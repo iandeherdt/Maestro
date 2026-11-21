@@ -45,8 +45,8 @@ Claude Code, built for one person running agents on their own hardware.
 5. If everything passes, the service pushes a branch and opens a pull request under its own
    GitHub identity. The pull request lists anything a reviewer should look at twice, such as
    removed tests or changed dependencies.
-6. Once CI is green the card moves to **Human Review**. You review and merge, or
-   move the card to **Rework** to have the agent continue.
+6. Once CI is green the card moves to **Human Review**. You review and merge. To have something
+   changed, write a comment on the pull request: the card goes back to work by itself.
 
 If the agent fails, the ticket is retried a limited number of times and then parked in
 **Blocked** with an explanation.
@@ -172,9 +172,28 @@ Then watch the card move:
 | Todo | Approved, waiting for a free slot |
 | In Progress | An agent is working on it |
 | Human Review | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
-| Rework | You asked for changes. Write what should change in a comment on the issue, then move the card here. The agent continues on the same branch and is given your comments on the issue. (Review comments on the pull request itself are not passed on yet.) |
+| Rework | You asked for changes. The service moves the card here by itself when you comment on the pull request, then on to In Progress. You can also write a comment on the issue and move the card here yourself. The agent continues on the same branch and is given your comments. See [Asking for changes](#asking-for-changes). |
 | Blocked | The service gave up after repeated failures. The status comment on the issue says why. |
 | Done | The pull request was merged. |
+
+### Asking for changes
+
+When a card is in **Human Review**, you do not have to touch the board to get something changed.
+Write on the pull request, in any of the three places GitHub offers:
+
+- a comment in the conversation,
+- a comment on a line of the diff,
+- a review with a summary.
+
+About two minutes after your last comment, the service moves the card back to work and writes
+"Picking up the new comments" on the pull request, so you can see it was noticed. The wait is
+there so that you can write several comments in a row and get one run for all of them. The agent
+is given your comments, with the file and line for comments on the diff, and its changes arrive
+as a new commit on the same pull request. The card then returns to **Human Review**.
+
+Only comments by you and the other people in `tracker.allowed_commenters` count. A comment by
+anyone else is ignored. Set `publish.rework_on_comments: false` to switch this off, and
+`publish.review_quiet_ms` to change the wait.
 
 ### Something bigger: let it plan first
 
@@ -336,6 +355,8 @@ changed ones:
 | `conventions` | none | Rule packs that are switched on, for example `[typescript]`. Set it with `symphony conventions enable` |
 | `verify.command` | none | What the service runs to decide whether the work is acceptable. With a rule pack, the pack's checks run first and this may be left out |
 | `publish.required_checks` | the repository's checks | `none` hands a pull request to you without waiting for CI. A list of names waits for exactly those. |
+| `publish.rework_on_comments` | `true` | Your comments on a pull request send the card back to work, see [Asking for changes](#asking-for-changes) |
+| `publish.review_quiet_ms` | `120000` | How long you have to be quiet on the pull request before that happens, in milliseconds |
 | `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
 | `budget.max_failure_attempts` | 3 | Failed attempts before a ticket is blocked |
@@ -365,6 +386,7 @@ Last updated 2026-11-21.
 | Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. Also run once on an organization, with the board. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
+| Comments on a pull request send the card back to work | Written, tested against a fake GitHub API. Not yet run against github.com. |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |

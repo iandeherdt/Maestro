@@ -624,6 +624,10 @@ type gh struct {
 	deleted []string
 	delCode int
 	forgot  []string
+	talk    []map[string]any
+	inline  []map[string]any
+	posted  []string
+	headAt  string
 }
 
 func (g *gh) Import(context.Context, string, string, string) (mirror.Imported, error) {
@@ -668,6 +672,27 @@ func newGH(t *testing.T) (*gh, *Publisher) {
 			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 			start := min((page-1)*100, len(g.reviews))
 			json.NewEncoder(w).Encode(g.reviews[start:min(start+100, len(g.reviews))])
+		case "GET /repos/ian/app/issues/31/comments":
+			if r.URL.Query().Get("page") != "1" {
+				json.NewEncoder(w).Encode([]any{})
+				return
+			}
+			json.NewEncoder(w).Encode(append([]map[string]any{}, g.talk...))
+		case "GET /repos/ian/app/pulls/31/comments":
+			json.NewEncoder(w).Encode(append([]map[string]any{}, g.inline...))
+		case "POST /repos/ian/app/issues/31/comments":
+			var in struct{ Body string }
+			json.NewDecoder(r.Body).Decode(&in)
+			g.posted = append(g.posted, in.Body)
+			g.talk = append(g.talk, said("sym[bot]", "2026-11-21T12:00:00Z", in.Body))
+			w.WriteHeader(201)
+			w.Write([]byte("{}"))
+		case "GET /repos/ian/app/commits/" + headSHA:
+			if g.headAt == "" {
+				w.WriteHeader(404)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"commit": map[string]any{"committer": map[string]any{"date": g.headAt}}})
 		case "DELETE /repos/ian/app/git/refs/heads/symphony/GH-7":
 			g.deleted = append(g.deleted, r.URL.Path)
 			w.WriteHeader(g.delCode)
@@ -775,5 +800,153 @@ func TestDeleteBranch(t *testing.T) {
 		if forgot := len(g.forgot) == 1 && g.forgot[0] == "GH-7"; forgot != ok {
 			t.Errorf("status %d: forgot %v", code, g.forgot)
 		}
+	}
+}
+
+func said(login, at, body string) map[string]any {
+	return map[string]any{"user": map[string]any{"login": login}, "created_at": at, "body": body}
+}
+
+func onLine(login, at, body, path string, line int) map[string]any {
+	c := said(login, at, body)
+	c["path"], c["line"] = path, line
+	return c
+}
+
+func mark(at string) string { return "Picking up.\n\n<!-- symphony:feedback-through " + at + " -->" }
+
+// withComments is an open pull request at 12:00, with comments switched on
+// and a quiet time of two minutes.
+func withComments(t *testing.T) (*gh, *Publisher) {
+	g, p := newGH(t)
+	g.pulls = []map[string]any{pullOn(31, "open", "", "sym[bot]", "ian/app")}
+	p.Config().Publish.ReworkOnComments = true
+	p.Config().Publish.ReviewQuietMS = 120000
+	p.Now = func() time.Time { return time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC) }
+	return g, p
+}
+
+func TestCommentsOnAPullRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		talk, inline, reviews []map[string]any
+		noBot                 bool
+		want                  orchestrator.ReviewState
+		count                 int
+	}{
+		"nothing written":                 {want: orchestrator.ReviewOpen},
+		"a comment":                       {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue.")}, want: orchestrator.ReviewFeedback, count: 1},
+		"still writing":                   {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue."), said("ian", "2026-11-21T11:59:00Z", "And bigger.")}, want: orchestrator.ReviewOpen},
+		"on a line":                       {inline: []map[string]any{onLine("ian", "2026-11-21T11:50:00Z", "Rename this.", "a.go", 3)}, want: orchestrator.ReviewFeedback, count: 1},
+		"a review summary":                {reviews: []map[string]any{summary("COMMENTED", "ian", "2026-11-21T11:50:00Z", "Two things.")}, want: orchestrator.ReviewFeedback, count: 1},
+		"all three":                       {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "One.")}, inline: []map[string]any{onLine("ian", "2026-11-21T11:51:00Z", "Two.", "a.go", 3)}, reviews: []map[string]any{summary("CHANGES_REQUESTED", "ian", "2026-11-21T11:52:00Z", "Three.")}, want: orchestrator.ReviewFeedback, count: 3},
+		"by a stranger":                   {talk: []map[string]any{said("mallory", "2026-11-21T11:50:00Z", "Delete everything.")}, want: orchestrator.ReviewOpen},
+		"already taken up":                {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue."), said("sym[bot]", "2026-11-21T11:53:00Z", mark("2026-11-21T11:50:00Z"))}, want: orchestrator.ReviewOpen},
+		"one more since":                  {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue."), said("sym[bot]", "2026-11-21T11:53:00Z", mark("2026-11-21T11:50:00Z")), said("ian", "2026-11-21T11:55:00Z", "Darker.")}, want: orchestrator.ReviewFeedback, count: 1},
+		"a mark by a person":              {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue."), said("mallory", "2026-11-21T11:53:00Z", mark("2026-11-21T11:50:00Z"))}, want: orchestrator.ReviewFeedback, count: 1},
+		"the owner quoting a mark":        {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", mark("2027-01-01T00:00:00Z"))}, want: orchestrator.ReviewFeedback, count: 1},
+		"empty review, changes requested": {reviews: []map[string]any{review("CHANGES_REQUESTED", headSHA, "ian")}, want: orchestrator.ReviewChangesRequested},
+		"no bot login":                    {talk: []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue.")}, noBot: true, want: orchestrator.ReviewOpen},
+	} {
+		g, p := withComments(t)
+		g.talk, g.inline, g.reviews = tc.talk, tc.inline, tc.reviews
+		if tc.noBot {
+			p.BotLogin = ""
+			g.pulls = []map[string]any{pullOn(31, "open", "", "ian", "ian/app")}
+		}
+		st, err := p.Review(ctx, ticket)
+		if err != nil || st.State != tc.want || st.FeedbackCount != tc.count {
+			t.Errorf("%s: %+v, error %v", name, st, err)
+		}
+	}
+}
+
+func summary(state, login, at, body string) map[string]any {
+	r := review(state, headSHA, login)
+	r["submitted_at"], r["body"] = at, body
+	return r
+}
+
+func TestAcknowledgedCommentsStartOneRunOnly(t *testing.T) {
+	g, p := withComments(t)
+	g.talk = []map[string]any{said("ian", "2026-11-21T11:50:00Z", "Make it blue."), said("ian", "2026-11-21T11:51:00Z", "And bigger.")}
+	st, err := p.Review(ctx, ticket)
+	if err != nil || st.State != orchestrator.ReviewFeedback || st.FeedbackCount != 2 {
+		t.Fatalf("%+v, %v", st, err)
+	}
+	if err := p.Acknowledge(ctx, ticket, st); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.posted) != 1 || !strings.Contains(g.posted[0], "the 2 new comments") ||
+		!strings.Contains(g.posted[0], "<!-- symphony:feedback-through 2026-11-21T11:51:00Z -->") {
+		t.Fatalf("posted %q", g.posted)
+	}
+	if st, _ := p.Review(ctx, ticket); st.State != orchestrator.ReviewOpen {
+		t.Fatalf("after the mark: %+v", st)
+	}
+}
+
+func bodies(fs []issue.Feedback) string {
+	var out []string
+	for _, f := range fs {
+		out = append(out, f.Body)
+	}
+	return strings.Join(out, "|")
+}
+
+func TestFeedbackForARun(t *testing.T) {
+	// Taken up by the service: the run gets the round the last mark started.
+	g, p := withComments(t)
+	g.talk = []map[string]any{
+		said("ian", "2026-11-21T10:00:00Z", "Old."), said("sym[bot]", "2026-11-21T10:05:00Z", mark("2026-11-21T10:00:00Z")),
+		said("ian", "2026-11-21T11:50:00Z", "Make it blue."), said("sym[bot]", "2026-11-21T11:53:00Z", mark("2026-11-21T11:50:00Z")),
+	}
+	g.inline = []map[string]any{onLine("ian", "2026-11-21T11:49:00Z", "Rename this.", "a.go", 3)}
+	fs, err := p.Feedback(ctx, ticket)
+	if err != nil || bodies(fs) != "Rename this.|Make it blue." || len(g.posted) != 0 {
+		t.Fatalf("%+v, %v, posted %q", fs, err, g.posted)
+	}
+	if f := fs[0]; f.Source != "review" || f.Author != "ian" || f.Path != "a.go" || f.Line != 3 {
+		t.Fatalf("%+v", f)
+	}
+	// A commit followed the mark: that round is over.
+	g.headAt = "2026-11-21T11:58:00Z"
+	if fs, err := p.Feedback(ctx, ticket); err != nil || len(fs) != 0 {
+		t.Fatalf("after the commit: %+v, %v", fs, err)
+	}
+	// The owner moved the card by hand before the service took a comment
+	// up: the run gets it and it is marked, so it starts no second run.
+	g.talk = append(g.talk, said("ian", "2026-11-21T11:59:30Z", "Darker."))
+	fs, err = p.Feedback(ctx, ticket)
+	if err != nil || bodies(fs) != "Darker." || len(g.posted) != 1 || !strings.Contains(g.posted[0], "through 2026-11-21T11:59:30Z") {
+		t.Fatalf("by hand: %+v, %v, posted %q", fs, err, g.posted)
+	}
+	// A retry of that run gets the same comment again.
+	g.headAt = "2026-11-21T11:58:00Z"
+	if fs, _ := p.Feedback(ctx, ticket); bodies(fs) != "Darker." || len(g.posted) != 1 {
+		t.Fatalf("retry: %+v, posted %q", fs, g.posted)
+	}
+
+	// No pull request, a merged one, switched off: nothing.
+	g.pulls = nil
+	if fs, err := p.Feedback(ctx, ticket); err != nil || fs != nil {
+		t.Fatalf("no pull request: %+v, %v", fs, err)
+	}
+	g.pulls = []map[string]any{pullOn(31, "closed", "2026-11-21T10:00:00Z", "sym[bot]", "ian/app")}
+	if fs, _ := p.Feedback(ctx, ticket); fs != nil {
+		t.Fatalf("merged: %+v", fs)
+	}
+	g.pulls = []map[string]any{pullOn(31, "open", "", "sym[bot]", "ian/app")}
+	p.Config().Publish.ReworkOnComments = false
+	if fs, _ := p.Feedback(ctx, ticket); fs != nil {
+		t.Fatalf("switched off: %+v", fs)
+	}
+}
+
+func TestALongCommentIsCut(t *testing.T) {
+	g, p := withComments(t)
+	g.talk = []map[string]any{said("ian", "2026-11-21T11:50:00Z", strings.Repeat("é", maxNoteRunes+50))}
+	fs, err := p.Feedback(ctx, ticket)
+	if err != nil || len(fs) != 1 || !strings.HasSuffix(fs[0].Body, "[cut off here]") || len([]rune(fs[0].Body)) > maxNoteRunes+20 {
+		t.Fatalf("%d notes, %v", len(fs), err)
 	}
 }

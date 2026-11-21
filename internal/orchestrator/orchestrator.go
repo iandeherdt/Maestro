@@ -1012,6 +1012,25 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 				o.comment(ctx, is, fmt.Sprintf("Pull request #%d was closed without being merged. "+
 					"The ticket stays where it is: move it to Rework to have it picked up again, or close it.", st.PRNumber), "")
 			}
+		case ReviewFeedback:
+			// The owner commented on the pull request. The ticket goes
+			// back to work without the owner moving the card. The state
+			// is written first: if the note on the pull request then
+			// fails, the comments start one more run, which is better
+			// than losing them.
+			delete(o.closedNoted, is.ID)
+			if !o.hasActiveState(reworkState) {
+				continue
+			}
+			if err := o.d.Tracker.SetState(ctx, is, reworkState); err != nil {
+				o.d.Log.Warn("rework state not written, will retry", "issue", is.Identifier, "error", err)
+				continue
+			}
+			if err := o.d.Reviews.Acknowledge(ctx, is, st); err != nil {
+				o.d.Log.Warn("comments on the pull request not acknowledged", "issue", is.Identifier, "error", err)
+			}
+			o.d.Log.Info("status", "issue", is.Identifier,
+				"text", fmt.Sprintf("%d new comment(s) on pull request #%d. Back to work.", st.FeedbackCount, st.PRNumber))
 		case ReviewChangesRequested:
 			delete(o.closedNoted, is.ID)
 			if !o.cfg.Publish.ReworkOnChangesRequested || !o.hasActiveState(reworkState) {

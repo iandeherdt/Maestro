@@ -126,7 +126,12 @@ type Publish struct {
 	ChecksTimeoutMS          int64
 	ChecksPollIntervalMS     int64
 	ReworkOnChangesRequested bool
-	MaxBundleBytes           int64
+	// ReworkOnComments sends a ticket back to work when an allowlisted
+	// person comments on its pull request. ReviewQuietMS is how long that
+	// person has to be quiet first, so that several comments start one run.
+	ReworkOnComments bool
+	ReviewQuietMS    int64
+	MaxBundleBytes   int64
 }
 
 type Policy struct {
@@ -663,6 +668,8 @@ func (b *builder) publish(s *section) {
 	p.ChecksTimeoutMS = b.positive("publish.checks_timeout_ms", s.integer("checks_timeout_ms", 3600000))
 	p.ChecksPollIntervalMS = b.positive("publish.checks_poll_interval_ms", s.integer("checks_poll_interval_ms", 60000))
 	p.ReworkOnChangesRequested = s.boolean("rework_on_changes_requested", true)
+	p.ReworkOnComments = s.boolean("rework_on_comments", true)
+	p.ReviewQuietMS = b.positive("publish.review_quiet_ms", s.integer("review_quiet_ms", 120000))
 	p.MaxBundleBytes = b.positive("publish.max_bundle_bytes", s.integer("max_bundle_bytes", 104857600))
 
 	switch v, ok := s.raw("required_checks"); {

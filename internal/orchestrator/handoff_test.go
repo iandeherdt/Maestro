@@ -16,6 +16,13 @@ type fakeReviews struct {
 	delErr  error
 	calls   int
 	deleted []string
+	acked   []ReviewStatus
+	ackErr  error
+}
+
+func (r *fakeReviews) Acknowledge(_ context.Context, _ issue.Issue, st ReviewStatus) error {
+	r.acked = append(r.acked, st)
+	return r.ackErr
 }
 
 func (r *fakeReviews) Review(_ context.Context, is issue.Issue) (ReviewStatus, error) {
@@ -162,5 +169,37 @@ func TestHandoffWatchLeavesOtherTicketsAlone(t *testing.T) {
 	e.tick()
 	if len(e.tr.Writes()) != 0 || len(r.deleted) != 0 {
 		t.Fatalf("writes %v", e.tr.Writes())
+	}
+}
+
+func TestCommentsOnThePullRequestSendTheTicketBack(t *testing.T) {
+	e, r := handedOff(t, ReviewFeedback)
+	st := r.status["id-1"]
+	st.FeedbackCount, st.FeedbackThrough = 2, time.Unix(1000, 0)
+	r.status["id-1"] = st
+	e.tick()
+	if got := e.tr.StateWrites("id-1"); len(got) == 0 || got[0] != "Rework" {
+		t.Fatalf("state writes = %v", got)
+	}
+	if len(r.acked) != 1 || r.acked[0].FeedbackCount != 2 || !r.acked[0].FeedbackThrough.Equal(time.Unix(1000, 0)) {
+		t.Fatalf("acknowledged = %+v", r.acked)
+	}
+}
+
+func TestCommentsAreNotAcknowledgedWhenTheStateWriteFails(t *testing.T) {
+	e, r := handedOff(t, ReviewFeedback)
+	e.tr.FailWrites = 1
+	e.tick()
+	if len(r.acked) != 0 || len(e.tr.StateWrites("id-1")) != 0 {
+		t.Fatalf("acknowledged %v, writes %v", r.acked, e.tr.StateWrites("id-1"))
+	}
+}
+
+func TestAFailedAcknowledgementStillSendsTheTicketBack(t *testing.T) {
+	e, r := handedOff(t, ReviewFeedback)
+	r.ackErr = errors.New("no")
+	e.tick()
+	if got := e.tr.StateWrites("id-1"); len(got) == 0 || got[0] != "Rework" {
+		t.Fatalf("state writes = %v", got)
 	}
 }
