@@ -141,7 +141,7 @@ func TestForeignPushAndClosedPullRequestBlock(t *testing.T) {
 }
 
 func TestChecksDeadline(t *testing.T) {
-	e, c := published(t)
+	e, _ := published(t)
 	e.clock.advance(29 * time.Minute)
 	e.tick()
 	if lastState(e) != "In Progress" {
@@ -153,7 +153,7 @@ func TestChecksDeadline(t *testing.T) {
 		t.Fatalf("state %s", lastState(e))
 	}
 	// An API that keeps failing must not hold the ticket forever either.
-	e, c = published(t)
+	e, c := published(t)
 	c.err = errors.New("api down")
 	e.tick()
 	if lastState(e) != "In Progress" || len(e.o.awaiting) != 1 {

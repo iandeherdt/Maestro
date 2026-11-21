@@ -115,7 +115,7 @@ func Fence(text string) string { return FenceMax(text, MaxUntrustedChars) }
 // references and markup openers broken, capped at limit characters. It is
 // for agent text that becomes the title or the body of a ticket.
 func Neutral(text string, limit int) string {
-	const zwsp = "​"
+	const zwsp = "\u200b"
 	var b strings.Builder
 	n := 0
 	for _, r := range text {

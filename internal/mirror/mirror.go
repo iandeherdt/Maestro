@@ -544,7 +544,16 @@ func (m *Mirror) ForgetPush(ctx context.Context, workspaceKey string) error {
 // Sync creates the mirror if it does not exist and fetches the remote's
 // branches into it (SPEC 9.2). Tags are not fetched. The token is handed
 // to git through an ephemeral helper and never stored in the mirror.
-func (m *Mirror) Sync(ctx context.Context, remoteURL, token string) error {
+// Branches named in skip are left out: they hold something other than
+// code, and every workspace is cloned from the mirror.
+func (m *Mirror) Sync(ctx context.Context, remoteURL, token string, skip ...string) error {
+	refs := []string{"+refs/heads/*:refs/heads/*"}
+	for _, b := range skip {
+		if !ValidBranch(b) {
+			return fmt.Errorf("invalid branch name")
+		}
+		refs = append(refs, "^refs/heads/"+b)
+	}
 	scheme := "https"
 	switch {
 	case strings.HasPrefix(remoteURL, "https://") && !strings.ContainsAny(remoteURL, "@ \t\n"):
@@ -570,14 +579,22 @@ func (m *Mirror) Sync(ctx context.Context, remoteURL, token string) error {
 	if err := os.WriteFile(helper, []byte(askpass), 0o700); err != nil {
 		return err
 	}
-	if _, err := m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "SYMPHONY_PUSH_TOKEN=" + token},
-		"-c", "protocol."+scheme+".allow=always", "-c", "http.followRedirects=false",
-		"fetch", "--quiet", "--prune", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
-		remoteURL, "+refs/heads/*:refs/heads/*"); err != nil {
+	args := append([]string{"-c", "protocol." + scheme + ".allow=always", "-c", "http.followRedirects=false",
+		"fetch", "--quiet", "--prune", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", remoteURL}, refs...)
+	if _, err := m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "SYMPHONY_PUSH_TOKEN=" + token}, args...); err != nil {
 		if exited(err) {
 			return fmt.Errorf("the repository could not be fetched")
 		}
 		return err
+	}
+	// A skipped branch that an earlier fetch brought in is not pruned by
+	// the fetch, so it is removed here.
+	for _, b := range skip {
+		if m.HasBranch(ctx, b) {
+			if _, err := m.git(ctx, nil, 0, "update-ref", "-d", "refs/heads/"+b); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

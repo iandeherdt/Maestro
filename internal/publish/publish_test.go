@@ -1084,3 +1084,21 @@ func TestPublishShowsScreenshots(t *testing.T) {
 		t.Fatalf("description:\n%s", text)
 	}
 }
+
+// A comment on a line was drafted before the service took up another
+// comment, and submitted with its review afterwards. It must not be lost.
+func TestACommentDraftedBeforeAMarkCountsFromItsReview(t *testing.T) {
+	g, p := withComments(t)
+	drafted := onLine("ian", "2026-11-21T11:40:00Z", "Rename this.", "a.go", 3)
+	drafted["pull_request_review_id"] = 77
+	g.inline = []map[string]any{drafted}
+	g.talk = []map[string]any{said("ian", "2026-11-21T11:45:00Z", "Make it blue."), said("sym[bot]", "2026-11-21T11:48:00Z", mark("2026-11-21T11:45:00Z"))}
+	rev := summary("COMMENTED", "ian", "2026-11-21T11:50:00Z", "")
+	rev["id"] = 77
+	g.reviews = []map[string]any{rev}
+	st, err := p.Review(ctx, ticket)
+	if err != nil || st.State != orchestrator.ReviewFeedback || st.FeedbackCount != 1 ||
+		!st.FeedbackThrough.Equal(time.Date(2026, 11, 21, 11, 50, 0, 0, time.UTC)) {
+		t.Fatalf("%+v, %v", st, err)
+	}
+}

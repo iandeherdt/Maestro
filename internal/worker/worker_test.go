@@ -442,13 +442,6 @@ func TestUnconfiguredWorkerRefusesToStart(t *testing.T) {
 
 // ---- end to end with the scheduler ----------------------------------------
 
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-
 func TestEndToEndWithScheduler(t *testing.T) {
 	r := newRig(t,
 		script{text: "first try\nSYMPHONY_STATUS: done"},                  // verify fails, turn 2

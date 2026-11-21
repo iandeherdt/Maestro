@@ -355,18 +355,21 @@ var (
 func (g *github) browse(local string, tamper func(callback *url.URL)) (int, string) {
 	resp, err := http.Get(local + "/")
 	if err != nil {
-		g.t.Fatal(err)
+		g.t.Error(err) // browse also runs beside the test, where Fatal is not allowed
+		return 0, ""
 	}
 	page, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	action := actionRE.FindSubmatch(page)
 	value := valueRE.FindSubmatch(page)
 	if action == nil || value == nil {
-		g.t.Fatalf("the local page has no form:\n%s", page)
+		g.t.Errorf("the local page has no form:\n%s", page)
+		return 0, ""
 	}
 	unescape := strings.NewReplacer("&#34;", `"`, "&amp;", "&", "&#39;", "'", "&lt;", "<", "&gt;", ">")
 	if _, err := http.PostForm(unescape.Replace(string(action[1])), url.Values{"manifest": {unescape.Replace(string(value[1]))}}); err != nil {
-		g.t.Fatal(err)
+		g.t.Error(err)
+		return 0, ""
 	}
 	g.mu.Lock()
 	redirect, _ := g.manifest["redirect_url"].(string)
@@ -378,7 +381,8 @@ func (g *github) browse(local string, tamper func(callback *url.URL)) (int, stri
 	}
 	resp, err = http.Get(cb.String())
 	if err != nil {
-		g.t.Fatal(err)
+		g.t.Error(err)
+		return 0, ""
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()

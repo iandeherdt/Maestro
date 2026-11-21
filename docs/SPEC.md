@@ -1858,7 +1858,9 @@ repository itself (not a fork that reuses the name) and it was opened by the bot
 
 What counts as a comment: a comment in the pull request's conversation, a comment on a line of
 the diff, and the summary of a submitted review. Only those by `tracker.allowed_commenters`, and
-never the bot's own. Edits are not followed.
+never the bot's own. Edits are not followed. A comment on a line counts from the moment its
+review was submitted, not from when it was drafted: a draft is invisible, and a mark set in
+between would otherwise hide the comment for good.
 
 The mark is a comment by the bot on the pull request that says the new comments were picked up
 and ends in `<!-- symphony:feedback-through <RFC 3339 time of the newest comment taken up> -->`.
@@ -2808,6 +2810,8 @@ names the commit keeps showing the same picture whatever is added later. For a p
 repository GitHub serves it to whoever may read the repository.
 
 When storing fails, the pull request is opened without pictures and says so.
+
+The mirror does not fetch this branch (Section 9.2), so workspaces are not cloned with it.
 
 The branch grows with every publish. The owner may delete it at any time; pull requests that
 were opened before then lose their pictures after a while, and the next publish creates the

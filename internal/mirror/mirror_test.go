@@ -615,6 +615,21 @@ func TestSync(t *testing.T) {
 	if got := l.run(fresh.Dir, "for-each-ref", "--format=%(refname)"); got != "refs/heads/main\n"+PushedRef("k") {
 		t.Fatalf("refs after pruning:\n%s", got)
 	}
+	// A branch that is to be skipped is not fetched, and one fetched by an
+	// earlier version goes. A skipped branch the remote does not have is fine.
+	l.run(seed, "push", "-q", remote, "HEAD:refs/heads/symphony/screenshots", "HEAD:refs/heads/symphony/GH-1")
+	if err := fresh.Sync(ctx, remote, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Sync(ctx, remote, "tok", "symphony/screenshots", "symphony/absent"); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.HasBranch(ctx, "symphony/screenshots") || !fresh.HasBranch(ctx, "symphony/GH-1") {
+		t.Fatalf("refs with a skipped branch:\n%s", l.run(fresh.Dir, "for-each-ref", "--format=%(refname)"))
+	}
+	if err := fresh.Sync(ctx, remote, "tok", "--upload-pack=x"); err == nil {
+		t.Fatal("an option was accepted as a branch to skip")
+	}
 	left, _ := filepath.Glob(filepath.Join(fresh.Dir, "sync-*"))
 	if len(left) != 0 {
 		t.Fatalf("helper directories left behind: %v", left)

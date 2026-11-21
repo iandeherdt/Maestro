@@ -99,6 +99,7 @@ func listAll[T any](ctx context.Context, a *api, path string) ([]T, bool, error)
 }
 
 type listedReview struct {
+	ID          int64  `json:"id"`
 	State       string `json:"state"`
 	CommitID    string `json:"commit_id"`
 	Body        string `json:"body"`

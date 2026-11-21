@@ -160,7 +160,7 @@ func TestStyledRun(t *testing.T) {
 		t.Errorf("the spinner left something behind:\n%q", out.String())
 	}
 	// A step that fails leaves the terminal as it found it.
-	u, out = styled("")
+	u, _ = styled("")
 	if err := Run(context.Background(), u, st, []Step{&oneStep{err: errors.New("no")}}); err == nil || u.inStep {
 		t.Fatalf("error %v, still in a step: %v", err, u.inStep)
 	}

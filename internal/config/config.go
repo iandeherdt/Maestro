@@ -199,21 +199,19 @@ type Options struct {
 }
 
 var (
-	repoRE        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
-	workerNameRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}$`)
-	varRefRE      = regexp.MustCompile(`^\$([A-Za-z_][A-Za-z0-9_]*)$`)
-	envNameRE     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	hostNameRE    = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$`)
-	credEnvRE     = regexp.MustCompile(`^(ANTHROPIC_.*|CLAUDE_.*TOKEN.*|.*_API_KEY|GITHUB_.*|GH_.*|LINEAR_.*)$`)
-	sizeRE        = regexp.MustCompile(`^[1-9][0-9]*[KMGT]?$`)
-	cpuQuotaRE    = regexp.MustCompile(`^[1-9][0-9]*%$`)
-	imageRE       = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,127}(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$`)
-	branchRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
-	permModes     = set("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
-	backends      = set("systemd", "docker", "podman", "macos-vm", "macos-user")
-	trackerKinds  = set("github", "linear")
-	knownTopLevel = []string{"tracker", "polling", "workspace", "hooks", "agent", "claude",
-		"sandbox", "verify", "screenshots", "publish", "policy", "budget", "worker", "server"}
+	repoRE       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+	workerNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}$`)
+	varRefRE     = regexp.MustCompile(`^\$([A-Za-z_][A-Za-z0-9_]*)$`)
+	envNameRE    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	hostNameRE   = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$`)
+	credEnvRE    = regexp.MustCompile(`^(ANTHROPIC_.*|CLAUDE_.*TOKEN.*|.*_API_KEY|GITHUB_.*|GH_.*|LINEAR_.*)$`)
+	sizeRE       = regexp.MustCompile(`^[1-9][0-9]*[KMGT]?$`)
+	cpuQuotaRE   = regexp.MustCompile(`^[1-9][0-9]*%$`)
+	imageRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,127}(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$`)
+	branchRE     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+	permModes    = set("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
+	backends     = set("systemd", "docker", "podman", "macos-vm", "macos-user")
+	trackerKinds = set("github", "linear")
 )
 
 func set(items ...string) map[string]bool {

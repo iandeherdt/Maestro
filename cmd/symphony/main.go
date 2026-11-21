@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/iandeherdt/Maestro/internal/config"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
@@ -200,6 +201,25 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.Tickets{},
 		&setup.WorkflowFile{},
 	}
+	// Ctrl-C ends whatever the wizard waits for on the network. A question
+	// that waits for the keyboard is not ended by that, so after a moment
+	// the wizard is stopped from here.
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-finished:
+			return
+		case <-ctx.Done():
+		}
+		select {
+		case <-finished:
+		case <-time.After(300 * time.Millisecond):
+			ui.Restore()
+			ui.Fail(stderr, setup.ErrAborted, true)
+			os.Exit(3)
+		}
+	}()
 	if err := setup.Run(ctx, ui, st, steps); err != nil {
 		if errors.Is(err, setup.ErrAborted) {
 			ui.Fail(stderr, err, true)
