@@ -1511,11 +1511,13 @@ Import (control zone):
    `refs/symphony/incoming/<workspace_key>` with object checking enabled
    (`transfer.fsckObjects=true`). Fetching from a bundle executes nothing from the workspace.
 3. Require that `base_sha` is an ancestor of the incoming head, that the incoming head is not
-   `base_sha`, and that every new commit is reachable only through `base_sha` (no unrelated
-   history, no merge of foreign refs).
+   `base_sha`, and that every new commit has exactly one parent. The new commits are therefore a
+   single line from `base_sha`: no unrelated history, no new root commit and no merge. At most
+   500 new commits are accepted. A head that fails these checks is removed from the mirror.
 4. All Git commands in the control zone run with `core.hooksPath=/dev/null`, no system or global
    configuration from the workspace, `protocol.allow=never` except for the configured remote, and
-   with external diff, textconv and filters disabled.
+   with external diff, textconv and filters disabled. Git reads a bundle through its `file` transport, so
+   that transport is allowed for the fetch of the service's own copy and for nothing else.
 
 A failure in any step is `import_rejected` and counts as a failure attempt.
 
@@ -1523,6 +1525,16 @@ A failure in any step is `import_rejected` and counts as a failure attempt.
 
 The diff is computed in the bare mirror between `base_sha` and the incoming head (name, status,
 mode, size, and content for scanning). No checkout is created.
+
+- Every file is read as text (`--text`), so an attribute in the repository such as `-diff` or
+  `binary` cannot hide lines from the secret scan. A file counts as binary when its changed
+  content has a NUL byte near the start.
+- Renames are not detected. A rename is a deletion and an addition, and the new file is scanned
+  in full.
+- Reading stops at the policy's limits: over `max_changed_files` no content is read, a file over
+  `max_file_bytes` is not loaded, and nothing is read once `max_diff_bytes` is spent. The policy
+  denies each of these cases anyway.
+- Error messages from Git are not passed on, because they can quote names chosen by the agent.
 
 ### 15.3 Diff Policy
 
