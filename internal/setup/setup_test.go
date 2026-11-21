@@ -241,6 +241,12 @@ type github struct {
 	created   []string
 	scopes    []string
 	refuse    int
+	formPath  string
+	kinds     map[string]string
+	boards    []*fakeBoard
+	noBoards  bool
+	gqlRefuse string
+	mutations []string
 }
 
 func newGitHub(t *testing.T) *github {
@@ -258,7 +264,20 @@ func (g *github) serve(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
-	case r.Method == "POST" && r.URL.Path == "/settings/apps/new":
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/users/"):
+		kind := map[string]string{"ian": "User", "acme": "Organization"}[strings.TrimPrefix(r.URL.Path, "/users/")]
+		if k, ok := g.kinds[strings.TrimPrefix(r.URL.Path, "/users/")]; ok {
+			kind = k
+		}
+		if kind == "" || r.Header.Get("Authorization") != "" {
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"type": kind})
+	case r.Method == "POST" && r.URL.Path == "/graphql":
+		g.graphql(w, r)
+	case r.Method == "POST" && (r.URL.Path == "/settings/apps/new" || r.URL.Path == "/organizations/acme/settings/apps/new"):
+		g.formPath = r.URL.Path
 		r.ParseForm()
 		json.Unmarshal([]byte(r.PostForm.Get("manifest")), &g.manifest)
 		g.state = r.URL.Query().Get("state")
@@ -275,7 +294,7 @@ func (g *github) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(201)
 		json.NewEncoder(w).Encode(map[string]any{"id": 4242, "slug": "symphony-ian-abc123", "pem": g.key,
 			"client_secret": "CLIENTSECRET", "webhook_secret": "HOOKSECRET"})
-	case r.Method == "GET" && r.URL.Path == "/repos/ian/app/installation":
+	case r.Method == "GET" && (r.URL.Path == "/repos/ian/app/installation" || r.URL.Path == "/repos/acme/app/installation"):
 		if !g.installed {
 			w.WriteHeader(404)
 			return
@@ -315,7 +334,7 @@ func (g *github) serve(w http.ResponseWriter, r *http.Request) {
 		for k, v := range in.Permissions {
 			g.scopes = append(g.scopes, k+":"+v)
 		}
-		if len(in.Repositories) != 1 || in.Repositories[0] != "app" {
+		if len(in.Repositories) != 1 || in.Repositories[0] != "app" || g.noBoards && in.Permissions["organization_projects"] != "" {
 			w.WriteHeader(422)
 			return
 		}

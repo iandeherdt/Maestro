@@ -63,7 +63,8 @@ func validCommand(s string) error {
 
 func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	m := repoRE.FindStringSubmatch(st.Repo)
-	if m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker) {
+	if m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker) ||
+		st.OwnerType == kindOrg && (!authorRE.MatchString(st.Author) || st.Board <= 0) {
 		return errors.New("the earlier steps have to be finished first")
 	}
 	path := filepath.Join(st.Dir(), workflowFileName)
@@ -157,9 +158,18 @@ func render(engine string, st *State, owner, verify string, ci bool) string {
 	b.WriteString("---\n")
 	b.WriteString("tracker:\n  kind: github\n  provider:\n")
 	b.WriteString("    repo: " + st.Repo + "\n")
-	b.WriteString("    state_source: labels\n")
+	author := owner
+	if st.OwnerType == kindOrg {
+		// A ticket's state is its column on the board, and only issues
+		// written by the operator count (SPEC 12.5).
+		author = st.Author
+		b.WriteString("    state_source: project\n")
+		b.WriteString("    project:\n      number: " + strconv.Itoa(st.Board) + "\n")
+	} else {
+		b.WriteString("    state_source: labels\n")
+	}
 	b.WriteString("    bot_login: \"" + st.AppSlug + "[bot]\"\n")
-	b.WriteString("  allowed_authors: [" + owner + "]\n")
+	b.WriteString("  allowed_authors: [" + author + "]\n")
 	b.WriteString("workspace:\n  root: " + root + "\n  repo: " + st.Repo + "\n")
 	b.WriteString("sandbox:\n  backend: " + engine + "\n")
 	b.WriteString("verify:\n  command: |\n    " + verify + "\n")

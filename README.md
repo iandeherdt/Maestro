@@ -8,15 +8,16 @@ It is built for one person running agents on their own hardware with their own C
 subscription, where the agent must not be able to do damage even if a ticket, a web page or a
 dependency tries to trick it.
 
-> **Status: under construction.** The building blocks are written and tested, but the service
-> does not run an agent yet. `symphony setup` and `symphony check` work today. See
-> [Project status](#project-status) for exactly what exists.
+> **Status: early.** The service has taken a real ticket to a merged pull request on a Mac, with
+> labels. The board described below is new and has only been tested against a stand-in for
+> GitHub. See [Project status](#project-status) for exactly what exists.
 
 ## How it works
 
-1. You write an issue and approve it by adding two labels: `status:todo` and `run:linux`.
-2. The service sees the ticket, checks that **you** wrote it and **you** applied the labels, and
-   marks it `status:in progress`.
+1. You write an issue, put it on your board, say which machine should take it, and approve it by
+   moving its card to the **Todo** column.
+2. The service sees the card, checks that **you** wrote the issue, and moves the card to
+   **In Progress**.
 3. It creates a fresh copy of the repository in a sandbox and starts Claude Code there with the
    ticket as its task. The agent has no GitHub token, no access to your home network and no way to
    reach the service's own files.
@@ -26,11 +27,16 @@ dependency tries to trick it.
 5. If everything passes, the service pushes a branch and opens a pull request under its own
    GitHub identity. The pull request lists anything a reviewer should look at twice, such as
    removed tests or changed dependencies.
-6. Once CI is green the ticket moves to `status:human review`. You review and merge, or comment
-   and send it back with `status:rework`.
+6. Once CI is green the card moves to **Human Review**. You review and merge, or comment and
+   move the card to **Rework**.
 
-If the agent fails, the ticket is retried a limited number of times and then parked as
-`status:blocked` with an explanation.
+If the agent fails, the ticket is retried a limited number of times and then parked in
+**Blocked** with an explanation.
+
+The board is a GitHub Project. GitHub only lets a service use a board that belongs to an
+organization, so the repository has to live in one (a free organization is enough, see
+[Install](#install)). For a repository on your personal account the service uses labels
+instead: `status:todo`, `status:in progress` and so on. Everything else is the same.
 
 ## What keeps it safe
 
@@ -39,7 +45,7 @@ If the agent fails, the ticket is retried a limited number of times and then par
 | The agent holds nothing worth stealing | It runs as a separate user in a sandbox with no tokens. Pushing and all GitHub calls are done by the service, outside the sandbox. |
 | The agent's word is not trusted | The service runs the verify command, checks the diff and waits for CI before a ticket reaches you. |
 | Nothing reaches the main branch without you | The service cannot merge or approve. It only opens pull requests, and only on branches under its own prefix. |
-| Only you can start work | A ticket is picked up only if an allowlisted account wrote it and applied its labels. Comments from anyone else never reach the agent. |
+| Only you can start work | A ticket is picked up only if an allowlisted account wrote it and it was approved: its card stands in Todo on a board only you can change, or you applied its labels. Comments from anyone else never reach the agent. |
 | Cost is bounded | Per-ticket retry limit, daily run limits, and `pause`. |
 
 The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
@@ -53,7 +59,10 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
   (`sudo dnf install podman` on RHEL and Fedora; it needs no root daemon) or Docker Engine.
 - A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
   installed on the machine itself.
-- A GitHub repository you own. Private repositories work.
+- A GitHub repository you own. Private repositories work. For the board, the repository has to
+  be in a GitHub organization that only you are a member of. Creating one is free: on github.com
+  press **+** at the top right, **New organization**, and pick the Free plan. Then create the
+  repository there, or move an existing one with Settings, **Transfer ownership**.
 
 ## Install
 
@@ -86,13 +95,18 @@ symphony setup
 What the setup does:
 
 1. **Checks the machine** for Git and Docker or Podman. For anything missing it tells you what to install.
-2. **Creates a GitHub App for the service.** You open a local page, press one button on
-   github.com, and the App's key is saved on your machine in a file only you can read. The App can
-   open pull requests and read check results. It cannot change settings, workflows or secrets,
-   and it cannot merge.
+2. **Creates a GitHub App for the service.** You say which repository the agents work on, open a
+   local page and press one button on github.com. The App's key is saved on your machine in a
+   file only you can read. The App can open pull requests and read check results, and in an
+   organization it can use the boards. It cannot change settings, workflows or secrets, and it
+   cannot merge.
 3. **Installs the App on one repository** of your choice and confirms that it can obtain a token
    for it.
-4. **Creates the labels** in the repository, after showing you which ones are missing.
+4. **Creates the board**, for a repository in an organization: it asks what this machine is
+   called and what your GitHub user name is, then creates a board named Symphony with the columns
+   Backlog, Todo, In Progress, Human Review, Rework, Blocked and Done, and a field named Worker
+   that says which machine takes a card. If the organization already has a board you can pick
+   that one. For a repository on a personal account this step creates the labels instead.
 5. **Writes the settings file** from two questions (how you test the repository, and whether it
    runs checks on pull requests), shows it to you first, and validates it.
 
@@ -113,22 +127,38 @@ get. It is not written to your files or your keychain, and no API key is involve
 
 ## Use
 
-While `symphony run` is running, it looks at the repository every 30 seconds.
+While `symphony run` is running, it looks at the board every 30 seconds.
 
-Approve a ticket by labelling an issue you wrote:
+GitHub opens a new board as a table. To see columns, open the board, click the small arrow next
+to "View 1" and choose **Board** under Layout. You do that once.
 
-- `status:todo` approves it.
-- `run:linux` or `run:mac` chooses the machine.
+To give the service a ticket:
 
-Then watch the labels change:
+1. On the board, press **+ Add item** at the bottom of the Backlog column and create an issue in
+   your repository. Write what you want done. Only issues that you wrote yourself are worked on.
+2. Open the card and set its **Worker** field to the machine that should do it, for example
+   `mac`.
+3. Drag the card to **Todo**. That is the approval.
 
-| Label | Meaning |
+Then watch the card move:
+
+| Column | Meaning |
 |---|---|
-| `status:todo` | Approved, waiting for a free slot |
-| `status:in progress` | An agent is working on it |
-| `status:human review` | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
-| `status:rework` | You asked for changes. Your comments on the issue and the pull request go to the agent. |
-| `status:blocked` | The service gave up after repeated failures. The status comment says why. |
+| Backlog | Not approved. Nothing happens here. |
+| Todo | Approved, waiting for a free slot |
+| In Progress | An agent is working on it |
+| Human Review | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
+| Rework | You asked for changes. Your comments on the issue and the pull request go to the agent. |
+| Blocked | The service gave up after repeated failures. The status comment on the issue says why. |
+| Done | The pull request was merged. |
+
+Anyone who can change the board can approve work, because GitHub does not record who moved a
+card. Keep the organization to yourself, or give other members read access to the board only.
+Do not switch on a board automation that puts new cards in Todo by itself.
+
+With labels instead of a board (a repository on a personal account), approve an issue by adding
+`status:todo` and `run:<machine>`, and the service changes the `status:` label as the card
+would move.
 
 What happens to a ticket, step by step: the service clones the repository into a fresh
 container, runs Claude Code there on a branch named `symphony/GH-<number>`, runs your test
@@ -158,7 +188,7 @@ It shows the file it will write and asks before it does. The background service 
 the agent still works in Docker, so Docker has to be running.
 
 Not built yet: `symphony unblock` and `symphony doctor`. To give a blocked ticket another
-chance, put `status:todo` back on it.
+chance, drag its card back to Todo (or put `status:todo` back on it).
 
 ## Configure
 
@@ -171,13 +201,15 @@ it for you; this is what it looks like:
 tracker:
   kind: github
   provider:
-    repo: your-account/your-repo
-    state_source: labels
+    repo: your-organization/your-repo
+    state_source: project          # the board; "labels" for a personal account
+    project:
+      number: 1                    # the number in the board's address
     bot_login: your-app[bot]
-  allowed_authors: [your-account]
+  allowed_authors: [your-user-name]
 workspace:
   root: "/home/you/.config/symphony/workspaces"
-  repo: your-account/your-repo
+  repo: your-organization/your-repo
 sandbox:
   backend: docker
 verify:
@@ -226,14 +258,15 @@ Last updated 2026-11-21.
 | Prompt construction | Done |
 | Attempt loop: turns, verify, publish, hand-off | Done, tested against fakes |
 | Workspace manager | Done, tested against a fake sandbox |
-| GitHub board with labels | Done, run once against a real repository |
+| Tickets approved with labels | Done, run once against a real repository |
+| Tickets approved on a board (GitHub Project of an organization) | Written and tested against a stand-in for GitHub, and the queries are checked against GitHub's published schema. Not yet run against github.com. |
 | Export and verify steps, mirror sync | Done, tested against a fake sandbox and local Git |
 | Egress proxy (allowlist of hosts the agent may reach) | Done, tested locally |
 | Diff policy and secret scan | Done |
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
-| Guided setup | Five of seven steps done (machine, App, installation, labels, settings file), run once on a Mac against github.com |
+| Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels; the organization and board path has not been run against github.com yet. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |

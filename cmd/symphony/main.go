@@ -194,7 +194,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.Machine{},
 		&setup.CreateApp{Port: *port},
 		&setup.InstallApp{},
-		&setup.Labels{},
+		&setup.Tickets{},
 		&setup.WorkflowFile{},
 	}
 	if err := setup.Run(ctx, ui, st, steps); err != nil {
@@ -206,11 +206,15 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	ui.Say("")
-	ui.Say("Setup is finished: the GitHub App, its installation on %s, the labels and the settings file.", st.Repo)
+	tickets, pickup := "the labels", "issues labelled status:todo and run:"+st.Worker
+	if st.OnBoard() {
+		tickets, pickup = "the board", "cards in the Todo column whose Worker is "+st.Worker
+	}
+	ui.Say("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets)
 	ui.Say("Three commands are left. Run them in this order, with Docker running:")
 	ui.Say("  symphony image    builds the container the agent works in (a few minutes, once)")
 	ui.Say("  symphony login    signs Claude Code in inside that container (once)")
-	ui.Say("  symphony run      starts the service; it then picks up issues labelled status:todo and run:%s", st.Worker)
+	ui.Say("  symphony run      starts the service; it then picks up %s", pickup)
 	ui.Say("Your settings: %s", st.WorkflowFile)
 	ui.Say("To check them at any time: symphony check")
 	return 0

@@ -1362,11 +1362,12 @@ Provider keys:
 - `token`: default `$GITHUB_TOKEN`. Secret.
 - `api_url`: default `https://api.github.com`. HTTPS only.
 - `state_source`: `project` or `labels`. REQUIRED.
-- `project` (object, for `state_source: project`): `owner`, `number`, `status_field` (default
-  `Status`), `token` (default: the same token; a separate token MAY be needed, see below).
+- `project` (object, for `state_source: project`): `number` (REQUIRED, the number in the
+  Project's address), `owner` (default: the owner of `repo`), `status_field` (default `Status`),
+  `worker_field` (default `Worker`). Unknown keys are rejected.
 - `state_label_prefix` (for `state_source: labels`): default `status:`.
-- `bot_login` (for `state_source: labels`): REQUIRED. The login the service acts as, for example
-  `my-app[bot]`. Used for the two rules marked "own account" below.
+- `bot_login`: REQUIRED. The login the service acts as, for example `my-app[bot]`. Used for the
+  two rules marked "own account" below.
 - `token` MUST be a `$VARIABLE` reference. A literal value is rejected, because the workflow file
   lives in a repository.
 
@@ -1399,8 +1400,19 @@ List freshness:
 State mapping:
 
 - `project`: the state is the value of the single-select `status_field` of the issue's item in
-  the configured Project. An issue that is not in the Project is not in any active state.
-  The orchestrator moves cards by updating that field.
+  the configured Project, compared case-insensitively with the configured state names. An issue
+  that is not in the Project, whose item is archived, or whose item has no status is in the
+  state `No Status`. Only issues of `repo` are read; draft items, pull requests and issues of
+  other repositories on the same Project are ignored. The orchestrator moves a card by setting
+  that field, and refuses with `tracker_write_rejected` when the issue has no card or the
+  Project has no option with the state's name.
+- `project` routing: the value of the single-select `worker_field` of the item is reported as
+  the label `run:<value>`, which is what `worker.require_routing_label` matches. A real label
+  on the issue that starts with `run:` is dropped in this mode, so that only the field routes.
+  A card without a worker value is therefore never dispatched while routing is required.
+- `project` reads: all items of the Project are read in pages of 100 with one GraphQL query per
+  page. A single issue is read with its items and matched to the Project by owner and number.
+  The list-freshness rule above applies to the item list in the same way.
 - `labels`: the state is the suffix of the single label with `state_label_prefix`. Zero or more
   than one such label means "no active state". The orchestrator changes state by replacing that
   label.
@@ -1422,7 +1434,12 @@ Approval provenance:
   identify who moved a card: on a real Project it reported `github-project-automation` both for
   a card the Project placed itself and after the owner moved that card. The actor of a status
   change is therefore not verified. The Project MUST be writable only by allowlisted accounts,
-  and `doctor` checks the collaborator list where the API allows.
+  and `doctor` checks the collaborator list where the API allows. This is weaker than the label
+  check as soon as a second person can write to the Project. The author allowlist still applies
+  to every issue. Required labels other than the routing label keep their labeler check.
+  A Project automation that sets the approval status on new items would approve every item
+  that is added; the adapter logs a warning at startup when the built-in workflows
+  "Item added to project" or "Auto-add to project" are enabled.
 
 Public repository rules:
 
@@ -1437,18 +1454,23 @@ Credentials:
 - Project access depends on who owns the Project. Fine-grained personal tokens cannot access a
   Project owned by a user account, and neither can a GitHub App.
   - Organization-owned Project (RECOMMENDED): the App carries the organization permission
-    Projects read and write. No personal token is involved.
-  - User-owned Project: `project.token` is a classic personal token with only the `project` scope.
-    It can read and change the owner's Projects and nothing else. That includes the issue behind
-    a card: for an issue in a private repository the card's content is returned as null
-    (confirmed by a test). `project` mode with a user-owned Project therefore works only for
-    public repositories. For private repositories the choices are an organization-owned
-    Project, or `state_source: labels`. A classic token with the `repo` scope would also work
-    and MUST NOT be used: it can read and write every repository of the account.
+    Projects read and write. No personal token is involved. The ticket token is limited to the
+    one repository and to Issues read and write plus that organization permission. The
+    repository and the Project belong to the same organization, because one installation of a
+    private App covers one account.
+  - User-owned Project: not supported. It would need a classic personal token with the
+    `project` scope, which cannot read the issue behind a card in a private repository
+    (confirmed by a test), and a classic token with the `repo` scope MUST NOT be used: it can
+    read and write every repository of the account. A repository on a personal account uses
+    `state_source: labels`.
   - `state_source: labels` needs no Project access at all.
 
 Requests: REST with pagination of 100, conditional requests (ETag) for polling, and respect for
-rate-limit headers (`tracker_rate_limited` with `retry_after_ms`).
+rate-limit headers (`tracker_rate_limited` with `retry_after_ms`). Project reads and writes use
+GraphQL at `<api_url>/graphql`. GraphQL answers 200 with an `errors` list: `RATE_LIMITED` maps
+to `tracker_rate_limited`, `NOT_FOUND` to "missing", a refused mutation to
+`tracker_write_rejected`, `FORBIDDEN` to `tracker_status`, anything else to `tracker_response`.
+The message is capped and stripped of control characters before it is logged.
 
 Request safety: the token is sent only to the configured API origin. Redirects are not followed,
 and a pagination link that points to another origin fails the call with `tracker_pagination`.
@@ -1456,7 +1478,11 @@ and a pagination link that points to another origin fails the call with `tracker
 someone else is ignored. Blockers are cached for five minutes. If the dependencies endpoint does
 not exist for the repository, blockers are not checked and a warning is logged once.
 
-Not implemented yet: `state_source: project`, and conditional requests.
+Not implemented yet: conditional requests, and the `doctor` check of who can write to the
+Project. `state_source: project` has been tested against a stand-in and its queries validated
+against GitHub's published schema, but not yet run against github.com. To verify there: that an
+installation token limited to one repository keeps the organization permission, and that the
+App may create a Project.
 
 ### 12.6 Linear Adapter Profile
 
@@ -1918,7 +1944,19 @@ Steps:
    without a browser the operator forwards the port over SSH.
 3. Installation: the operator installs the App on the one repository. The wizard finds the
    installation and proves the chain by requesting a token limited to that repository.
-4. Labels: the operator names the worker, and the state labels and the routing label that are
+   The wizard asks GitHub whether the repository's owner is an organization. If it is, the App is
+   created in that organization and also requests the organization permission Projects read and
+   write, and step 4 sets up a board. Otherwise step 4 creates labels.
+4. Tickets. For an organization, a board: the operator names the worker and gives the GitHub
+   login whose issues are worked on, which becomes `allowed_authors`. The wizard lists the
+   organization's open Projects and uses the one the operator picks, or creates one named
+   Symphony linked to the repository. It then makes sure the Status field has an option for
+   every state and that a single-select field Worker lists this worker. GitHub can only replace
+   a field's whole option list, and what that does to items using an option is not documented,
+   so the wizard rewrites options only while the Project has no items; otherwise it tells the
+   operator which options to add by hand and stops. The token is limited to the one repository,
+   with Projects read and write and Contents and Issues read. For a personal account, labels:
+   the operator names the worker, and the state labels and the routing label that are
    missing are listed and created with a token limited to Issues on the one repository.
 5. Workflow file: written from the earlier answers and the verify command, shown in full before
    it is written, and validated with the code the service uses at startup. An existing file is
