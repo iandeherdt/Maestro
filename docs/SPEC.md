@@ -736,6 +736,10 @@ first; then `identifier`.
 As upstream Section 8.3. `available_slots = max(max_concurrent_agents - running_count, 0)`.
 `awaiting_checks` entries do not count.
 
+Per-state limits (`agent.max_concurrent_agents_by_state`) count a running issue under the state it
+was dispatched from, not its current state. Dispatch moves every issue to `in_progress_state`, so
+counting by current state would make a limit on `Todo` or `Rework` meaningless.
+
 ### 8.4 Retry and Backoff
 
 Delays by kind:
@@ -764,6 +768,19 @@ Failure accounting (extension, bounded retries):
 Retry handling (as upstream Section 8.4): refresh the issue by ID; not found releases; terminal
 cleans the workspace and releases; active and routable dispatches if a slot is free, else requeues
 with `no available orchestrator slots`; otherwise releases.
+
+Additional rules:
+
+- A retry that comes due while dispatch is on hold (paused, quota window, daily budget) keeps its
+  claim and its attempt number and is looked at again after `polling.interval_ms`.
+- A `tracker` retry repeats the write that failed. It keeps the attempt number and the retry kind
+  of the dispatch it interrupted. If the failed write was the move to `blocked_state`, that write
+  is retried, also while dispatch is paused, and the claim is released once it succeeds or once a
+  human has moved the issue out of the active states.
+- A worker launch failure schedules a `failure` retry without counting a failure attempt. Three in
+  a row pause dispatch (Section 17.2).
+- A report from an attempt that the orchestrator has already stopped is ignored, including when a
+  newer attempt for the same issue is running.
 
 ### 8.5 Active Run Reconciliation
 

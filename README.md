@@ -9,8 +9,10 @@ pull requests for a human to review.
 
 ## Status
 
-Early. Only the workflow file loader and configuration validation exist. The service does not run
-anything yet.
+Early. What exists: the workflow file loader, configuration validation, and the scheduling core
+(polling, claims, retries, reconciliation, budgets), tested against a fake board and a fake agent.
+The service does not run anything yet: there is no sandbox, agent runner, board adapter or
+publisher.
 
 ```sh
 go build ./cmd/symphony
