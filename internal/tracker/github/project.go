@@ -121,7 +121,7 @@ func newBoard(raw any, repoOwner string) (*board, error) {
 const issueFields = `
 fragment issueFields on Issue {
   id number title body state url createdAt updatedAt
-  author { login }
+  author { __typename login }
   assignees(first: 1) { nodes { login } }
   labels(first: 100) { nodes { name } }
   repository { nameWithOwner }
@@ -195,7 +195,19 @@ mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
 }`
 
 type gqlLogin struct {
-	Login string `json:"login"`
+	Typename string `json:"__typename"`
+	Login    string `json:"login"`
+}
+
+// restLogin is the login as the REST API writes it. GraphQL names an App's
+// account without the "[bot]" that REST, and so the configuration, use.
+// Without this the tasks the service creates from an approved plan would
+// look like the work of a stranger and never be picked up.
+func (l gqlLogin) restLogin() string {
+	if l.Typename == "Bot" && l.Login != "" && !strings.HasSuffix(l.Login, "[bot]") {
+		return l.Login + "[bot]"
+	}
+	return l.Login
 }
 
 type gqlIssue struct {
@@ -265,7 +277,7 @@ func (g gqlIssue) rest() ghIssue {
 	gi := ghIssue{NodeID: g.ID, Number: g.Number, Title: g.Title, Body: &body, State: strings.ToLower(g.State),
 		HTMLURL: g.URL, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt, Labels: g.Labels.Nodes}
 	if g.Author != nil {
-		gi.User = &ghUser{Login: g.Author.Login}
+		gi.User = &ghUser{Login: g.Author.restLogin()}
 	}
 	if len(g.Assignees.Nodes) > 0 {
 		gi.Assignee = &ghUser{Login: g.Assignees.Nodes[0].Login}
