@@ -3,8 +3,9 @@
 This is the roadmap. The design itself is specified in [SPEC.md](SPEC.md), which is normative and
 written at the level of detail of OpenAI's Symphony specification, from which it is derived.
 
-Status: proposal, nothing built yet. This repository is public, so it never contains secrets, host
-names or tokens.
+Status: in progress. Phase 1 is done, phases 2 and 5 are partly done, and nothing has run on the
+owner's machines yet. The README lists what exists. This repository is public, so it never
+contains secrets, host names or tokens.
 
 ## What is being built
 
@@ -53,7 +54,12 @@ the result itself, and opens a pull request for the owner to review and merge.
 
 ## Phases
 
-Each phase lands as its own pull request and is done when the listed tests pass.
+Each phase lands as one or more pull requests and is done when the listed tests pass.
+
+Progress on 2026-11-21: phase 0 is done for everything that can be checked without a machine.
+Phase 1 is done. Phase 2 is done for label mode, and Project mode is parked (decision 7). Phase 5
+has the diff policy, the secret scan, the import step and the App tokens; push, pull request and
+the checks gate are open. Phases 3, 4, 6, 7 and 9 need the owner's machines.
 
 | Phase | Scope (SPEC sections) | Done when |
 |---|---|---|
