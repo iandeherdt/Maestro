@@ -10,7 +10,7 @@ dependency tries to trick it.
 
 > **Status: early.** The service has taken a real ticket to a merged pull request on a Mac, with
 > labels. The board and the planning stage described below have had one real run on a Mac: setup,
-> a card picked up from the board, and a plan posted by the agent. See [Project status](#project-status) for exactly what exists.
+> an idea planned, the plan changed after a comment, and its tasks created in Todo. See [Project status](#project-status) for exactly what exists.
 
 ## How it works
 
@@ -297,7 +297,7 @@ Last updated 2026-11-21.
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |
-| Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com, as far as the plan being posted for approval. Creating the tasks of an approved plan has only been tested against a stand-in. Needs the board. |
+| Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
 | Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `symphony unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
