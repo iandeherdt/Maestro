@@ -1,0 +1,374 @@
+package setup
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/iandeherdt/Symphony-beads/internal/config"
+	tracker "github.com/iandeherdt/Symphony-beads/internal/tracker/github"
+	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+)
+
+type fakeBoard struct {
+	number     int
+	title      string
+	closed     bool
+	items      int
+	status     []option
+	worker     []option
+	hasWorker  bool
+	workerKind string
+}
+
+func names(opts []option) string {
+	var out []string
+	for _, o := range opts {
+		out = append(out, o.Name)
+	}
+	return strings.Join(out, ",")
+}
+
+func (g *github) graphql(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}
+	json.NewDecoder(r.Body).Decode(&in)
+	answer := func(data any) { json.NewEncoder(w).Encode(map[string]any{"data": data}) }
+	fail := func(msg string) {
+		json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]string{{"message": msg}}})
+	}
+	if r.Header.Get("Authorization") != "Bearer ghs_x" {
+		w.WriteHeader(401)
+		return
+	}
+	str := func(k string) string { s, _ := in.Variables[k].(string); return s }
+	options := func() []option {
+		raw, _ := json.Marshal(in.Variables["options"])
+		var opts []option
+		json.Unmarshal(raw, &opts)
+		for _, o := range opts {
+			if o.Name == "" || o.Color == "" || o.Description == "" {
+				g.t.Errorf("an option without name, color or description: %+v", o)
+			}
+		}
+		return opts
+	}
+	field := func(opts []option, id, kind string) any {
+		if kind == "" {
+			kind = "ProjectV2SingleSelectField"
+		}
+		return map[string]any{"__typename": kind, "id": id, "options": opts}
+	}
+	if g.gqlRefuse != "" && strings.Contains(in.Query, g.gqlRefuse) {
+		fail("Resource not accessible\x1b[31m by integration")
+		return
+	}
+	switch {
+	case strings.Contains(in.Query, "createProjectV2("):
+		g.mutations = append(g.mutations, "board")
+		if str("owner") != "O_org" || str("repo") != "R_repo" || str("title") != "Symphony" {
+			fail("bad input")
+			return
+		}
+		b := &fakeBoard{number: len(g.boards) + 1, title: str("title"),
+			status: []option{{"Todo", "GREEN", ""}, {"In Progress", "YELLOW", ""}, {"Done", "PURPLE", ""}}}
+		g.boards = append(g.boards, b)
+		answer(map[string]any{"createProjectV2": map[string]any{"projectV2": map[string]int{"number": b.number}}})
+	case strings.Contains(in.Query, "updateProjectV2Field("):
+		for _, b := range g.boards {
+			switch str("field") {
+			case "F_status_" + b.title:
+				g.mutations = append(g.mutations, "columns")
+				b.status = options()
+			case "F_worker_" + b.title:
+				g.mutations = append(g.mutations, "workers")
+				b.worker = options()
+			}
+		}
+		answer(map[string]any{"updateProjectV2Field": map[string]any{"clientMutationId": nil}})
+	case strings.Contains(in.Query, "createProjectV2Field("):
+		g.mutations = append(g.mutations, "field")
+		for _, b := range g.boards {
+			if str("project") == "PVT_"+b.title && str("name") == "Worker" && !b.hasWorker {
+				b.hasWorker, b.worker = true, options()
+			}
+		}
+		answer(map[string]any{"createProjectV2Field": map[string]any{"clientMutationId": nil}})
+	case strings.Contains(in.Query, "projectsV2("):
+		var nodes []any
+		for _, b := range g.boards {
+			nodes = append(nodes, map[string]any{"number": b.number, "title": b.title, "closed": b.closed})
+		}
+		answer(map[string]any{"repository": map[string]any{"id": "R_repo", "owner": map[string]string{"id": "O_org"}},
+			"organization": map[string]any{"projectsV2": map[string]any{"nodes": nodes}}})
+	case strings.Contains(in.Query, "projectV2(number:"):
+		n, _ := in.Variables["number"].(float64)
+		var project any
+		for _, b := range g.boards {
+			if b.number == int(n) {
+				m := map[string]any{"id": "PVT_" + b.title, "title": b.title, "closed": b.closed, "worker": nil,
+					"items": map[string]int{"totalCount": b.items}, "status": field(b.status, "F_status_"+b.title, "")}
+				if b.hasWorker {
+					m["worker"] = field(b.worker, "F_worker_"+b.title, b.workerKind)
+				}
+				project = m
+			}
+		}
+		answer(map[string]any{"organization": map[string]any{"projectV2": project}})
+	default:
+		w.WriteHeader(400)
+	}
+}
+
+func onOrg(t *testing.T, g *github) (*State, *Board) {
+	t.Helper()
+	st := installed(t, g)
+	st.OwnerType = kindOrg
+	return st, &Board{GitHub: GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}, GOOS: "linux"}
+}
+
+var allColumns = "Backlog,Todo,In Progress,Human Review,Rework,Blocked,Done"
+
+func TestBoardStepCreatesTheBoard(t *testing.T) {
+	g := newGitHub(t)
+	st, step := onOrg(t, g)
+	if s, err := step.Check(ctx, st); err != nil || s.Done {
+		t.Fatalf("%+v %v", s, err)
+	}
+	// Declining creates nothing, but remembers the answers.
+	u, _ := ui("\nian\nn\n")
+	if err := step.Run(ctx, u, st); !errors.Is(err, ErrAborted) || len(g.mutations) != 0 || st.Worker != "linux" || st.Author != "ian" {
+		t.Fatalf("%v, mutations %v, state %+v", err, g.mutations, st)
+	}
+
+	u, out := ui("\n\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	b := g.boards[0]
+	if st.Board != 1 || names(b.status) != allColumns || names(b.worker) != "linux" {
+		t.Fatalf("board %d, columns %q, workers %q", st.Board, names(b.status), names(b.worker))
+	}
+	if strings.Join(g.mutations, ",") != "board,columns,field" {
+		t.Errorf("mutations %v", g.mutations)
+	}
+	for _, want := range []string{"/orgs/ian/projects/1", "Layout choose Board", "Only issues that you wrote"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	seen := map[string]bool{}
+	for _, sc := range g.scopes {
+		seen[sc] = true
+	}
+	if !seen["organization_projects:write"] || seen["issues:write"] || seen["contents:write"] || seen["pull_requests:write"] {
+		t.Errorf("token scopes %v", g.scopes)
+	}
+
+	// A second run changes nothing.
+	u, out = ui("")
+	if err := Run(ctx, u, st, []Step{step}); err != nil || !strings.Contains(out.String(), "Already done.") || len(g.mutations) != 3 {
+		t.Fatalf("second run: %v %v\n%s", err, g.mutations, out)
+	}
+	// A board that was closed in the meantime is replaced.
+	b.closed = true
+	if s, _ := step.Check(ctx, st); s.Done {
+		t.Fatal("a closed board counts as done")
+	}
+	u, _ = ui("\n\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil || st.Board != 2 {
+		t.Fatalf("after closing: board %d, %v", st.Board, err)
+	}
+}
+
+func TestBoardStepUsesAnEmptyExistingBoard(t *testing.T) {
+	g := newGitHub(t)
+	g.boards = []*fakeBoard{
+		{number: 3, title: "Old", closed: true},
+		{number: 4, title: "Mine", hasWorker: true, worker: []option{{"mac", "BLUE", "The Mac."}},
+			status: []option{{"todo", "GREEN", "x"}, {"Ideas", "PINK", "Loose thoughts."}}},
+	}
+	st, step := onOrg(t, g)
+	u, out := ui("server\nian\n3\n9\n4\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	b := g.boards[1]
+	if st.Board != 4 || names(b.status) != allColumns+",Ideas" || names(b.worker) != "mac,server" {
+		t.Fatalf("board %d, columns %q, workers %q", st.Board, names(b.status), names(b.worker))
+	}
+	if strings.Contains(out.String(), "  3  Old") || !strings.Contains(out.String(), "  4  Mine") || strings.Contains(strings.Join(g.mutations, ","), "board") {
+		t.Errorf("mutations %v\n%s", g.mutations, out)
+	}
+}
+
+func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
+	g := newGitHub(t)
+	full := []option{}
+	for _, c := range columns {
+		full = append(full, option{c.Name, c.Color, c.Description})
+	}
+	g.boards = []*fakeBoard{
+		{number: 1, title: "Partial", items: 2, status: full[:3]},
+		{number: 2, title: "Shared", items: 5, status: full, hasWorker: true, worker: []option{{"mac", "BLUE", "x"}}},
+		{number: 3, title: "Odd", status: full, hasWorker: true, workerKind: "ProjectV2Field"},
+	}
+	for pick, want := range map[string]string{
+		"1": "Human Review, Rework, Blocked, Done",
+		"2": "Add the option linux",
+	} {
+		st, step := onOrg(t, g)
+		u, out := ui("\nian\n" + pick + "\n")
+		if err := Run(ctx, u, st, []Step{step}); !errors.Is(err, ErrAborted) || len(g.mutations) != 0 {
+			t.Fatalf("board %s: %v, mutations %v", pick, err, g.mutations)
+		}
+		if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "run setup again") {
+			t.Errorf("board %s:\n%s", pick, out)
+		}
+		// Once the operator has added what was missing, setup finishes.
+		g.boards[0].status, g.boards[0].hasWorker, g.boards[0].worker = full, true, []option{{"Linux", "BLUE", "x"}}
+		g.boards[1].worker = append(g.boards[1].worker, option{"linux", "BLUE", "x"})
+		u, out = ui("\n\n")
+		if err := Run(ctx, u, st, []Step{step}); err != nil || len(g.mutations) != 0 {
+			t.Fatalf("board %s after the fix: %v\n%s", pick, err, out)
+		}
+		g.boards[0].status, g.boards[0].hasWorker = full[:3], false
+		g.boards[1].worker = g.boards[1].worker[:1]
+	}
+	st, step := onOrg(t, g)
+	u, _ := ui("\nian\n3\n")
+	if err := step.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "not a single-select field") {
+		t.Fatalf("a Worker field of another kind: %v", err)
+	}
+}
+
+func TestBoardStepExplainsRefusals(t *testing.T) {
+	g := newGitHub(t)
+	st, step := onOrg(t, g)
+
+	u, _ := ui("\nacme\n")
+	if err := step.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "is an organization, not a person") {
+		t.Fatalf("an organization as the author: %v", err)
+	}
+	u, _ = ui("\nnobody\n")
+	if err := step.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "no account named nobody") {
+		t.Fatalf("an unknown author: %v", err)
+	}
+
+	g.gqlRefuse = "createProjectV2("
+	u, _ = ui("\nian\ny\n")
+	err := step.Run(ctx, u, st)
+	if err == nil || !strings.Contains(err.Error(), "create it by hand") || !strings.Contains(err.Error(), "/orgs/ian/projects") ||
+		strings.Contains(err.Error(), "\x1b") || st.Board != 0 {
+		t.Fatalf("a refused creation: %v", err)
+	}
+
+	// An App from before boards has no right to them.
+	g.gqlRefuse, g.noBoards = "", true
+	st.Worker, st.Author, st.Board = "linux", "ian", 1
+	if _, err := step.Check(ctx, st); err == nil || !strings.Contains(err.Error(), "Projects to Read and write") {
+		t.Fatalf("an App without the permission: %v", err)
+	}
+}
+
+func TestTicketsPicksBoardOrLabels(t *testing.T) {
+	g := newGitHub(t)
+	gh := GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}
+	st := installed(t, g)
+	step := &Tickets{GitHub: gh, GOOS: "linux"}
+	// A state from before boards, and a personal account, use labels.
+	for _, kind := range []string{"", kindUser} {
+		st.OwnerType = kind
+		if s, err := step.Check(ctx, st); err != nil || !strings.Contains(s.Detail, "labels") {
+			t.Errorf("%q: %+v %v", kind, s, err)
+		}
+	}
+	st.OwnerType = kindOrg
+	if s, err := step.Check(ctx, st); err != nil || !strings.Contains(s.Detail, "board") {
+		t.Errorf("organization: %+v %v", s, err)
+	}
+	u, _ := ui("\nian\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil || st.Board != 1 || len(g.created) != 0 {
+		t.Fatalf("board %d, labels %v, %v", st.Board, g.created, err)
+	}
+}
+
+func TestCreateAppInAnOrganization(t *testing.T) {
+	g := newGitHub(t)
+	gh := GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}
+	st := state(t)
+	create := &CreateApp{GitHub: gh, Port: freePort(t), Wait: 10 * time.Second}
+	create.Ready = func(local string) { go g.browse(local, nil) }
+	u, out := ui("acme/app\ny\n")
+	if err := Run(ctx, u, st, []Step{create}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	g.mu.Lock()
+	perms, _ := g.manifest["default_permissions"].(map[string]any)
+	path := g.formPath
+	g.mu.Unlock()
+	if st.OwnerType != kindOrg || path != "/organizations/acme/settings/apps/new" || len(perms) != 7 ||
+		perms["organization_projects"] != "write" || perms["administration"] != nil || perms["members"] != nil {
+		t.Errorf("owner type %q, form %q, permissions %v", st.OwnerType, path, perms)
+	}
+	for _, want := range []string{"acme is an organization", "boards", "owner of acme"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	install := &InstallApp{GitHub: gh}
+	st.InstallationID = ""
+	u, out = ui("n\n")
+	if err := install.Run(ctx, u, st); !errors.Is(err, ErrAborted) || !strings.Contains(out.String(), "Choose acme,") {
+		t.Errorf("%v\n%s", err, out)
+	}
+
+	st = state(t)
+	u, _ = ui("nobody/app\n")
+	if err := create.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "no account named nobody") || st.Repo != "" {
+		t.Fatalf("an unknown account: %v", err)
+	}
+}
+
+func TestWorkflowFileForABoard(t *testing.T) {
+	g := newGitHub(t)
+	st, _ := onOrg(t, g)
+	step := &WorkflowFile{GOOS: "linux", LookPath: func(string) (string, error) { return "/usr/bin/x", nil }}
+	st.Worker = "linux"
+	if err := step.Run(ctx, nil, st); err == nil {
+		t.Fatal("the file was written without a board")
+	}
+	st.Author, st.Board = "ian-himself", 12
+	u, out := ui("\ny\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	raw, _ := os.ReadFile(st.WorkflowFile)
+	for _, want := range []string{"state_source: project\n    project:\n      number: 12\n", "allowed_authors: [ian-himself]", "repo: ian/app"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("the file lacks %q:\n%s", want, raw)
+		}
+	}
+	if strings.Contains(string(raw), "labels") {
+		t.Errorf("labels in a board file:\n%s", raw)
+	}
+	// The board adapter accepts the file as written.
+	def, err := workflow.Load(st.WorkflowFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Build(def, config.Options{Env: os.Getenv, HomeDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.New(cfg, tracker.Options{Token: func(context.Context) (string, error) { return "x", nil }}); err != nil {
+		t.Fatalf("the adapter refuses the file: %v", err)
+	}
+}

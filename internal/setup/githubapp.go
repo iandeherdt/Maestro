@@ -36,6 +36,16 @@ var permissions = map[string]string{
 	"checks": "read", "statuses": "read", "metadata": "read",
 }
 
+// boardPermission is added for a repository in an organization, where
+// tickets are approved on a board (SPEC 12.5).
+const boardPermission = "organization_projects"
+
+// The two kinds of account GitHub reports for a repository owner.
+const (
+	kindUser = "User"
+	kindOrg  = "Organization"
+)
+
 var (
 	repoRE = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100})$`)
 	codeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,200}$`)
@@ -78,6 +88,36 @@ func (g GitHub) client() *http.Client {
 	}
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return hc
+}
+
+// ownerKind asks GitHub whether an account is a person or an organization.
+// The question needs no credential.
+func (g GitHub) ownerKind(ctx context.Context, owner string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.api()+"/users/"+owner, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GitHub could not be reached: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return "", fmt.Errorf("GitHub has no account named %s. Check the spelling and run setup again", owner)
+	default:
+		return "", fmt.Errorf("GitHub answered with status %d when asked about the account %s. Try again in a few minutes", resp.StatusCode, owner)
+	}
+	var out struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Type != kindUser && out.Type != kindOrg {
+		return "", fmt.Errorf("GitHub's answer about the account %s could not be read", owner)
+	}
+	return out.Type, nil
 }
 
 // app opens the App recorded in the state.
@@ -127,11 +167,15 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	if err != nil {
 		return err
 	}
-	st.Repo = repo
+	owner := repoRE.FindStringSubmatch(repo)[1]
+	kind, err := c.GitHub.ownerKind(ctx, owner)
+	if err != nil {
+		return err
+	}
+	st.Repo, st.OwnerType = repo, kind
 	if err := st.Save(); err != nil {
 		return err
 	}
-	owner := repoRE.FindStringSubmatch(repo)[1]
 	suffix, err := randomHex(3)
 	if err != nil {
 		return err
@@ -142,9 +186,27 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	}
 	name += "-" + suffix // App names are unique across GitHub
 
-	ui.Say("  This creates a private GitHub App named %s on your account. It may:", name)
-	ui.Say("    - read and write code, pull requests and issues, and read check results,")
-	ui.Say("      only in repositories you install it on in the next step.")
+	perms, newApp := permissions, c.GitHub.web()+"/settings/apps/new"
+	if kind == kindOrg {
+		perms = map[string]string{boardPermission: "write"}
+		for k, v := range permissions {
+			perms[k] = v
+		}
+		newApp = c.GitHub.web() + "/organizations/" + owner + "/settings/apps/new"
+		ui.Say("  %s is an organization, so tickets will be approved on a board with columns.", owner)
+		ui.Say("  This creates a private GitHub App named %s in the organization %s. It may:", name, owner)
+		ui.Say("    - read and write code, pull requests and issues, and read check results,")
+		ui.Say("      only in repositories you install it on in the next step,")
+		ui.Say("    - read and change the organization's boards (GitHub calls them Projects).")
+		ui.Say("  You need to be an owner of %s to create it.", owner)
+	} else {
+		ui.Say("  %s is a personal account, so tickets will be approved with labels.", owner)
+		ui.Say("  (For a board with columns, put the repository in a free GitHub organization instead,")
+		ui.Say("  and answer with that repository. GitHub gives an App no access to a personal board.)")
+		ui.Say("  This creates a private GitHub App named %s on your account. It may:", name)
+		ui.Say("    - read and write code, pull requests and issues, and read check results,")
+		ui.Say("      only in repositories you install it on in the next step.")
+	}
 	ui.Say("  It cannot change repository settings, workflows or secrets, and it cannot merge.")
 	ok, err := ui.Confirm("  Continue?")
 	if err != nil {
@@ -172,7 +234,7 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	manifest, err := json.Marshal(map[string]any{
 		"name": name, "url": homepage, "redirect_url": local + "/callback", "public": false,
 		"description":         "Opens pull requests for approved tickets. Created by symphony setup.",
-		"default_permissions": permissions, "default_events": []string{},
+		"default_permissions": perms, "default_events": []string{},
 	})
 	if err != nil {
 		return err
@@ -205,10 +267,10 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 <body style="font-family:sans-serif;max-width:36em;margin:3em auto">
 <h1>Create the GitHub App</h1>
 <p>The next page is on github.com. Check the name and press <b>Create GitHub App</b>.</p>
-<form method="post" action="%s/settings/apps/new?state=%s">
+<form method="post" action="%s?state=%s">
 <input type="hidden" name="manifest" value="%s">
 <button type="submit" style="font-size:1.1em;padding:.5em 1em">Continue to GitHub</button>
-</form></body>`, html.EscapeString(c.GitHub.web()), state, html.EscapeString(string(manifest)))
+</form></body>`, html.EscapeString(newApp), state, html.EscapeString(string(manifest)))
 	}))
 	mux.HandleFunc("/callback", guard(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -347,7 +409,7 @@ func (i *InstallApp) Run(ctx context.Context, ui *UI, st *State) error {
 		}
 		ui.Say("  Open this page:")
 		ui.Say("      %s/apps/%s/installations/new", i.GitHub.web(), st.AppSlug)
-		ui.Say("  Choose your account, then \"Only select repositories\", pick %s and press Install.", m[2])
+		ui.Say("  Choose %s, then \"Only select repositories\", pick %s and press Install.", m[1], m[2])
 		ui.Say("  Selecting only this repository keeps the service away from everything else you own.")
 		ok, err := ui.Confirm("  Installed it?")
 		if err != nil {

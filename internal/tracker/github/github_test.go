@@ -56,6 +56,7 @@ type hub struct {
 	// listLabels, when set for an issue, is what the list endpoint reports
 	// instead of the current labels: the list on github.com lags.
 	listLabels map[int][]string
+	board      *fakeBoard
 }
 
 func newHub(t *testing.T) *hub {
@@ -152,6 +153,10 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if code := h.status[key]; code != 0 {
 		w.WriteHeader(code)
+		return
+	}
+	if r.URL.Path == "/graphql" && r.Method == http.MethodPost && h.board != nil {
+		h.graphql(w, r)
 		return
 	}
 	prefix := "/repos/" + owner + "/app"

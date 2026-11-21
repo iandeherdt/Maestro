@@ -1,10 +1,12 @@
 // Package github is the GitHub Issues adapter (SPEC section 12.5).
 //
-// This file implements state_source "labels": an issue's state is the one
-// label carrying the state prefix. Anyone can open an issue or comment on a
+// With state_source "labels" an issue's state is the one label carrying the
+// state prefix. With state_source "project" it is the column of the issue's
+// card on a board (project.go). Anyone can open an issue or comment on a
 // public repository, so nothing here trusts either. An issue is
-// dispatchable only when an allowlisted account wrote it and an allowlisted
-// account applied the labels that approve and route it.
+// dispatchable only when an allowlisted account wrote it and it was
+// approved: by labels an allowlisted account applied, or by its card
+// standing in an active column of a board only the owner can change.
 package github
 
 import (
@@ -41,6 +43,9 @@ const (
 	// by several seconds, a single issue read does not.
 	listLag     = 2 * time.Minute
 	reworkState = "Rework"
+	// routePrefix starts the label that routes an issue to a worker
+	// (SPEC 5.3.12). On a board the Worker field is reported as this label.
+	routePrefix = "run:"
 )
 
 // Options are the inputs that do not come from the workflow file.
@@ -72,6 +77,7 @@ type Adapter struct {
 	authors      map[string]bool
 	commenters   map[string]bool
 	blockersOnce sync.Once
+	board        *board // nil with state_source: labels
 
 	mu      sync.Mutex
 	numbers map[string]int       // node id -> issue number
@@ -138,10 +144,7 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	if source != "labels" {
-		if source == "project" {
-			return nil, cfgErr("tracker.provider.state_source: project is not implemented yet, use labels")
-		}
+	if source != "labels" && source != "project" {
 		return nil, cfgErr("tracker.provider.state_source must be project or labels")
 	}
 	prefix, err := str("state_label_prefix", defaultPrefix)
@@ -156,7 +159,7 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 		return nil, err
 	}
 	if !loginRE.MatchString(bot) {
-		return nil, cfgErr("tracker.provider.bot_login is required with state_source: labels: the login the service acts as, for example my-app[bot]")
+		return nil, cfgErr("tracker.provider.bot_login is required: the login the service acts as, for example my-app[bot]")
 	}
 	apiURL, err := str("api_url", defaultAPI)
 	if err != nil {
@@ -232,6 +235,15 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 	if a.ownedStates[a.firstActive] != "" {
 		return nil, cfgErr("the first active state %q is the approval state and cannot be one the service writes", cfg.Tracker.ActiveStates[0])
 	}
+	if source == "project" {
+		b, err := newBoard(p["project"], owner)
+		if err != nil {
+			return nil, err
+		}
+		a.board = b
+	} else if p["project"] != nil {
+		return nil, cfgErr("tracker.provider.project is only used with state_source: project")
+	}
 	return a, nil
 }
 
@@ -290,6 +302,9 @@ type ghComment struct {
 // FetchIssuesByStates returns open issues carrying the state label of one of
 // the given states.
 func (a *Adapter) FetchIssuesByStates(ctx context.Context, states []string) ([]issue.Issue, error) {
+	if a.board != nil {
+		return a.boardIssuesByStates(ctx, states)
+	}
 	var out []issue.Issue
 	seen := map[int]bool{}
 	for _, state := range states {
@@ -325,7 +340,7 @@ func (a *Adapter) FetchIssuesByStates(ctx context.Context, states []string) ([]i
 					}
 					gi = fresh
 				}
-				is, err := a.normalize(ctx, gi)
+				is, err := a.normalize(ctx, gi, nil)
 				if err != nil {
 					if isTransport(err) {
 						return err
@@ -379,8 +394,7 @@ func (a *Adapter) FetchIssuesByIDs(ctx context.Context, ids []string) ([]issue.I
 		if !ok {
 			continue
 		}
-		var gi ghIssue
-		_, err := a.c.do(ctx, http.MethodGet, a.c.url(a.path("/issues/%d", n), nil), nil, &gi, false)
+		gi, card, err := a.read(ctx, n)
 		if errors.Is(err, errNotFound) {
 			continue
 		}
@@ -391,13 +405,23 @@ func (a *Adapter) FetchIssuesByIDs(ctx context.Context, ids []string) ([]issue.I
 		if gi.NodeID != id {
 			continue
 		}
-		is, err := a.normalize(ctx, gi)
+		is, err := a.normalize(ctx, gi, card)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, is)
 	}
 	return out, nil
+}
+
+// read returns the current record of one issue and, on a board, its card.
+func (a *Adapter) read(ctx context.Context, n int) (ghIssue, *card, error) {
+	if a.board != nil {
+		return a.boardIssue(ctx, n)
+	}
+	var gi ghIssue
+	_, err := a.c.do(ctx, http.MethodGet, a.c.url(a.path("/issues/%d", n), nil), nil, &gi, false)
+	return gi, nil, err
 }
 
 func isTransport(err error) bool {
@@ -410,7 +434,9 @@ func isTransport(err error) bool {
 
 var priorityRE = regexp.MustCompile(`^(?:p|priority:)([1-4])$`)
 
-func (a *Adapter) normalize(ctx context.Context, gi ghIssue) (issue.Issue, error) {
+// normalize builds the issue model. On a board, on is the issue's card, or
+// nil when the issue has none.
+func (a *Adapter) normalize(ctx context.Context, gi ghIssue, on *card) (issue.Issue, error) {
 	if gi.NodeID == "" || gi.Number <= 0 || strings.TrimSpace(gi.Title) == "" || gi.User == nil || gi.User.Login == "" {
 		return issue.Issue{}, terr(tracker.Response, "issue record lacks a required field")
 	}
@@ -440,7 +466,9 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue) (issue.Issue, error
 	var stateLabels []string
 	for _, l := range gi.Labels {
 		name := norm(l.Name)
-		if name == "" {
+		if name == "" || a.board != nil && strings.HasPrefix(name, routePrefix) {
+			// On a board the Worker field routes a card. A label that looks
+			// like a routing label must not.
 			continue
 		}
 		is.Labels = append(is.Labels, name)
@@ -452,12 +480,23 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue) (issue.Issue, error
 			stateLabels = append(stateLabels, strings.TrimSpace(l.Name)[len(a.prefix):])
 		}
 	}
+	if on != nil {
+		is.NativeRef["project_item_id"] = on.item
+		if on.worker != "" {
+			is.Labels = append(is.Labels, routePrefix+norm(on.worker))
+		}
+	}
 	sort.Strings(is.Labels)
 	is.ContentHash = issue.ContentHash(is.Title, is.Description)
 
 	switch {
 	case gi.State == "closed":
 		is.State = a.terminal
+	case a.board != nil:
+		is.State = NoState
+		if on != nil && strings.TrimSpace(on.status) != "" {
+			is.State = strings.TrimSpace(on.status)
+		}
 	case len(stateLabels) == 1 && strings.TrimSpace(stateLabels[0]) != "":
 		is.State = strings.TrimSpace(stateLabels[0])
 	default:
@@ -521,8 +560,19 @@ func (a *Adapter) derived(ctx context.Context, gi ghIssue, is issue.Issue) (bool
 func (a *Adapter) provenance(ctx context.Context, number int, is issue.Issue) (bool, error) {
 	stateLabel := a.prefix + norm(is.State)
 	need := map[string]bool{stateLabel: true}
+	if a.board != nil {
+		// The column is the approval, and the Worker field the routing.
+		// Neither has a recorded actor (SPEC 12.5).
+		need = map[string]bool{}
+	}
 	for _, l := range a.required {
+		if a.board != nil && strings.HasPrefix(norm(l), routePrefix) {
+			continue
+		}
 		need[norm(l)] = true
+	}
+	if len(need) == 0 {
+		return true, nil
 	}
 	last := map[string]string{} // label -> login of the most recent labeler
 	err := a.c.list(ctx, a.path("/issues/%d/timeline", number), nil, func(page json.RawMessage) error {
@@ -599,8 +649,8 @@ func numberOf(is issue.Issue) (int, error) {
 	return n, nil
 }
 
-// SetState replaces the issue's state label. Only the states the
-// orchestrator owns can be written.
+// SetState replaces the issue's state label, or moves its card. Only the
+// states the orchestrator owns can be written.
 func (a *Adapter) SetState(ctx context.Context, is issue.Issue, state string) error {
 	if a.ownedStates[norm(state)] == "" {
 		return terr(tracker.WriteRejected, "the service does not write the state %q", state)
@@ -609,8 +659,8 @@ func (a *Adapter) SetState(ctx context.Context, is issue.Issue, state string) er
 	if err != nil {
 		return err
 	}
-	var gi ghIssue
-	if _, err := a.c.do(ctx, http.MethodGet, a.c.url(a.path("/issues/%d", n), nil), nil, &gi, false); err != nil {
+	gi, on, err := a.read(ctx, n)
+	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return terr(tracker.WriteRejected, "issue %s no longer exists", is.Identifier)
 		}
@@ -622,6 +672,9 @@ func (a *Adapter) SetState(ctx context.Context, is issue.Issue, state string) er
 	a.mu.Lock()
 	a.written[n] = a.now() // recorded first: a write that fails half way still changed labels
 	a.mu.Unlock()
+	if a.board != nil {
+		return a.moveCard(ctx, is, on, state)
+	}
 	target := a.prefix + norm(state)
 	has := false
 	var stale []string

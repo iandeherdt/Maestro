@@ -41,8 +41,11 @@ the result itself, and opens a pull request for the owner to review and merge.
    for them. Ticket state is kept in labels (`state_source: labels`): the owner approves a
    ticket by adding the `status:todo` label. A Project board on a personal account was tested
    and dropped for now, because a token limited to Projects cannot see the issue behind a card
-   in a private repository, and GitHub does not say who moved a card. Dragging cards remains
-   possible later with an organization-owned Project (SPEC 12.5).
+   in a private repository, and GitHub does not say who moved a card.
+   Changed on 2026-11-21: the owner wants a board, not labels. Repositories that use the board
+   move to a free organization of which the owner is the only member, the App is created in
+   that organization, and ticket state is the column of the card (`state_source: project`,
+   SPEC 12.5). Labels remain for repositories on a personal account.
 8. Claude Code runner: two runners behind one interface, selected by configuration. The pilot
    uses headless mode (`claude -p`), which is documented and reports structured events. Since
    2026-06-15 Anthropic bills headless use on a subscription from a separate monthly credit

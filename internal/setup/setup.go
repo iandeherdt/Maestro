@@ -88,13 +88,20 @@ func (u *UI) Confirm(question string) (bool, error) {
 // State is what the wizard remembers between runs. It holds no secret: the
 // App's key is a separate file, and this file only says where it is.
 type State struct {
-	Repo           string `json:"repo,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// OwnerType is "Organization" or "User". An organization gets a board,
+	// a personal account labels. Empty in a state written before boards.
+	OwnerType      string `json:"owner_type,omitempty"`
 	AppID          string `json:"app_id,omitempty"`
 	AppSlug        string `json:"app_slug,omitempty"`
 	AppKeyFile     string `json:"app_key_file,omitempty"`
 	InstallationID string `json:"installation_id,omitempty"`
 	Worker         string `json:"worker,omitempty"`
 	WorkflowFile   string `json:"workflow_file,omitempty"`
+	// Author is the GitHub login whose issues are worked on, and Board the
+	// number of the board. Both are only set for an organization.
+	Author string `json:"author,omitempty"`
+	Board  int    `json:"board,omitempty"`
 
 	path string
 }
@@ -131,6 +138,10 @@ func LoadState(dir string) (*State, error) {
 	}
 	return s, nil
 }
+
+// OnBoard reports whether tickets are approved on a board instead of with
+// labels.
+func (s *State) OnBoard() bool { return s.OwnerType == kindOrg }
 
 // Dir is the directory the state lives in.
 func (s *State) Dir() string { return filepath.Dir(s.path) }

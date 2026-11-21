@@ -422,7 +422,13 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	_, name, _ := strings.Cut(cfg.Workspace.Repo, "/")
 	// One token for the tickets, one for the code, each limited to this
 	// repository and to what it is used for.
-	tickets, err := app.Source(ghapp.Scope{Repositories: []string{name}, Permissions: map[string]string{"issues": "write"}})
+	ticketRights := map[string]string{"issues": "write"}
+	onBoard := cfg.Tracker.Provider["state_source"] == "project"
+	if onBoard {
+		// Moving a card needs the organization's Projects permission.
+		ticketRights["organization_projects"] = "write"
+	}
+	tickets, err := app.Source(ghapp.Scope{Repositories: []string{name}, Permissions: ticketRights})
 	if err != nil {
 		return err
 	}
@@ -549,8 +555,13 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	defer os.Remove(filepath.Join(cfg.Budget.StateDir, serviceFile))
 	fmt.Fprintf(stdout, "Symphony is running for %s (worker %q, base branch %s).\n", cfg.Workspace.Repo, cfg.Worker.Name, base)
-	fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
-	fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))
+	if onBoard {
+		fmt.Fprintf(stdout, "It looks at the board every %d seconds. To give it a ticket: put an issue of %s on the board,\n", cfg.Polling.IntervalMS/1000, cfg.Workspace.Repo)
+		fmt.Fprintf(stdout, "set the card's Worker to %s, and move the card to the column %s.\n", cfg.Worker.Name, cfg.Tracker.ActiveStates[0])
+	} else {
+		fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
+		fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))
+	}
 	fmt.Fprintln(stdout, "From another terminal: symphony status, symphony pause, symphony resume.")
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
