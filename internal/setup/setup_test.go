@@ -235,6 +235,10 @@ type github struct {
 	installed bool
 	convertTo int
 	srv       *httptest.Server
+	labels    map[string]bool
+	created   []string
+	scopes    []string
+	refuse    int
 }
 
 func newGitHub(t *testing.T) *github {
@@ -275,11 +279,40 @@ func (g *github) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, `{"id": 777}`)
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/repos/ian/app/labels/"):
+		if r.Header.Get("Authorization") != "Bearer ghs_x" {
+			w.WriteHeader(401)
+			return
+		}
+		if !g.labels[strings.TrimPrefix(r.URL.Path, "/repos/ian/app/labels/")] {
+			w.WriteHeader(404)
+		}
+	case r.Method == "POST" && r.URL.Path == "/repos/ian/app/labels":
+		var in map[string]string
+		json.NewDecoder(r.Body).Decode(&in)
+		if g.refuse != 0 {
+			w.WriteHeader(g.refuse)
+			return
+		}
+		if g.labels[in["name"]] {
+			w.WriteHeader(422)
+			return
+		}
+		if g.labels == nil {
+			g.labels = map[string]bool{}
+		}
+		g.labels[in["name"]] = true
+		g.created = append(g.created, in["name"])
+		w.WriteHeader(201)
 	case r.Method == "POST" && r.URL.Path == "/app/installations/777/access_tokens":
 		var in struct {
-			Repositories []string `json:"repositories"`
+			Repositories []string          `json:"repositories"`
+			Permissions  map[string]string `json:"permissions"`
 		}
 		json.NewDecoder(r.Body).Decode(&in)
+		for k, v := range in.Permissions {
+			g.scopes = append(g.scopes, k+":"+v)
+		}
 		if len(in.Repositories) != 1 || in.Repositories[0] != "app" {
 			w.WriteHeader(422)
 			return
@@ -489,5 +522,139 @@ func TestInstallAppAsksUntilInstalled(t *testing.T) {
 	}
 	if s, _ := install.Check(ctx, st); !s.Done {
 		t.Errorf("after: %+v", s)
+	}
+}
+
+// installed returns a state as it is after the App steps.
+func installed(t *testing.T, g *github) *State {
+	t.Helper()
+	st := state(t)
+	st.Repo, st.AppID, st.AppSlug, st.InstallationID = "ian/app", "4242", "symphony-ian-abc123", "777"
+	st.AppKeyFile = filepath.Join(st.Dir(), keyFileName)
+	if err := os.WriteFile(st.AppKeyFile, []byte(g.key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.installed = true
+	return st
+}
+
+func TestLabelsStep(t *testing.T) {
+	g := newGitHub(t)
+	g.labels = map[string]bool{"status:todo": true, "bug": true}
+	st := installed(t, g)
+	step := &Labels{GitHub: GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}, GOOS: "darwin"}
+	if s, err := step.Check(ctx, st); err != nil || s.Done {
+		t.Fatalf("%+v %v", s, err)
+	}
+
+	// Declining creates nothing.
+	u, out := ui("\nn\n")
+	if err := step.Run(ctx, u, st); !errors.Is(err, ErrAborted) || len(g.created) != 0 {
+		t.Fatalf("%v, created %v", err, g.created)
+	}
+	if st.Worker != "mac" {
+		t.Errorf("the default name on macOS is %q", st.Worker)
+	}
+	if strings.Contains(out.String(), "status:todo  ") || !strings.Contains(out.String(), "status:human review") {
+		t.Errorf("the list should show only missing labels:\n%s", out)
+	}
+
+	u, _ = ui("Bad Name\nlinux\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil {
+		t.Fatal(err)
+	}
+	want := "status:in progress,status:human review,status:rework,status:blocked,status:done,run:linux"
+	if strings.Join(g.created, ",") != want {
+		t.Errorf("created %v", g.created)
+	}
+	for _, sc := range g.scopes {
+		if sc != "issues:write" {
+			t.Errorf("a token with %s was requested", sc)
+		}
+	}
+	if s, _ := step.Check(ctx, st); !s.Done {
+		t.Errorf("after: %+v", s)
+	}
+}
+
+func TestWorkflowFileStep(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		g := newGitHub(t)
+		st := installed(t, g)
+		st.Worker = "linux"
+		step := &WorkflowFile{GOOS: goos}
+		u, out := ui("  go test ./...  \ny\n")
+		if err := Run(ctx, u, st, []Step{step}); err != nil {
+			t.Fatalf("%s: %v\n%s", goos, err, out)
+		}
+		raw, err := os.ReadFile(st.WorkflowFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"repo: ian/app", "state_source: labels", `bot_login: "symphony-ian-abc123[bot]"`,
+			"allowed_authors: [ian]", "    go test ./...\n", "name: linux"} {
+			if !strings.Contains(string(raw), want) {
+				t.Errorf("%s: the file lacks %q:\n%s", goos, want, raw)
+			}
+		}
+		if !strings.Contains(out.String(), "    tracker:") {
+			t.Errorf("%s: the file was not shown before writing", goos)
+		}
+		if fi, _ := os.Stat(st.WorkflowFile); fi.Mode().Perm() != 0o600 {
+			t.Errorf("mode %o", fi.Mode().Perm())
+		}
+
+		// An edited file is kept, never rewritten.
+		edited := strings.Replace(string(raw), "go test ./...", "make check", 1)
+		os.WriteFile(st.WorkflowFile, []byte(edited), 0o600)
+		st.WorkflowFile = ""
+		u, _ = ui("")
+		if err := Run(ctx, u, st, []Step{step}); err != nil {
+			t.Fatal(err)
+		}
+		if again, _ := os.ReadFile(st.WorkflowFile); string(again) != edited {
+			t.Errorf("%s: an existing file was overwritten", goos)
+		}
+
+		// A broken file stops the wizard with the reason.
+		os.WriteFile(st.WorkflowFile, []byte("---\ntracker: [\n---\n"), 0o600)
+		if s, _ := step.Check(ctx, st); s.Done || !strings.Contains(s.Detail, "not valid") {
+			t.Errorf("%s: broken file: %+v", goos, s)
+		}
+		st.WorkflowFile = ""
+		if err := step.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "not valid") {
+			t.Errorf("%s: broken file accepted: %v", goos, err)
+		}
+	}
+}
+
+func TestWorkflowFileNeedsAVerifyCommandAndAYes(t *testing.T) {
+	g := newGitHub(t)
+	st := installed(t, g)
+	st.Worker = "linux"
+	step := &WorkflowFile{GOOS: "linux"}
+	u, out := ui("\n   \nmake check\nn\n")
+	if err := step.Run(ctx, u, st); !errors.Is(err, ErrAborted) {
+		t.Fatal(err)
+	}
+	if strings.Count(out.String(), "a verify command is required") != 2 {
+		t.Errorf("empty answers were accepted:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(st.Dir(), workflowFileName)); err == nil {
+		t.Fatal("the file was written after a no")
+	}
+	if err := validCommand("a\nb"); err == nil {
+		t.Error("a multi-line command was accepted")
+	}
+}
+
+func TestLabelsStepReportsARefusal(t *testing.T) {
+	g := newGitHub(t)
+	g.refuse = 403
+	st := installed(t, g)
+	step := &Labels{GitHub: GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}, GOOS: "linux"}
+	u, _ := ui("\ny\n")
+	if err := step.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "status 403") {
+		t.Fatalf("%v", err)
 	}
 }
