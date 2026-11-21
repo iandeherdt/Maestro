@@ -182,7 +182,7 @@ Last updated 2026-11-21.
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, not yet tried against github.com |
 | Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), not yet tried against github.com |
-| Checks gate (waiting for CI) | Not started |
+| Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Running the service: `symphony run`, `status`, `pause`, `doctor` | Not started |
 | Claude Code runner | Not started. Needs one real run on a machine with the CLI logged in. |
 | Linux sandbox | Not started. Needs the server. |

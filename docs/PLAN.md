@@ -63,7 +63,8 @@ Each phase lands as one or more pull requests and is done when the listed tests 
 Progress on 2026-11-21: phase 0 is done for everything that can be checked without a machine.
 Phase 1 is done. Phase 2 is done for label mode, and Project mode is parked (decision 7). Phase 5
 has the diff policy, the secret scan, the import step, the App tokens, the push and the pull
-request; the checks gate is open. Phase 6 has the first three steps of the guided setup. Phases 3, 4, 6, 7 and 9 need the owner's machines.
+request and the checks gate; the hand-off watch is open. Phase 6 has five of the seven steps of the
+guided setup. Phases 3, 4, 6, 7 and 9 need the owner's machines.
 
 | Phase | Scope (SPEC sections) | Done when |
 |---|---|---|

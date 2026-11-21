@@ -1664,16 +1664,30 @@ the startup check in Section 15.7.
 
 For each Publish Record, every `publish.checks_poll_interval_ms`:
 
-1. Read the pull request. If its head is not `head_sha`, someone else pushed to the branch: block
-   the issue with `foreign_push`.
-2. Determine required checks: the list in `publish.required_checks`, or the base branch's
-   required status checks. If the result is empty, startup validation already failed
-   (`no_required_checks`), unless the operator set an explicit empty list, which emits a warning
-   on every publish.
-3. All required checks successful for `head_sha`: mark the pull request ready, set the issue to
-   the hand-off state, update the status comment, release the claim.
-4. Any required check failed: collect logs for feedback, schedule a `gate` retry.
-5. Deadline passed: set the issue to the blocked state with `checks_timeout`.
+1. Refresh the issue. If it is gone or terminal, drop the record and release the claim. If a
+   person moved it out of the in-progress state, drop the record and release the claim without
+   writing a state: their choice stands.
+2. Read the pull request. If it is closed or merged, block the issue with `pull_request_closed`.
+   If its head is not `head_sha`, someone else pushed to the branch: block the issue with
+   `foreign_push`.
+3. Read the check runs (latest run per check) and the commit statuses for `head_sha`. A check
+   run counts as passed when it completed with `success`, `neutral` or `skipped`; any other
+   completed conclusion is a failure. When two results carry the same name, the worse one counts.
+4. Determine required checks: the list in `publish.required_checks`. With an empty list, every
+   check reported for the commit is required and at least one must exist, so that "nothing
+   reported yet" is never read as green. Reading the base branch's required status checks
+   instead is planned with Section 15.7.
+5. All required checks successful: mark the pull request ready (GraphQL
+   `markPullRequestReadyForReview`, refused if the head moved in the meantime), set the issue to
+   the hand-off state, clear its failure budget, update the status comment, release the claim.
+   If marking ready or the state write fails, nothing is released and the step is retried on the
+   next poll.
+6. Any required check failed: pass each failed check's name and report to the agent as feedback
+   with source `ci`, and schedule a `gate` retry with category `checks_failed`.
+7. Deadline passed, including when the checks could not be read until then: set the issue to the
+   blocked state with `checks_timeout`.
+
+A commit with more check runs than the adapter reads (500) stays pending until the deadline.
 
 Workflows triggered by a pull request from a branch in the same repository can read repository
 secrets. Rule D1 and the missing Workflows permission prevent the agent from changing workflow

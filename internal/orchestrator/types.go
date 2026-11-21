@@ -196,3 +196,37 @@ type Snapshot struct {
 	QuotaBlockedUntil time.Time
 	ConfigError       string
 }
+
+// CheckState is what the checks gate found for a published pull request.
+type CheckState int
+
+const (
+	// ChecksPending: at least one required check has not finished.
+	ChecksPending CheckState = iota
+	// ChecksPassed: every required check succeeded on the pushed commit.
+	ChecksPassed
+	// ChecksFailed: a required check failed.
+	ChecksFailed
+	// ChecksForeignPush: the pull request's head is not the pushed commit.
+	ChecksForeignPush
+	// ChecksClosed: the pull request was closed or merged by someone.
+	ChecksClosed
+)
+
+// CheckStatus is the result of one look at a pull request's checks.
+type CheckStatus struct {
+	State CheckState
+	// Detail is a short summary. Untrusted: check names come from the
+	// repository's workflows.
+	Detail string
+	// Feedback describes failed checks for the agent's next attempt.
+	Feedback []issue.Feedback
+}
+
+// Checker reads the checks of a published pull request (SPEC 15.6).
+type Checker interface {
+	Check(ctx context.Context, rec PublishRecord) (CheckStatus, error)
+	// MarkReady takes the pull request out of draft. It must succeed when
+	// the pull request is already ready.
+	MarkReady(ctx context.Context, rec PublishRecord) error
+}
