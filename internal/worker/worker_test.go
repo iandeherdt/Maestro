@@ -1,0 +1,499 @@
+package worker
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/iandeherdt/Symphony-beads/internal/budget"
+	"github.com/iandeherdt/Symphony-beads/internal/config"
+	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Symphony-beads/internal/prompt"
+	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
+	"github.com/iandeherdt/Symphony-beads/internal/sandbox/sandboxtest"
+	"github.com/iandeherdt/Symphony-beads/internal/tracker/trackertest"
+	"github.com/iandeherdt/Symphony-beads/internal/workspace"
+)
+
+const sha = "0123456789abcdef0123456789abcdef01234567"
+
+// script is one scripted agent turn and what the gates find after it.
+type script struct {
+	text      string // final message
+	err       error
+	noChanges bool
+	verifyOK  bool
+	during    func() // runs while the turn is "in progress"
+}
+
+type fakes struct {
+	mu        sync.Mutex
+	turns     []script
+	prompts   []Turn
+	verifies  int
+	publishes int
+	reject    *Rejection
+	pubErr    error
+	hang      chan struct{} // when set, RunTurn blocks until ctx ends
+}
+
+func (f *fakes) RunTurn(ctx context.Context, t Turn, onEvent func(orchestrator.Event)) (TurnResult, error) {
+	f.mu.Lock()
+	n := len(f.prompts)
+	f.prompts = append(f.prompts, t)
+	f.mu.Unlock()
+	if f.hang != nil {
+		close(f.hang)
+		<-ctx.Done()
+		return TurnResult{}, ctx.Err()
+	}
+	if n >= len(f.turns) {
+		return TurnResult{}, errors.New("no scripted turn left")
+	}
+	s := f.turns[n]
+	onEvent(orchestrator.Event{Kind: "assistant", SessionID: "sess-1", Usage: &orchestrator.Usage{Input: int64(100 * (n + 1))}})
+	if s.during != nil {
+		s.during()
+	}
+	if s.err != nil {
+		return TurnResult{}, s.err
+	}
+	return TurnResult{SessionID: "sess-1", ResultText: s.text}, nil
+}
+
+func (f *fakes) current() script {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.turns[len(f.prompts)-1]
+}
+
+func (f *fakes) Export(context.Context, workspace.Workspace) (Export, error) {
+	return Export{NoChanges: f.current().noChanges}, nil
+}
+
+func (f *fakes) Verify(context.Context, workspace.Workspace) (VerifyResult, error) {
+	f.verifies++
+	if f.current().verifyOK {
+		return VerifyResult{Passed: true}, nil
+	}
+	return VerifyResult{ExitStatus: 1, OutputTail: "FAIL TestLogin"}, nil
+}
+
+func (f *fakes) Publish(_ context.Context, is issue.Issue, ws workspace.Workspace, _ VerifyResult) (*orchestrator.PublishRecord, *Rejection, error) {
+	f.publishes++
+	if f.pubErr != nil {
+		return nil, nil, f.pubErr
+	}
+	if f.reject != nil {
+		return nil, f.reject, nil
+	}
+	return &orchestrator.PublishRecord{IssueID: is.ID, Identifier: is.Identifier, Branch: ws.Branch, HeadSHA: sha, PRNumber: 42}, nil, nil
+}
+
+type collector struct {
+	mu     sync.Mutex
+	events []orchestrator.Event
+	done   chan orchestrator.Outcome
+}
+
+func (c *collector) Event(e orchestrator.Event) {
+	c.mu.Lock()
+	c.events = append(c.events, e)
+	c.mu.Unlock()
+}
+func (c *collector) Exit(o orchestrator.Outcome) { c.done <- o }
+
+func (c *collector) phases() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, e := range c.events {
+		if e.Phase != "" {
+			out = append(out, string(e.Phase))
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+type rig struct {
+	t    *testing.T
+	w    *Worker
+	f    *fakes
+	tr   *trackertest.Fake
+	sb   *sandboxtest.Fake
+	cfg  *config.Config
+	is   issue.Issue
+	sink *collector
+}
+
+func testConfig() *config.Config {
+	return &config.Config{
+		Tracker: config.Tracker{RequiredLabels: []string{"run:linux"},
+			ActiveStates: []string{"Todo", "Rework", "In Progress"}, TerminalStates: []string{"Done", "Cancelled"},
+			InProgressState: "In Progress", BlockedState: "Blocked", HandoffState: "Human Review", DoneState: "Done"},
+		Polling:   config.Polling{IntervalMS: 30000},
+		Workspace: config.Workspace{Repo: "acme/app", BaseBranch: "main"},
+		Hooks:     config.Hooks{BeforeRun: "make gen", AfterRun: "make clean", TimeoutMS: 60000},
+		Agent:     config.Agent{MaxConcurrentAgents: 2, MaxTurns: 3, MaxRetryBackoffMS: 300000},
+		Claude:    config.Claude{StallTimeoutMS: 300000},
+		Publish:   config.Publish{BranchPrefix: "symphony/"},
+		Budget:    config.Budget{MaxFailureAttempts: 3, MaxRunsPerDay: 50, QuotaBackoffMS: 1800000},
+		Worker:    config.Worker{Name: "linux"},
+	}
+}
+
+func sandboxHandler(_ context.Context, req sandbox.Request) (sandbox.Result, error) {
+	if req.Populate != nil && req.Populate.Op == sandbox.OpProbe {
+		return sandbox.Result{Stdout: []byte("missing")}, nil
+	}
+	if req.Populate != nil && req.Populate.Op == sandbox.OpClone {
+		return sandbox.Result{Stdout: []byte(sha)}, nil
+	}
+	return sandbox.Result{}, nil
+}
+
+func newRig(t *testing.T, turns ...script) *rig {
+	t.Helper()
+	cfg := testConfig()
+	pb, err := prompt.New("Implement {{ issue.identifier }}.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	is := issue.Issue{ID: "id-1", Identifier: "GH-1", Title: "Fix login", Description: "It fails.",
+		State: "In Progress", Labels: []string{"run:linux"}, Dispatchable: true}
+	is.ContentHash = issue.ContentHash(is.Title, is.Description)
+	r := &rig{t: t, cfg: cfg, is: is, f: &fakes{turns: turns}, tr: trackertest.New(is),
+		sb: &sandboxtest.Fake{Handler: sandboxHandler}, sink: &collector{done: make(chan orchestrator.Outcome, 1)}}
+	r.w = &Worker{
+		Settings:   func() Settings { return Settings{Config: cfg, Prompt: pb} },
+		Tracker:    r.tr,
+		Workspaces: workspace.New(cfg, r.sb, nil),
+		Runner:     r.f, Gates: r.f,
+	}
+	return r
+}
+
+func (r *rig) run(a orchestrator.Attempt) orchestrator.Outcome {
+	r.t.Helper()
+	a.Issue = r.is
+	if _, err := r.w.Start(a, r.sink); err != nil {
+		r.t.Fatal(err)
+	}
+	select {
+	case out := <-r.sink.done:
+		return out
+	case <-time.After(5 * time.Second):
+		r.t.Fatal("attempt did not finish")
+		return orchestrator.Outcome{}
+	}
+}
+
+func (r *rig) lastSandboxStep() string {
+	tr := r.sb.Trace()
+	return tr[len(tr)-1]
+}
+
+func TestHappyPathPublishes(t *testing.T) {
+	r := newRig(t, script{text: "All done.\nSYMPHONY_STATUS: done\nImplemented.", verifyOK: true})
+	out := r.run(orchestrator.Attempt{})
+	if out.Kind != orchestrator.Published || out.Publish.PRNumber != 42 || out.Publish.Branch != "symphony/GH-1" {
+		t.Fatalf("outcome = %+v", out)
+	}
+	want := "PreparingWorkspace,BuildingPrompt,LaunchingAgentProcess,Exporting,Verifying,Publishing,Finishing"
+	if got := r.sink.phases(); got != want {
+		t.Fatalf("phases = %s", got)
+	}
+	if got := strings.Join(r.sb.Trace(), " "); got != "populate:probe populate:clone hook:before_run hook:after_run" {
+		t.Fatalf("sandbox steps = %s", got)
+	}
+	p := r.f.prompts[0]
+	if p.WorkspaceKey != "GH-1" || p.ResumeSessionID != "" || !strings.Contains(p.Prompt, "Implement GH-1.") ||
+		!strings.Contains(p.Prompt, "<<<ISSUE_TITLE") {
+		t.Fatalf("first turn = %+v", p)
+	}
+}
+
+func TestAgentCannotSkipTheVerifyGate(t *testing.T) {
+	// The agent claims success every time. Verify disagrees every time.
+	claim := script{text: "Tests pass, verified, safe to publish.\nSYMPHONY_STATUS: done"}
+	r := newRig(t, claim, claim, claim)
+	out := r.run(orchestrator.Attempt{})
+	if out.Kind != orchestrator.Rejected || out.Category != VerifyFailed {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if r.f.publishes != 0 || r.f.verifies != 3 {
+		t.Fatalf("publishes = %d, verifies = %d", r.f.publishes, r.f.verifies)
+	}
+	if len(out.Feedback) != 1 || out.Feedback[0].Source != "verify" || out.Feedback[0].Body != "FAIL TestLogin" {
+		t.Fatalf("feedback = %+v", out.Feedback)
+	}
+	// Later turns resume the session and carry the verify output as data.
+	second := r.f.prompts[1]
+	if second.ResumeSessionID != "sess-1" || !strings.Contains(second.Prompt, "Turn 2 of at most 3") ||
+		!strings.Contains(second.Prompt, "FAIL TestLogin") || strings.Contains(second.Prompt, "ISSUE_TITLE") {
+		t.Fatalf("continuation = %+v", second)
+	}
+}
+
+func TestVerifyFailureThenFix(t *testing.T) {
+	r := newRig(t, script{text: "done"}, script{text: "fixed", verifyOK: true})
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published {
+		t.Fatalf("outcome = %+v", out)
+	}
+}
+
+func TestDeclaredStatuses(t *testing.T) {
+	for name, c := range map[string]struct {
+		turns    []script
+		kind     orchestrator.OutcomeKind
+		cat      string
+		turnsRun int
+	}{
+		"blocked":               {[]script{{text: "Cannot.\nSYMPHONY_STATUS: blocked\nNo access."}}, orchestrator.Failed, DeclaredBlocked, 1},
+		"no changes and done":   {[]script{{text: "Nothing to do.", noChanges: true}}, orchestrator.Failed, NoChanges, 1},
+		"continue then publish": {[]script{{text: "SYMPHONY_STATUS: continue"}, {text: "SYMPHONY_STATUS: done", verifyOK: true}}, orchestrator.Published, "", 2},
+		"continue forever": {[]script{{text: "SYMPHONY_STATUS: continue"}, {text: "SYMPHONY_STATUS: continue"}, {text: "SYMPHONY_STATUS: continue"}},
+			orchestrator.Failed, MaxTurnsExhausted, 3},
+		"no changes, continue, then work": {[]script{{text: "SYMPHONY_STATUS: continue", noChanges: true}, {text: "ok", verifyOK: true}},
+			orchestrator.Published, "", 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, c.turns...)
+			out := r.run(orchestrator.Attempt{})
+			if out.Kind != c.kind || out.Category != c.cat || len(r.f.prompts) != c.turnsRun {
+				t.Fatalf("outcome = %+v after %d turns", out, len(r.f.prompts))
+			}
+			if r.lastSandboxStep() != "hook:after_run" {
+				t.Fatalf("after_run did not run: %v", r.sb.Trace())
+			}
+		})
+	}
+}
+
+func TestDeclaredStatusParsing(t *testing.T) {
+	for text, want := range map[string]string{
+		"":                                   "done",
+		"no marker":                          "done",
+		"SYMPHONY_STATUS: continue":          "continue",
+		"x\n  SYMPHONY_STATUS: blocked  \ny": "blocked",
+		"SYMPHONY_STATUS: continue\nlater\nSYMPHONY_STATUS: done": "done",
+		"I would say SYMPHONY_STATUS: blocked here":               "done", // not on its own line
+		"SYMPHONY_STATUS: published":                              "done", // not a known value
+		"SYMPHONY_STATUS: done\r\n":                               "done",
+	} {
+		if got := DeclaredStatus(text); got != want {
+			t.Errorf("%q: %s, want %s", text, got, want)
+		}
+	}
+}
+
+func TestAgentErrorsMapToOutcomes(t *testing.T) {
+	reset := time.Date(2026, 11, 21, 15, 45, 0, 0, time.UTC)
+	for name, c := range map[string]struct {
+		err  error
+		kind orchestrator.OutcomeKind
+		cat  string
+	}{
+		"quota":       {&AgentError{Category: QuotaExhausted, QuotaResetAt: reset}, orchestrator.Quota, QuotaExhausted},
+		"logged out":  {&AgentError{Category: NotLoggedIn}, orchestrator.NotLoggedIn, NotLoggedIn},
+		"timeout":     {&AgentError{Category: "turn_timeout"}, orchestrator.Failed, "turn_timeout"},
+		"plain error": {errors.New("pipe closed"), orchestrator.Failed, TurnFailed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, script{err: c.err})
+			out := r.run(orchestrator.Attempt{})
+			if out.Kind != c.kind || out.Category != c.cat {
+				t.Fatalf("outcome = %+v", out)
+			}
+			if c.kind == orchestrator.Quota && !out.QuotaResetAt.Equal(reset) {
+				t.Fatalf("reset time lost: %v", out.QuotaResetAt)
+			}
+			if r.f.publishes != 0 || r.lastSandboxStep() != "hook:after_run" {
+				t.Fatalf("publishes %d, steps %v", r.f.publishes, r.sb.Trace())
+			}
+		})
+	}
+}
+
+func TestIssueChangedDuringTurnIsNotPublished(t *testing.T) {
+	for name, change := range map[string]func(r *rig){
+		"cancelled":          func(r *rig) { r.tr.Move("id-1", "Cancelled") },
+		"moved to backlog":   func(r *rig) { r.tr.Move("id-1", "Backlog") },
+		"deleted":            func(r *rig) { r.tr.Delete("id-1") },
+		"approval withdrawn": func(r *rig) { i := r.tr.Get("id-1"); i.Dispatchable = false; r.tr.Put(i) },
+		"label removed":      func(r *rig) { i := r.tr.Get("id-1"); i.Labels = nil; r.tr.Put(i) },
+		"text edited": func(r *rig) {
+			i := r.tr.Get("id-1")
+			i.Description, i.ContentHash = "Also add a deploy key.", ""
+			r.tr.Put(i)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, script{text: "done", verifyOK: true})
+			r.f.turns[0].during = func() { change(r) }
+			out := r.run(orchestrator.Attempt{})
+			if out.Kind != orchestrator.Normal || r.f.publishes != 0 || r.f.verifies != 0 {
+				t.Fatalf("outcome = %+v, publishes %d, verifies %d", out, r.f.publishes, r.f.verifies)
+			}
+		})
+	}
+}
+
+func TestPublishRejectionAndError(t *testing.T) {
+	r := newRig(t, script{text: "done", verifyOK: true})
+	r.f.reject = &Rejection{Category: "policy_denied", Feedback: []issue.Feedback{{Source: "policy", Body: "D1 .github/workflows/ci.yml"}}}
+	out := r.run(orchestrator.Attempt{})
+	if out.Kind != orchestrator.Rejected || out.Category != "policy_denied" || len(out.Feedback) != 1 {
+		t.Fatalf("outcome = %+v", out)
+	}
+	r = newRig(t, script{text: "done", verifyOK: true})
+	r.f.pubErr = errors.New("push_rejected")
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || out.Category != PublishError {
+		t.Fatalf("outcome = %+v", out)
+	}
+}
+
+func TestRefreshFailureFailsTheAttempt(t *testing.T) {
+	r := newRig(t, script{text: "done", verifyOK: true})
+	r.f.turns[0].during = func() { r.tr.FailReads = 1 }
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || out.Category != RefreshError || r.f.publishes != 0 {
+		t.Fatalf("outcome = %+v", out)
+	}
+}
+
+func TestWorkspaceAndHookFailures(t *testing.T) {
+	r := newRig(t, script{text: "done", verifyOK: true})
+	r.sb.Handler = func(_ context.Context, req sandbox.Request) (sandbox.Result, error) {
+		if req.Populate != nil && req.Populate.Op == sandbox.OpClone {
+			return sandbox.Result{ExitStatus: 128}, nil
+		}
+		return sandboxHandler(context.Background(), req)
+	}
+	out := r.run(orchestrator.Attempt{})
+	if out.Kind != orchestrator.Failed || out.Category != workspace.PopulateFailed || len(r.f.prompts) != 0 {
+		t.Fatalf("outcome = %+v", out)
+	}
+	for _, s := range r.sb.Trace() {
+		if strings.HasPrefix(s, "hook:") {
+			t.Fatalf("a hook ran without a workspace: %v", r.sb.Trace())
+		}
+	}
+
+	r = newRig(t, script{text: "done", verifyOK: true})
+	r.sb.Handler = func(_ context.Context, req sandbox.Request) (sandbox.Result, error) {
+		if req.Env["SYMPHONY_HOOK"] == workspace.BeforeRun {
+			return sandbox.Result{ExitStatus: 1}, nil
+		}
+		return sandboxHandler(context.Background(), req)
+	}
+	out = r.run(orchestrator.Attempt{})
+	if out.Kind != orchestrator.Failed || out.Category != workspace.HookFailed || len(r.f.prompts) != 0 {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if r.lastSandboxStep() != "hook:after_run" {
+		t.Fatalf("after_run did not run after a failed before_run: %v", r.sb.Trace())
+	}
+}
+
+func TestRetryAttemptPromptCarriesFeedback(t *testing.T) {
+	r := newRig(t, script{text: "done", verifyOK: true})
+	r.run(orchestrator.Attempt{Number: 1, RetryKind: orchestrator.KindGate,
+		Feedback: []issue.Feedback{{Source: "ci", Body: "lint: unused variable"}}})
+	p := r.f.prompts[0].Prompt
+	if !strings.Contains(p, "This is attempt 2") || !strings.Contains(p, "source=ci\nlint: unused variable") {
+		t.Fatalf("prompt = %s", p)
+	}
+}
+
+func TestTerminateCancelsTheTurnAndStillCleansUp(t *testing.T) {
+	r := newRig(t)
+	r.f.hang = make(chan struct{})
+	h, err := r.w.Start(orchestrator.Attempt{Issue: r.is}, r.sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-r.f.hang
+	h.Terminate()
+	h.Terminate() // safe to repeat
+	select {
+	case out := <-r.sink.done:
+		if out.Kind != orchestrator.Normal {
+			t.Fatalf("outcome = %+v", out)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("attempt did not stop")
+	}
+	if r.lastSandboxStep() != "hook:after_run" || r.f.publishes != 0 {
+		t.Fatalf("steps = %v", r.sb.Trace())
+	}
+}
+
+func TestUnconfiguredWorkerRefusesToStart(t *testing.T) {
+	if _, err := (&Worker{}).Start(orchestrator.Attempt{}, &collector{}); err == nil {
+		t.Fatal("started without collaborators")
+	}
+}
+
+// ---- end to end with the scheduler ----------------------------------------
+
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+
+func TestEndToEndWithScheduler(t *testing.T) {
+	r := newRig(t,
+		script{text: "first try\nSYMPHONY_STATUS: done"},                  // verify fails, turn 2
+		script{text: "second try\nSYMPHONY_STATUS: done", verifyOK: true}, // publishes
+	)
+	todo := r.is
+	todo.State = "Todo"
+	r.tr.Put(todo)
+	other := todo
+	other.ID, other.Identifier, other.AuthorID, other.Dispatchable = "id-2", "GH-2", "stranger", false
+	r.tr.Put(other)
+
+	b, err := budget.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := orchestrator.New(r.cfg, orchestrator.Deps{Tracker: r.tr, Worker: r.w, Budget: b,
+		Workspaces: workspace.New(r.cfg, r.sb, nil)})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { o.Run(ctx); close(done) }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for len(o.Latest().AwaitingChecks) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("not published; snapshot %+v", o.Latest())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	s := o.Latest()
+	if len(s.Running) != 0 || s.AwaitingChecks[0].Identifier != "GH-1" || s.AwaitingChecks[0].PRNumber != 42 {
+		t.Fatalf("snapshot = %+v", s)
+	}
+	if got := strings.Join(r.tr.StateWrites("id-1"), ","); got != "In Progress" {
+		t.Fatalf("state writes for GH-1 = %s", got)
+	}
+	// The issue that is not approved was never touched.
+	if len(r.tr.StateWrites("id-2")) != 0 || r.tr.Get("id-2").State != "Todo" {
+		t.Fatal("an issue that is not dispatchable was touched")
+	}
+	if len(r.f.prompts) != 2 || r.f.publishes != 1 || b.Failures("id-1") != 0 || b.Today(time.Now()).Runs != 1 {
+		t.Fatalf("turns %d, publishes %d, failures %d", len(r.f.prompts), r.f.publishes, b.Failures("id-1"))
+	}
+	if s.Totals.Usage.Input != 200 {
+		t.Fatalf("usage not accounted: %+v", s.Totals)
+	}
+}
