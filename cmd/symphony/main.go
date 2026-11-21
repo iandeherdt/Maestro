@@ -50,7 +50,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 2 {
 		explicit = args[1]
 	}
-	def, err := workflow.Load(workflow.ResolvePath(explicit))
+	path := workflowPath(explicit)
+	def, err := workflow.Load(path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -79,9 +80,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 	for _, w := range cfg.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}
+	fmt.Fprintf(stdout, "checked %s\n", path)
 	fmt.Fprintf(stdout, "workflow ok: tracker=%s repo=%s worker=%s required_labels=%v\n",
 		cfg.Tracker.Kind, cfg.Workspace.Repo, cfg.Worker.Name, cfg.Tracker.RequiredLabels)
 	return 0
+}
+
+// workflowPath applies SPEC 5.1: an explicit path, else WORKFLOW.md in the
+// current directory, else the file the guided setup wrote.
+func workflowPath(explicit string) string {
+	path := workflow.ResolvePath(explicit)
+	if explicit != "" {
+		return path
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	if base, err := os.UserConfigDir(); err == nil {
+		fromSetup := filepath.Join(base, "symphony", workflow.DefaultFileName)
+		if _, err := os.Stat(fromSetup); err == nil {
+			return fromSetup
+		}
+	}
+	return path
 }
 
 func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -131,7 +152,8 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "setup failed:", err)
 		return 1
 	}
-	ui.Say("The workflow file is %s. Check it at any time with: symphony check %s", st.WorkflowFile, st.WorkflowFile)
+	ui.Say("The workflow file is %s", st.WorkflowFile)
+	ui.Say("Check it at any time with: symphony check")
 	ui.Say("Installing and starting the service is not built yet, so nothing is running.")
 	return 0
 }
