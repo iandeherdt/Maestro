@@ -1,16 +1,22 @@
 // Command symphony runs the orchestrator described in docs/SPEC.md.
 //
-// Only configuration checking is implemented so far.
+// The guided setup and configuration checking are implemented so far.
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"path/filepath"
 
 	"github.com/iandeherdt/Symphony-beads/internal/config"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
 	"github.com/iandeherdt/Symphony-beads/internal/prompt"
+	"github.com/iandeherdt/Symphony-beads/internal/setup"
 	"github.com/iandeherdt/Symphony-beads/internal/workflow"
 )
 
@@ -18,10 +24,18 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+const usage = `usage:
+  symphony setup [--dir DIR] [--port N]   guided installation, safe to run again
+  symphony check [path-to-WORKFLOW.md]    validate a workflow file
+
+The service itself is not implemented yet.`
+
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "setup" {
+		return runSetup(args[1:], os.Stdin, stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "check" || len(args) > 2 {
-		fmt.Fprintln(stderr, "usage: symphony check [path-to-WORKFLOW.md]")
-		fmt.Fprintln(stderr, "The service itself is not implemented yet.")
+		fmt.Fprintln(stderr, usage)
 		return 2
 	}
 	explicit := ""
@@ -59,5 +73,54 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "workflow ok: tracker=%s repo=%s worker=%s required_labels=%v\n",
 		cfg.Tracker.Kind, cfg.Workspace.Repo, cfg.Worker.Name, cfg.Tracker.RequiredLabels)
+	return 0
+}
+
+func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "where setup keeps its state and the App key (default: the user's configuration directory)")
+	port := fs.Int("port", setup.DefaultPort, "loopback port used while creating the GitHub App")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return 2
+	}
+	if *dir == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			fmt.Fprintln(stderr, "no configuration directory was found for this user, pass --dir:", err)
+			return 1
+		}
+		*dir = filepath.Join(base, "symphony")
+	}
+	abs, err := filepath.Abs(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	st, err := setup.LoadState(abs)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ui := setup.NewUI(stdin, stdout)
+	ui.Say("Symphony setup. Every step says what it will do and waits for you.")
+	ui.Say("You can stop with Ctrl-C and run this command again; finished steps are skipped.")
+	ui.Say("State and the App key are kept in %s", abs)
+	steps := []setup.Step{
+		&setup.Machine{},
+		&setup.CreateApp{Port: *port},
+		&setup.InstallApp{},
+	}
+	if err := setup.Run(ctx, ui, st, steps); err != nil {
+		if errors.Is(err, setup.ErrAborted) {
+			fmt.Fprintln(stderr, err)
+			return 3
+		}
+		fmt.Fprintln(stderr, "setup failed:", err)
+		return 1
+	}
+	ui.Say("The remaining steps (labels, workflow file, installing the service) are not built yet.")
 	return 0
 }

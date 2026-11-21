@@ -1763,12 +1763,56 @@ As upstream Section 13.7, loopback only:
 ### 16.7 CLI
 
 - `symphony [path-to-WORKFLOW.md]`: run the service.
+- `symphony setup [--dir DIR] [--port N]`: guided installation (Section 16.8).
+- `symphony check [path-to-WORKFLOW.md]`: validate a workflow file without starting anything.
 - `symphony status`: print the state from the loopback API.
 - `symphony doctor [--repo]`: configuration, sandbox self-test, token scopes, branch protection,
   repository readiness (Appendix C).
 - `symphony pause [reason]`, `symphony resume`
 - `symphony unblock <identifier>`: reset `failure_attempts` for an issue.
 - Exit status: `0` on normal shutdown, nonzero on startup failure or abnormal exit.
+
+### 16.8 Guided Setup
+
+`symphony setup` installs the service step by step. It exists so that a correct, least-privilege
+installation is also the easiest one.
+
+Rules for every step:
+
+- A step can tell from the machine and from GitHub whether it is already done. The wizard can be
+  stopped at any point and run again; finished steps are confirmed in one line and skipped.
+- A step says what it is about to change and waits for an explicit yes. The end of input is
+  never consent.
+- After a step has run it is checked again. The wizard does not continue past a step that is not
+  verifiably done.
+- The wizard never asks the operator to type or paste a secret, and never prints one. Its state
+  file holds identifiers and paths only.
+- The state directory MUST NOT be writable by other users.
+
+Steps:
+
+1. Machine: Git 2.31 or newer, the Claude Code CLI, and on Linux systemd and cgroup v2. Nothing
+   is installed by the wizard; each missing item comes with what to do.
+2. GitHub App: created through GitHub's manifest flow. The wizard serves a page on a loopback
+   port with a form that posts the manifest to github.com. The operator presses Create there,
+   GitHub redirects back to the loopback port with a one-time code, and the wizard exchanges the
+   code for the App's ID and private key. The key is written to a new file with mode 0600 and an
+   existing key file is never overwritten. The client secret and webhook secret in the response
+   are discarded. The manifest requests exactly the permissions of Section 15.5, no webhook and
+   no events, and the App is private. The loopback listener answers only requests addressed to
+   the loopback host, and the callback must carry the wizard's random state value. On a machine
+   without a browser the operator forwards the port over SSH.
+3. Installation: the operator installs the App on the one repository. The wizard finds the
+   installation and proves the chain by requesting a token limited to that repository.
+4. Labels: the state labels and the routing label are created in the repository. (not built)
+5. Workflow file: written from a few questions and validated. (not built)
+6. Service: the users, directories and the systemd or launchd unit are installed after the
+   wizard has shown what it will write. (not built)
+7. Self-test: `symphony doctor`. (not built)
+
+To verify on the first real run: that GitHub accepts a loopback `redirect_url` in a manifest, that
+a manifest without `hook_attributes` creates an App with the webhook off, and that the code
+exchange needs no authentication.
 
 ## 17. Failure Model and Recovery
 
