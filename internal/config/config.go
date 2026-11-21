@@ -37,14 +37,19 @@ type Config struct {
 type Tracker struct {
 	Kind string
 	// Provider is adapter-owned configuration, passed through unchanged.
-	Provider          map[string]any
-	RequiredLabels    []string // effective: normalized, plus the routing label
-	ActiveStates      []string
-	TerminalStates    []string
-	HandoffState      string
-	InProgressState   string
-	BlockedState      string
-	DoneState         string
+	Provider        map[string]any
+	RequiredLabels  []string // effective: normalized, plus the routing label
+	ActiveStates    []string
+	TerminalStates  []string
+	HandoffState    string
+	InProgressState string
+	BlockedState    string
+	DoneState       string
+	// PlanningState is the state in which an issue is an idea to be planned
+	// rather than work to be done (SPEC 22). Empty switches planning off.
+	PlanningState string
+	// PlannedState is where the owner moves an idea to approve its plan.
+	PlannedState      string
 	AllowedAuthors    []string
 	AllowedCommenters []string
 }
@@ -320,6 +325,13 @@ func (b *builder) tracker(s *section) {
 	t.InProgressState = s.str("in_progress_state", "In Progress")
 	t.BlockedState = s.str("blocked_state", "Blocked")
 	t.DoneState = s.str("done_state", "Done")
+	// Planning needs a board, so it is on by default only there.
+	planDefault := ""
+	if t.Provider["state_source"] == "project" {
+		planDefault = "Idea"
+	}
+	t.PlanningState = strings.TrimSpace(s.str("planning_state", planDefault))
+	t.PlannedState = strings.TrimSpace(s.str("planned_state", "Planned"))
 	t.AllowedAuthors = trimAll(s.strList("allowed_authors", nil))
 	t.AllowedCommenters = trimAll(s.strList("allowed_commenters", t.AllowedAuthors))
 	b.lenient(s)
@@ -353,6 +365,27 @@ func (b *builder) tracker(s *section) {
 	check("tracker.in_progress_state", t.InProgressState, true, false)
 	check("tracker.blocked_state", t.BlockedState, false, false)
 	check("tracker.done_state", t.DoneState, false, true)
+
+	if t.PlanningState != "" {
+		// An idea is polled like any active state, but it must be told
+		// apart from every state that means something else.
+		plan, planned := Normalize(t.PlanningState), Normalize(t.PlannedState)
+		taken := map[string]bool{Normalize(t.HandoffState): true, Normalize(t.BlockedState): true}
+		for st := range active {
+			taken[st] = true
+		}
+		for st := range terminal {
+			taken[st] = true
+		}
+		switch {
+		case taken[plan]:
+			b.fail("tracker.planning_state", "state %q is already used for something else", t.PlanningState)
+		case planned == "" || planned == plan || taken[planned]:
+			b.fail("tracker.planned_state", "state %q must be a state of its own", t.PlannedState)
+		default:
+			t.ActiveStates = append(t.ActiveStates, t.PlanningState)
+		}
+	}
 }
 
 func notIf(b bool) string {

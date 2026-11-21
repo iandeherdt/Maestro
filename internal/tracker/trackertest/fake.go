@@ -26,6 +26,14 @@ type Fake struct {
 	// FailReads and FailWrites make the next n calls of that kind fail.
 	FailReads  int
 	FailWrites int
+
+	// Planning: the board's workers, the owner's comments, and a script of
+	// failures for the planner writes, consumed call by call ("" = succeed).
+	WorkerNames []string
+	Comments    []tracker.Feedback
+	PlanFail    []string
+	planCalls   int
+	created     int
 }
 
 func New(issues ...issue.Issue) *Fake {
@@ -162,6 +170,70 @@ func (f *Fake) UpsertStatusComment(_ context.Context, is issue.Issue, body strin
 	return nil
 }
 
-func (f *Fake) FetchFeedback(context.Context, issue.Issue, time.Time) ([]tracker.Feedback, error) {
-	return nil, nil
+func (f *Fake) FetchFeedback(_ context.Context, _ issue.Issue, since time.Time) ([]tracker.Feedback, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []tracker.Feedback
+	for _, c := range f.Comments {
+		if c.CreatedAt.After(since) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+var _ tracker.Planner = (*Fake)(nil)
+
+// planErr consumes the failure script of the planner writes.
+func (f *Fake) planErr() error {
+	i := f.planCalls
+	f.planCalls++
+	if i < len(f.PlanFail) && f.PlanFail[i] != "" {
+		return &tracker.Error{Category: tracker.WriteRejected, Msg: f.PlanFail[i]}
+	}
+	return nil
+}
+
+func (f *Fake) Workers(context.Context) ([]string, error) { return f.WorkerNames, nil }
+
+func (f *Fake) PostComment(_ context.Context, is issue.Issue, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.planErr(); err != nil {
+		return err
+	}
+	f.writes = append(f.writes, Write{"post", is.ID, body})
+	return nil
+}
+
+func (f *Fake) CreateTask(_ context.Context, t tracker.Task) (tracker.TaskRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.planErr(); err != nil {
+		return tracker.TaskRef{}, err
+	}
+	f.created++
+	ref := tracker.TaskRef{ID: "task-" + string(rune('0'+f.created)), Identifier: "T-" + string(rune('0'+f.created)), NativeID: int64(f.created)}
+	f.writes = append(f.writes, Write{"create", ref.ID, t.Title + "\n" + t.Body})
+	return ref, nil
+}
+
+func (f *Fake) PlaceTask(_ context.Context, parent issue.Issue, ref tracker.TaskRef, worker, state string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.planErr(); err != nil {
+		return err
+	}
+	f.writes = append(f.writes, Write{"place", ref.ID, parent.ID + "|" + worker + "|" + state})
+	return nil
+}
+
+func (f *Fake) AddBlocker(_ context.Context, task, blocker tracker.TaskRef) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.planErr(); err != nil {
+		return err
+	}
+	f.writes = append(f.writes, Write{"blocker", task.ID, blocker.ID})
+	return nil
 }

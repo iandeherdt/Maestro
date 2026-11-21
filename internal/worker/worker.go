@@ -16,6 +16,7 @@ import (
 	"github.com/iandeherdt/Symphony-beads/internal/config"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
 	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Symphony-beads/internal/plan"
 	"github.com/iandeherdt/Symphony-beads/internal/prompt"
 	"github.com/iandeherdt/Symphony-beads/internal/tracker"
 	"github.com/iandeherdt/Symphony-beads/internal/workspace"
@@ -36,7 +37,10 @@ const (
 	TurnFailed        = "turn_failed"
 	// SessionUnknown: a continuation turn could not resume its session.
 	// The worker starts a fresh session with the full prompt, once.
-	SessionUnknown      = "session_unknown"
+	SessionUnknown = "session_unknown"
+	// Planning runs (SPEC 22).
+	PlanBriefError      = "plan_brief_error"
+	PlanMalformed       = "plan_malformed"
 	afterRunGracePeriod = 2 * time.Minute
 )
 
@@ -113,6 +117,12 @@ type Settings struct {
 	Prompt *prompt.Builder
 }
 
+// Planning supplies what a planning run needs besides the idea: the
+// machines tasks can be given to and the conversation so far.
+type Planning interface {
+	Brief(ctx context.Context, is issue.Issue) (plan.Brief, error)
+}
+
 // Worker implements orchestrator.Worker.
 type Worker struct {
 	Settings   func() Settings
@@ -120,6 +130,8 @@ type Worker struct {
 	Workspaces Workspaces
 	Runner     Runner
 	Gates      Gates
+	// Planning is optional. Without it a planning attempt fails.
+	Planning Planning
 }
 
 type handle struct {
@@ -186,6 +198,9 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 
 	if err := w.Workspaces.RunHook(ctx, workspace.BeforeRun, ws.Key); err != nil {
 		return failed(orDefault(workspace.CategoryOf(err), workspace.HookFailed), err)
+	}
+	if a.Planning {
+		return w.plan(ctx, a, set, ws, sink)
 	}
 
 	maxTurns := int(cfg.Agent.MaxTurns)
@@ -302,6 +317,80 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 			return failed(PublishError, errors.New("publisher returned neither a record nor a rejection"))
 		}
 		return orchestrator.Outcome{Kind: orchestrator.Published, Publish: rec}
+	}
+}
+
+// plan runs a planning attempt: the agent reads the repository and answers
+// with questions or with a plan. Nothing is exported, verified or
+// published, whatever the agent did in the workspace.
+func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings, ws workspace.Workspace, sink orchestrator.Sink) orchestrator.Outcome {
+	cfg, is := set.Config, a.Issue
+	phase := func(p orchestrator.Phase) { sink.Event(orchestrator.Event{Kind: "phase", Phase: p}) }
+	if w.Planning == nil {
+		return failed(PlanBriefError, errors.New("planning is not set up on this worker"))
+	}
+	phase(orchestrator.BuildingPrompt)
+	brief, err := w.Planning.Brief(ctx, is)
+	if err != nil {
+		return failed(PlanBriefError, err)
+	}
+	first := func() (string, error) {
+		return set.Prompt.Planning(prompt.PlanInput{Issue: is, RepoName: cfg.Workspace.Repo, Workers: brief.Workers, History: brief.History})
+	}
+	maxTurns := int(cfg.Agent.MaxTurns)
+	sessionID, problem := "", ""
+	sessionReset := false
+	for turn := 1; ; turn++ {
+		if ctx.Err() != nil {
+			return orchestrator.Outcome{Kind: orchestrator.Normal}
+		}
+		var text string
+		if turn == 1 {
+			if text, err = first(); err != nil {
+				return failed(prompt.RenderError, err)
+			}
+		} else {
+			text = set.Prompt.PlanningRetry(turn, maxTurns, problem)
+		}
+		phase(orchestrator.LaunchingAgentProcess)
+		sink.Event(orchestrator.Event{Kind: "turn_start", TurnStart: true})
+		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID}, sink.Event)
+		var lost *AgentError
+		if errors.As(err, &lost) && lost.Category == SessionUnknown && sessionID != "" && !sessionReset && ctx.Err() == nil {
+			sessionReset = true
+			sink.Event(orchestrator.Event{Kind: "session_reset"})
+			if text, err = first(); err != nil {
+				return failed(prompt.RenderError, err)
+			}
+			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text}, sink.Event)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return orchestrator.Outcome{Kind: orchestrator.Normal}
+			}
+			return agentOutcome(err)
+		}
+		sessionID = res.SessionID
+
+		// Is this still an idea the owner wants planned, with the same text?
+		refreshed, err := w.Tracker.FetchIssuesByIDs(ctx, []string{is.ID})
+		if err != nil {
+			return failed(RefreshError, err)
+		}
+		if len(refreshed) == 0 || !stillWanted(cfg, refreshed[0]) || refreshed[0].ContentHash != is.ContentHash ||
+			issue.NormalizeState(refreshed[0].State) != issue.NormalizeState(cfg.Tracker.PlanningState) {
+			return orchestrator.Outcome{Kind: orchestrator.Normal}
+		}
+
+		p, err := plan.Parse(res.ResultText, brief.Workers)
+		if err == nil {
+			return orchestrator.Outcome{Kind: orchestrator.Planned, Plan: p}
+		}
+		var fe *plan.FormatError
+		if !errors.As(err, &fe) || turn >= maxTurns {
+			return failed(PlanMalformed, err)
+		}
+		problem = fe.Msg
 	}
 }
 

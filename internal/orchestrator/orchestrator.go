@@ -10,6 +10,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/iandeherdt/Symphony-beads/internal/budget"
 	"github.com/iandeherdt/Symphony-beads/internal/config"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Symphony-beads/internal/plan"
 	"github.com/iandeherdt/Symphony-beads/internal/tracker"
 )
 
@@ -48,6 +50,8 @@ type Deps struct {
 	// Reviews is optional. Without it nothing follows a ticket once it is
 	// handed to a person.
 	Reviews Reviews
+	// Plans is optional. Without it ideas are not planned.
+	Plans Plans
 	// Preflight is the optional per-tick validation (SPEC 6.2, 6.3). It
 	// returns a configuration to apply when the workflow file changed, or
 	// nil. An error skips dispatch for that tick; reconciliation still
@@ -89,10 +93,14 @@ type Orchestrator struct {
 	// issues whose closed pull request was already commented on.
 	handoffAt   time.Time
 	closedNoted map[string]bool
-	claimed     map[string]bool
-	retries     map[string]*RetryEntry
-	completed   map[string]bool
-	totals      Totals
+	// plansAt is when approved plans were last looked at. planNoted holds
+	// the ideas whose missing or outdated plan was already commented on.
+	plansAt   time.Time
+	planNoted map[string]bool
+	claimed   map[string]bool
+	retries   map[string]*RetryEntry
+	completed map[string]bool
+	totals    Totals
 
 	gen           uint64
 	spawnFailures int
@@ -120,6 +128,7 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		running:   map[string]*runEntry{},
 		awaiting:  map[string]*PublishRecord{},
 		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{}, closedNoted: map[string]bool{},
+		planNoted: map[string]bool{},
 		claimed:   map[string]bool{},
 		retries:   map[string]*RetryEntry{},
 		completed: map[string]bool{},
@@ -314,6 +323,7 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 	o.reconcile(ctx)
 	o.watchChecks(ctx)
 	o.watchHandoff(ctx)
+	o.watchPlans(ctx)
 
 	if o.configError != "" {
 		return
@@ -396,6 +406,9 @@ func (o *Orchestrator) eligible(is issue.Issue) bool {
 	if !o.isActive(is) || !o.routable(is) {
 		return false
 	}
+	if o.planning(is) && o.d.Plans == nil {
+		return false
+	}
 	if _, err := issue.WorkspaceKey(is.Identifier); err != nil {
 		return false
 	}
@@ -435,22 +448,32 @@ func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int
 	o.claimed[is.ID] = true
 	delete(o.retries, is.ID)
 
-	if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.InProgressState); err != nil {
-		// The claim is held: an issue whose state cannot be written must
-		// not be picked up again by the next poll.
-		o.trackerRetry(is, &RetryEntry{Attempt: attempt, resumeKind: kind, Feedback: feedback,
-			writeFailures: writeFailures + 1, Error: "tracker write failed: " + err.Error()})
-		return
-	}
+	// An idea stays in its own state while it is planned. Moving it to the
+	// in-progress state would turn it into work to implement after a
+	// restart.
+	planning := o.planning(is)
 	dispatchState := issue.NormalizeState(is.State)
-	is.State = o.cfg.Tracker.InProgressState
+	if !planning {
+		if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.InProgressState); err != nil {
+			// The claim is held: an issue whose state cannot be written must
+			// not be picked up again by the next poll.
+			o.trackerRetry(is, &RetryEntry{Attempt: attempt, resumeKind: kind, Feedback: feedback,
+				writeFailures: writeFailures + 1, Error: "tracker write failed: " + err.Error()})
+			return
+		}
+		is.State = o.cfg.Tracker.InProgressState
+	}
 
 	o.d.Budget.AddRun(o.now())
 	o.persist()
-	o.comment(ctx, is, "Dispatched to worker `"+o.cfg.Worker.Name+"`"+attemptSuffix(attempt)+".", "")
+	what := "Dispatched to"
+	if planning {
+		what = "Planning on"
+	}
+	o.comment(ctx, is, what+" worker `"+o.cfg.Worker.Name+"`"+attemptSuffix(attempt)+".", "")
 
 	o.gen++
-	h, err := o.d.Worker.Start(Attempt{Issue: is, Number: attempt, RetryKind: kind, Feedback: feedback},
+	h, err := o.d.Worker.Start(Attempt{Issue: is, Number: attempt, RetryKind: kind, Feedback: feedback, Planning: planning},
 		sink{o, is.ID, o.gen})
 	if err != nil {
 		o.spawnFailures++
@@ -711,6 +734,8 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 	case NotLoggedIn:
 		o.pause("agent login required")
 		o.release(id)
+	case Planned:
+		o.proposed(ctx, e, out.Plan)
 	case Rejected:
 		o.failed(ctx, e, KindGate, out.Category, out.Message, out.Feedback)
 	default:
@@ -734,6 +759,100 @@ func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt in
 	}
 	o.schedule(&RetryEntry{IssueID: is.ID, Identifier: is.Identifier, Attempt: attempt + 1,
 		Kind: kind, Feedback: feedback, Error: category})
+}
+
+// ---- planning -------------------------------------------------------------
+
+// planning reports whether the issue is an idea to plan (SPEC 22).
+func (o *Orchestrator) planning(is issue.Issue) bool {
+	p := issue.NormalizeState(o.cfg.Tracker.PlanningState)
+	return p != "" && issue.NormalizeState(is.State) == p
+}
+
+// proposed hands the result of a planning run to the owner. The card is
+// moved to the hand-off state first: if that write fails, the idea would
+// otherwise be planned again on every poll, with a new comment each time.
+func (o *Orchestrator) proposed(ctx context.Context, e *runEntry, p *plan.Plan) {
+	is := e.issue
+	if p == nil || o.d.Plans == nil {
+		o.failed(ctx, e, KindFailure, "plan_missing", "", nil)
+		return
+	}
+	if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.HandoffState); err != nil {
+		o.failed(ctx, e, KindFailure, "tracker_write_failed", err.Error(), nil)
+		return
+	}
+	o.d.Budget.ClearIssue(is.ID)
+	o.persist()
+	o.release(is.ID)
+	if err := o.d.Plans.Propose(ctx, is, p); err != nil {
+		o.d.Log.Warn("plan not posted", "issue", is.Identifier, "error", err)
+		o.comment(ctx, is, "The planning run finished, but its result could not be posted here. Move the card back to "+
+			o.cfg.Tracker.PlanningState+" to plan again.", "")
+		return
+	}
+	if len(p.Tasks) == 0 {
+		o.comment(ctx, is, "The planning agent has questions. They are in a comment below. Answer them, then move the card back to "+
+			o.cfg.Tracker.PlanningState+".", "")
+		return
+	}
+	o.comment(ctx, is, fmt.Sprintf("A plan with %d task(s) is in a comment below. Move the card to %s to approve it, or comment and move it back to %s.",
+		len(p.Tasks), o.cfg.Tracker.PlannedState, o.cfg.Tracker.PlanningState), "")
+}
+
+// watchPlans turns approved plans into tasks. An idea is approved by the
+// owner moving its card to the planned state; the service never does that.
+func (o *Orchestrator) watchPlans(ctx context.Context) {
+	if o.d.Plans == nil || o.cfg.Tracker.PlanningState == "" {
+		return
+	}
+	interval := time.Duration(o.cfg.Publish.ChecksPollIntervalMS) * time.Millisecond
+	if !o.plansAt.IsZero() && o.now().Sub(o.plansAt) < interval {
+		return
+	}
+	o.plansAt = o.now()
+	issues, err := o.d.Tracker.FetchIssuesByStates(ctx, []string{o.cfg.Tracker.PlannedState})
+	if err != nil {
+		o.d.Log.Warn("approved plans could not be read, will retry", "error", err)
+		return
+	}
+	seen := map[string]bool{}
+	for _, is := range issues {
+		// Only ideas the owner wrote, routed to this worker.
+		if !o.routable(is) || o.claimed[is.ID] {
+			continue
+		}
+		seen[is.ID] = true
+		summary, err := o.d.Plans.Materialize(ctx, is)
+		note := ""
+		switch {
+		case errors.Is(err, plan.ErrNoPlan):
+			note = "This card is in " + o.cfg.Tracker.PlannedState + ", but this machine has no plan for it that you have seen. Move it to " +
+				o.cfg.Tracker.PlanningState + " to have it planned."
+		case errors.Is(err, plan.ErrStale):
+			note = "The idea was edited after its plan was proposed, so the plan is not used. Move the card to " +
+				o.cfg.Tracker.PlanningState + " to plan the new text."
+		case err != nil:
+			o.d.Log.Warn("tasks of an approved plan not created yet, will retry", "issue", is.Identifier, "error", err)
+			note = "The tasks of the approved plan could not all be created yet. The service keeps trying. Last error: `" +
+				safeCategory(tracker.CategoryOf(err)) + "`."
+		case summary != "":
+			delete(o.planNoted, is.ID)
+			o.comment(ctx, is, summary, "")
+			continue
+		default:
+			continue
+		}
+		if !o.planNoted[is.ID] {
+			o.planNoted[is.ID] = true
+			o.comment(ctx, is, note, "")
+		}
+	}
+	for id := range o.planNoted {
+		if !seen[id] {
+			delete(o.planNoted, id)
+		}
+	}
 }
 
 // ---- checks gate ----------------------------------------------------------

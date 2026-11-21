@@ -6,6 +6,7 @@ import (
 
 	"github.com/iandeherdt/Symphony-beads/internal/budget"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Symphony-beads/internal/plan"
 )
 
 // Phase of a run attempt (SPEC 7.2).
@@ -70,6 +71,8 @@ const (
 	Quota
 	// NotLoggedIn: the agent has no valid login. Pauses dispatch.
 	NotLoggedIn
+	// Planned: a planning run ended with questions or a plan (SPEC 22).
+	Planned
 )
 
 // Outcome is reported exactly once per attempt.
@@ -81,6 +84,8 @@ type Outcome struct {
 	Publish  *PublishRecord
 	// QuotaResetAt is the reset time the CLI reported, if it did.
 	QuotaResetAt time.Time
+	// Plan is set for the outcome Planned. Its text is untrusted.
+	Plan *plan.Plan
 }
 
 // PublishRecord describes pushed work that is waiting for its checks.
@@ -102,6 +107,8 @@ type Attempt struct {
 	Number    int
 	RetryKind string
 	Feedback  []issue.Feedback
+	// Planning is true for an idea: the run plans and changes nothing.
+	Planning bool
 }
 
 // Sink receives updates from one attempt. Both methods may be called from
@@ -133,6 +140,16 @@ type Workspaces interface {
 // a restart (SPEC 17.3). It returns nil when it was not.
 type Prober interface {
 	Probe(ctx context.Context, is issue.Issue) (*PublishRecord, error)
+}
+
+// Plans is the planning stage as the orchestrator sees it (SPEC 22).
+type Plans interface {
+	// Propose shows the result of a planning run to the owner.
+	Propose(ctx context.Context, is issue.Issue, p *plan.Plan) error
+	// Materialize creates the tasks of the plan the owner approved. It
+	// continues where an earlier call stopped. The summary is non-empty
+	// once, when the last task is in place.
+	Materialize(ctx context.Context, is issue.Issue) (summary string, err error)
 }
 
 // Clock is the time source.

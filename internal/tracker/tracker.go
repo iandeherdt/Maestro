@@ -69,6 +69,39 @@ type Tracker interface {
 	FetchFeedback(ctx context.Context, is issue.Issue, since time.Time) ([]Feedback, error)
 }
 
+// Task is one piece of work from an approved plan (SPEC 22).
+type Task struct {
+	Title  string
+	Body   string
+	Worker string
+}
+
+// TaskRef identifies a task the service created on the board.
+type TaskRef struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier"`
+	// NativeID is the provider's own numeric ID, where it has one.
+	NativeID int64 `json:"native_id,omitempty"`
+}
+
+// Planner is implemented by adapters that support the planning stage:
+// talking to the owner on a ticket, and turning an approved plan into
+// tickets of its own. Every write except CreateTask is idempotent.
+type Planner interface {
+	// Workers lists the machines a ticket can be routed to.
+	Workers(ctx context.Context) ([]string, error)
+	// PostComment adds a new comment to the ticket. The body is built by
+	// the service; untrusted parts are fenced by the caller.
+	PostComment(ctx context.Context, is issue.Issue, body string) error
+	// CreateTask creates a ticket. It is not on the board yet.
+	CreateTask(ctx context.Context, t Task) (TaskRef, error)
+	// PlaceTask puts the ticket on the board, routed to a worker and in
+	// the given state, and records it as a part of the parent.
+	PlaceTask(ctx context.Context, parent issue.Issue, ref TaskRef, worker, state string) error
+	// AddBlocker records that task cannot start before blocker is done.
+	AddBlocker(ctx context.Context, task, blocker TaskRef) error
+}
+
 // MaxUntrustedChars caps text from the agent or a tool inside a comment.
 const MaxUntrustedChars = 2000
 
@@ -76,12 +109,17 @@ const MaxUntrustedChars = 2000
 // it is length-capped, stripped of control characters, has mentions, issue
 // references and markup openers broken with a zero-width space, and is put
 // in a fenced block that the text itself cannot close.
-func Fence(text string) string {
+func Fence(text string) string { return FenceMax(text, MaxUntrustedChars) }
+
+// Neutral returns text with control characters removed and mentions, issue
+// references and markup openers broken, capped at limit characters. It is
+// for agent text that becomes the title or the body of a ticket.
+func Neutral(text string, limit int) string {
 	const zwsp = "​"
 	var b strings.Builder
 	n := 0
 	for _, r := range text {
-		if n >= MaxUntrustedChars {
+		if n >= limit {
 			b.WriteString("…")
 			break
 		}
@@ -98,7 +136,13 @@ func Fence(text string) string {
 			b.WriteRune(r)
 		}
 	}
-	body := b.String()
+	return b.String()
+}
+
+// FenceMax is Fence with another length cap, for a plan the owner has to
+// be able to read in full.
+func FenceMax(text string, limit int) string {
+	body := Neutral(text, limit)
 	longest, run := 0, 0
 	for _, r := range body {
 		if r == '`' {

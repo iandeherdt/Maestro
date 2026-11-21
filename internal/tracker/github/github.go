@@ -507,7 +507,10 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue, on *card) (issue.Is
 	a.numbers[gi.NodeID] = gi.Number
 	a.mu.Unlock()
 
-	if gi.State == "closed" || is.State == NoState || !a.authors[norm(gi.User.Login)] {
+	// The service's own account writes issues only from a plan the owner
+	// approved (planner.go), so its tickets count as written by the owner.
+	trusted := a.authors[norm(gi.User.Login)] || norm(gi.User.Login) == a.bot
+	if gi.State == "closed" || is.State == NoState || !trusted {
 		return is, nil // Dispatchable stays false; no further requests are spent
 	}
 	approved, blockers, err := a.derived(ctx, gi, is)

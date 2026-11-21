@@ -36,6 +36,7 @@ type fakeIssue struct {
 	events   []ghEvent
 	comments []ghComment
 	blockers []int
+	children []int
 	updated  int
 	isPR     bool
 	nodeID   string
@@ -169,6 +170,16 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		return
 	}
+	if len(parts) == 1 && r.Method == http.MethodPost { // create
+		var in map[string]string
+		json.NewDecoder(r.Body).Decode(&in)
+		n := 100 + len(h.issues)
+		fi := &fakeIssue{number: n, title: in["title"], body: in["body"], author: bot, state: "open", nodeID: fmt.Sprintf("I_node%d", n)}
+		h.issues[n] = fi
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"id": 5000 + n, "node_id": fi.nodeID, "number": n})
+		return
+	}
 	if len(parts) == 1 { // list
 		want := strings.ToLower(r.URL.Query().Get("labels"))
 		var nums []int
@@ -228,6 +239,38 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 			items = append(items, e)
 		}
 		h.page(w, r, items)
+	case parts[2] == "sub_issues" && r.Method == http.MethodPost:
+		var in map[string]int
+		json.NewDecoder(r.Body).Decode(&in)
+		child := in["sub_issue_id"] - 5000
+		if h.issues[child] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		for _, c := range fi.children {
+			if c == child {
+				w.WriteHeader(422)
+				return
+			}
+		}
+		fi.children = append(fi.children, child)
+		w.WriteHeader(201)
+	case parts[2] == "dependencies" && r.Method == http.MethodPost:
+		var in map[string]int
+		json.NewDecoder(r.Body).Decode(&in)
+		blocker := in["issue_id"] - 5000
+		if h.noDeps || h.issues[blocker] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		for _, b := range fi.blockers {
+			if b == blocker {
+				w.WriteHeader(422)
+				return
+			}
+		}
+		fi.blockers = append(fi.blockers, blocker)
+		w.WriteHeader(201)
 	case parts[2] == "dependencies":
 		if h.noDeps {
 			w.WriteHeader(404)

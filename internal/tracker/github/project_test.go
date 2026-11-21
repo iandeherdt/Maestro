@@ -35,11 +35,14 @@ type fakeBoard struct {
 	listStatus map[int]string
 	moves      int
 	automation []string
+	workers    []string
+	noWorkers  bool
 }
 
 func newBoardHub(t *testing.T) *hub {
 	h := newHub(t)
 	h.board = &fakeBoard{number: 7, cards: map[int]*fakeCard{}, errors: map[string]string{}, listStatus: map[int]string{},
+		workers: []string{"linux", "Mac"},
 		columns: []string{"Backlog", "Todo", "In Progress", "Human Review", "Rework", "Blocked", "Done"}}
 	return h
 }
@@ -109,6 +112,17 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 		h.requests = append(h.requests, "MOVE")
 		n, _ := strconv.Atoi(strings.TrimPrefix(str("item"), "PVTI_"))
 		c := b.cards[n]
+		if c != nil && str("project") == "PVT_board" && str("field") == "F_worker" {
+			for _, name := range b.workers {
+				if optionID(name) == str("option") {
+					c.worker = name
+					answer(map[string]any{"updateProjectV2ItemFieldValue": map[string]any{"projectV2Item": map[string]string{"id": str("item")}}})
+					return
+				}
+			}
+			fail("UNPROCESSABLE")
+			return
+		}
 		if c == nil || str("project") != "PVT_board" || str("field") != "F_status" {
 			fail("NOT_FOUND")
 			return
@@ -122,6 +136,17 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		fail("UNPROCESSABLE")
+	case strings.Contains(in.Query, "addProjectV2ItemById"):
+		h.requests = append(h.requests, "ADD")
+		n, _ := strconv.Atoi(strings.TrimPrefix(str("content"), "I_node"))
+		if h.issues[n] == nil || str("project") != "PVT_board" {
+			fail("NOT_FOUND")
+			return
+		}
+		if b.cards[n] == nil {
+			b.cards[n] = &fakeCard{}
+		}
+		answer(map[string]any{"addProjectV2ItemById": map[string]any{"item": map[string]string{"id": fmt.Sprintf("PVTI_%d", n)}}})
 	case strings.Contains(in.Query, "issue(number:"):
 		h.requests = append(h.requests, "ISSUE")
 		fi := h.issues[num("n")]
@@ -203,7 +228,16 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 		if str("status") == "Status" {
 			field = map[string]any{"__typename": "ProjectV2SingleSelectField", "id": "F_status", "options": opts}
 		}
-		answer(wrap(map[string]any{"id": "PVT_board", "closed": b.closed, "field": field, "workflows": map[string]any{"nodes": flows}}))
+		var workerField any
+		if !b.noWorkers {
+			var names []any
+			for _, name := range b.workers {
+				names = append(names, map[string]string{"id": optionID(name), "name": name})
+			}
+			workerField = map[string]any{"__typename": "ProjectV2SingleSelectField", "id": "F_worker", "options": names}
+		}
+		answer(wrap(map[string]any{"id": "PVT_board", "closed": b.closed, "field": field, "workerField": workerField,
+			"workflows": map[string]any{"nodes": flows}}))
 	default:
 		w.WriteHeader(400)
 	}
