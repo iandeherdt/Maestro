@@ -1,0 +1,24 @@
+# The same checks the Symphony service runs before it pushes, plus the
+# package audit, which needs the network. Make this check required in the
+# branch protection of the main branch.
+name: conventions-typescript
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  conventions-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: pnpm, when the project uses it
+        run: if [ -f pnpm-lock.yaml ]; then npm install --global pnpm@10; fi
+      - name: Packages, and no known vulnerabilities in them
+        run: sh conventions/typescript/prepare.sh --audit
+      - name: Format, lint, types, tests, coverage
+        run: sh conventions/typescript/verify.sh

@@ -1,0 +1,83 @@
+{
+  "name": "dotnet",
+  "title": ".NET (C#)",
+  "applies": "A repository with one solution file (.sln or .slnx) in its root that contains every project, test projects included.",
+  "rules": [
+    {
+      "id": "format",
+      "rule": "Code is formatted and styled as .editorconfig says: file-scoped namespaces, braces, sorted usings, accessibility modifiers.",
+      "enforced_by": ["dotnet format --verify-no-changes", ".editorconfig"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "analyzers",
+      "rule": "The build has no warnings. Every warning of the compiler, the .NET analyzers and SonarAnalyzer.CSharp is an error, nullable reference types are on, and unused usings and unused private members are not allowed.",
+      "enforced_by": ["TreatWarningsAsErrors", "Roslyn .NET analyzers (latest-recommended)", "SonarAnalyzer.CSharp"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "security",
+      "rule": "No insecure code patterns: every rule in the Security category of the .NET analyzers and the security rules of SonarAnalyzer.CSharp fail the build.",
+      "enforced_by": ["Roslyn security rules (CA2xxx, CA3xxx, CA5xxx)", "SonarAnalyzer.CSharp"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "size",
+      "rule": "A file has at most 400 lines of code, a method at most 60 lines, and a method's cognitive complexity is at most 15.",
+      "enforced_by": ["SonarAnalyzer.CSharp S104, S138, S3776", "conventions/dotnet/SonarLint.xml"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "tests",
+      "rule": "All tests pass, and the solution has at least one test project.",
+      "enforced_by": ["dotnet test", "conventions/dotnet/verify.sh"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "coverage",
+      "rule": "The tests of every test project cover at least 80% of the lines.",
+      "enforced_by": ["coverlet.msbuild with a threshold"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "packages",
+      "rule": "No package, direct or transitive, has a known vulnerability.",
+      "enforced_by": ["NuGet audit (NuGetAuditMode all) as an error at restore"],
+      "where": ["ci"]
+    },
+    {
+      "id": "secrets",
+      "rule": "No credentials in the change.",
+      "enforced_by": ["the secret scan of the Symphony service"],
+      "where": ["service"]
+    },
+    {
+      "id": "rules-stay",
+      "rule": "The agent cannot change these rules, the scripts that check them, or the CI workflows.",
+      "enforced_by": ["the diff policy of the Symphony service (protected paths)"],
+      "where": ["service"]
+    }
+  ],
+  "protect": [
+    "conventions/**",
+    ".editorconfig",
+    "Directory.Build.props",
+    "Directory.Build.targets",
+    "Directory.Packages.props",
+    "global.json",
+    "NuGet.Config",
+    ".globalconfig",
+    "*.ruleset"
+  ],
+  "hosts": ["api.nuget.org"],
+  "prepare": "sh conventions/dotnet/prepare.sh",
+  "verify": "sh conventions/dotnet/verify.sh",
+  "check": "conventions-dotnet",
+  "gitignore": ["bin/", "obj/", "TestResults/", "*.user"],
+  "image": [
+    "COPY --from=mcr.microsoft.com/dotnet/sdk:10.0 /usr/share/dotnet /usr/share/dotnet",
+    "RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \\\n && apt-get update \\\n && apt-get install -y --no-install-recommends libicu72 \\\n && rm -rf /var/lib/apt/lists/*"
+  ],
+  "image_note": "the .NET SDK 10",
+  "after_apply": []
+}

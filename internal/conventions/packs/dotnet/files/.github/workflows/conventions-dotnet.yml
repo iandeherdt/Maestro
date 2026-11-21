@@ -1,0 +1,22 @@
+# The same checks the Symphony service runs before it pushes, plus the
+# package audit, which needs the network. Make this check required in the
+# branch protection of the main branch.
+name: conventions-dotnet
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  conventions-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Packages, and no known vulnerabilities in them
+        run: sh conventions/dotnet/prepare.sh --audit
+      - name: Format, analyzers, tests, coverage
+        run: sh conventions/dotnet/verify.sh

@@ -312,7 +312,7 @@ Markdown with OPTIONAL YAML front matter, parsed exactly as upstream Section 5.2
 ### 5.3 Front Matter Schema
 
 Top-level keys: `tracker`, `polling`, `workspace`, `hooks`, `agent`, `claude`, `sandbox`, `verify`,
-`publish`, `policy`, `budget`, `worker`, `server`.
+`publish`, `policy`, `budget`, `worker`, `server`, and the list `conventions` (Section 23).
 
 Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sandbox`, `publish`
 and `policy` MUST fail validation, because a typo there can silently disable a control.
@@ -2629,6 +2629,79 @@ with `addProjectV2ItemById` and its Worker and Status fields are set, Status las
 
 Not implemented yet: planning with `state_source: labels`, and a way to take over an idea on
 another machine than the one that planned it.
+
+## 23. Conventions
+
+Purpose: conventions of a project that hold because a tool checks them, not because a prompt asks
+for them. Not part of upstream.
+
+### 23.1 Rule packs
+
+A rule pack is the set of conventions for one kind of project. Packs are part of the binary
+(`internal/conventions/packs`). The packs are `dotnet` and `typescript`. A pack consists of:
+
+- Rules. Every rule states what holds, names at least one tool that enforces it, and says where
+  it is checked. A rule without a tool MUST NOT be in a pack; the tests refuse it.
+- Files for the repository: the configuration of the tools, `conventions/<pack>/prepare.sh`
+  (installs dependencies, the only script that needs the network), `conventions/<pack>/verify.sh`
+  (every check that needs no network), a CI workflow that runs both, and
+  `conventions/<pack>/RULES.md`, generated from the rules, for people and for the agent.
+- Protected paths, hosts that `prepare.sh` reaches, and Dockerfile lines that add the pack's
+  tools to the sandbox image.
+
+### 23.2 Where a rule is enforced
+
+1. Verify gate (Section 14). The service runs the pack's `verify.sh` before it publishes. A
+   failure goes back to the agent as feedback like any verify failure.
+2. CI. The pack's workflow runs `prepare.sh --audit` and the same `verify.sh` on every pull
+   request. The audit of dependencies for known vulnerabilities needs the network and therefore
+   runs here only. The owner makes the check required on the base branch (Section 15.7).
+3. Diff policy (Section 15.3). The pack's protected paths are added to D1, so a change that
+   weakens a rule file, a script or a threshold is refused before the push. CI workflows are
+   protected by the built-in list. A test asserts that no file of a pack can be changed by the
+   agent.
+
+Commit hooks are not used for enforcement: the agent commits inside its sandbox and could skip or
+remove them.
+
+### 23.3 Configuration
+
+`conventions: [<pack>, ...]` in the front matter switches packs on. Unknown names are a
+configuration error. For every pack, in the listed order, the configuration is extended, never
+reduced:
+
+- `policy.deny_paths` gets the pack's protected paths.
+- `sandbox.network.allow_hooks` gets the pack's hosts.
+- `hooks.before_run` runs the pack's `prepare.sh` before the file's own hook. With a pack,
+  `hooks.timeout_ms` defaults to 900000.
+- `verify.command` runs the pack's `verify.sh` before the file's own command. With a pack, the
+  file's own command MAY be absent, and the placeholder `true` is dropped.
+
+Each script is preceded by a check that the pack's files are in the repository, so that a pack
+that is switched on but not applied fails with an explanation.
+
+`symphony image` appends the Dockerfile lines of the packs that are switched on.
+
+### 23.4 Commands
+
+- `symphony conventions` lists the packs, `show <pack>` prints the rules with their tools.
+- `symphony conventions apply <pack> [--to DIR] [--replace]` writes the pack's files into a
+  checkout. A file that exists with other content is a conflict: nothing is written unless
+  `--replace` is given. Nothing is written through a symbolic link. The owner commits and pushes;
+  the service's App cannot, because it has no right to change workflows.
+- `symphony conventions enable|disable <pack> [--file PATH]` edits the one line in the settings
+  file. The changed file is validated with the startup code before it replaces the old one.
+
+### 23.5 Limits
+
+- The agent's own network profile does not include package registries, so an agent cannot add a
+  dependency that is not already in the lockfile or restored by `prepare.sh`. A ticket that needs
+  a new dependency fails in verify until the owner adds it. Open: a controlled way to do this.
+- One solution (`dotnet`) or one `package.json` (`typescript`) in the root. Monorepos are not
+  covered.
+- `typescript` measures coverage with vitest only.
+- Static analysis services that need an account (SonarQube server, code scanning) are not part
+  of a pack.
 
 ## Appendix A. Linux Worker Deployment
 

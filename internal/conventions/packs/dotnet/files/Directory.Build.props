@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    Conventions of this repository, enforced by the build. Written by
+    `symphony conventions apply dotnet`. The agent may not change this file;
+    change it by hand when a rule has to change.
+  -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Needed for the unused-using rule to run in the build. Missing XML comments are not an error. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- Known vulnerabilities in packages, direct or transitive, fail the restore. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.37.0.15768" PrivateAssets="all" />
+    <!-- Measures coverage when tests run. It is referenced everywhere so that no test project can be left out. -->
+    <PackageReference Include="coverlet.msbuild" Version="10.1.1" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)conventions/dotnet/SonarLint.xml" Link="SonarLint.xml" />
+  </ItemGroup>
+</Project>
