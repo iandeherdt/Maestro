@@ -190,9 +190,9 @@ Last updated 2026-11-21.
 | GitHub board with labels | Done, run once against a real repository |
 | Diff policy and secret scan | Done |
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
-| GitHub App tokens | Done, not yet tried against github.com |
+| GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
-| Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), not yet tried against github.com |
+| Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), run once on a Mac against github.com |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Running the service: `symphony run`, `status`, `pause`, `doctor` | Not started |

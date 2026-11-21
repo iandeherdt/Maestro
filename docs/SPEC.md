@@ -289,6 +289,8 @@ Path precedence:
 
 1. Positional CLI argument.
 2. `WORKFLOW.md` in the process working directory.
+3. `WORKFLOW.md` in the guided setup's directory (`symphony/` under the user's configuration
+   directory), if the file in step 2 does not exist.
 
 Rules:
 
@@ -1854,9 +1856,10 @@ Steps:
    wizard has shown what it will write. (not built)
 7. Self-test: `symphony doctor`. (not built)
 
-To verify on the first real run: that GitHub accepts a loopback `redirect_url` in a manifest, that
-a manifest without `hook_attributes` creates an App with the webhook off, and that the code
-exchange needs no authentication.
+Steps 1 to 5 ran on a Mac against github.com on 2026-11-21 and completed: GitHub accepted the
+loopback `redirect_url`, the code exchange needed no authentication, a repository-limited token
+was issued, and the missing labels were created. Still to verify by looking at the App's settings
+page: that a manifest without `hook_attributes` leaves the webhook off.
 
 ## 17. Failure Model and Recovery
 
