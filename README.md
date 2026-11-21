@@ -15,8 +15,8 @@ prompt construction with a strict template engine, the workspace manager, which 
 sandbox launcher through a narrow request format, live reload of the workflow file, the service
 log format, the loopback status API, the attempt loop that takes an issue from prompt to
 pull request through the gates, the GitHub adapter in label mode (run once against a real
-repository), the diff policy with the secret scan, and the import of the agent's commits into
-the service's own mirror.
+repository), the diff policy with the secret scan, the import of the agent's commits into
+the service's own mirror, and the minting of short-lived GitHub App tokens.
 The service does not run anything yet: there is no sandbox, agent runner or publisher.
 
 ```sh
