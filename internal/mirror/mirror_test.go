@@ -584,6 +584,9 @@ func TestSync(t *testing.T) {
 	if got := l.run(fresh.Dir, "rev-parse", "refs/heads/main"); got != l.base {
 		t.Fatalf("main at %s", got)
 	}
+	if !fresh.HasBranch(ctx, "main") || fresh.HasBranch(ctx, "develop") || fresh.HasBranch(ctx, "--all") {
+		t.Fatal("HasBranch is wrong about main, develop or an option")
+	}
 	cfg, _ := os.ReadFile(filepath.Join(fresh.Dir, "config"))
 	if strings.Contains(string(cfg), "tok") || strings.Contains(string(cfg), "remote") {
 		t.Fatalf("the mirror's configuration holds the remote or the token:\n%s", cfg)

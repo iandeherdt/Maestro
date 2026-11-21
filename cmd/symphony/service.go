@@ -457,6 +457,11 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if err := syncMirror(ctx); err != nil {
 		return explain("the repository %s could not be fetched: %v", cfg.Workspace.Repo, err)
 	}
+	if !mir.HasBranch(ctx, base) {
+		return explain("%s has no branch %q yet. An empty repository gives the agent nothing to start from.\n"+
+			"Add a first commit on github.com (the \"Add a README\" button does it), then run `symphony run` again.",
+			cfg.Workspace.Repo, base)
+	}
 
 	trk, err := github.New(cfg, github.Options{Token: tickets.Token, Log: log})
 	if err != nil {

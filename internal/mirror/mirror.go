@@ -581,3 +581,12 @@ func (m *Mirror) Sync(ctx context.Context, remoteURL, token string) error {
 	}
 	return nil
 }
+
+// HasBranch reports whether the mirror has a branch of that name.
+func (m *Mirror) HasBranch(ctx context.Context, name string) bool {
+	if !ValidBranch(name) {
+		return false
+	}
+	_, err := m.git(ctx, nil, 0, "rev-parse", "--verify", "--quiet", "refs/heads/"+name+"^{commit}")
+	return err == nil
+}
