@@ -88,14 +88,16 @@ query($owner: String!, $repo: String!) {
   organization(login: $owner) { projectsV2(first: 50) { nodes { number title closed } } }
 }`
 
+// The fields are listed and picked by name here: asking GitHub for a field
+// by a name the board does not have is answered with an error for the
+// whole request, not with an empty value.
 const boardStateQuery = `
-query($owner: String!, $number: Int!, $status: String!, $worker: String!) {
+query($owner: String!, $number: Int!) {
   organization(login: $owner) {
     projectV2(number: $number) {
       id title closed
       items(first: 1) { totalCount }
-      status: field(name: $status) { __typename ... on ProjectV2SingleSelectField { id options { name color description } } }
-      worker: field(name: $worker) { __typename ... on ProjectV2SingleSelectField { id options { name color description } } }
+      fields(first: 100) { nodes { __typename ... on ProjectV2FieldCommon { id name } ... on ProjectV2SingleSelectField { options { name color description } } } }
     }
   }
 }`
@@ -124,6 +126,7 @@ type option struct {
 type selectField struct {
 	Typename string   `json:"__typename"`
 	ID       string   `json:"id"`
+	Name     string   `json:"name"`
 	Options  []option `json:"options"`
 }
 
@@ -150,8 +153,25 @@ type boardState struct {
 	Items  struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"items"`
-	Status *selectField `json:"status"`
-	Worker *selectField `json:"worker"`
+	Fields struct {
+		Nodes []selectField `json:"nodes"`
+	} `json:"fields"`
+	// Status and Worker are picked from Fields by name; nil when absent.
+	Status *selectField `json:"-"`
+	Worker *selectField `json:"-"`
+}
+
+// pick finds the fields the service uses, whatever their type.
+func (b *boardState) pick() {
+	for i := range b.Fields.Nodes {
+		f := &b.Fields.Nodes[i]
+		switch {
+		case b.Status == nil && strings.EqualFold(f.Name, statusField):
+			b.Status = f
+		case b.Worker == nil && strings.EqualFold(f.Name, workerField):
+			b.Worker = f
+		}
+	}
 }
 
 // missingColumns are the columns the board still lacks.
@@ -257,13 +277,14 @@ func (b *Board) read(ctx context.Context, st *State) (*boardState, error) {
 			ProjectV2 *boardState `json:"projectV2"`
 		} `json:"organization"`
 	}
-	err := b.graphql(ctx, st, boardStateQuery, map[string]any{"owner": m[1], "number": st.Board, "status": statusField, "worker": workerField}, &out)
+	err := b.graphql(ctx, st, boardStateQuery, map[string]any{"owner": m[1], "number": st.Board}, &out)
 	if err != nil {
 		return nil, err
 	}
 	if out.Organization == nil || out.Organization.ProjectV2 == nil || out.Organization.ProjectV2.ID == "" {
 		return nil, nil
 	}
+	out.Organization.ProjectV2.pick()
 	return out.Organization.ProjectV2, nil
 }
 
@@ -441,9 +462,18 @@ func (b *Board) choose(ctx context.Context, ui *UI, st *State, owner, repo strin
 		if err == nil {
 			err = errors.New("GitHub did not say which board it created")
 		}
-		return fmt.Errorf("the board could not be created: %w.\n"+
-			"  You can create it by hand instead: open %s/orgs/%s/projects, press New project, pick Board, name it %s.\n"+
-			"  Then run setup again and choose it from the list", err, b.GitHub.web(), owner, boardTitle)
+		// GitHub lets a person create a board in an organization, but
+		// refuses it to an App. So the operator makes an empty one and
+		// setup fills it in.
+		ui.Say("  GitHub did not let the App create the board (%s). That is normal: only a person can.", oneLine(err.Error()))
+		ui.Say("  Please create an empty one yourself, it takes a minute:")
+		ui.Say("    1. Open %s/orgs/%s/projects", b.GitHub.web(), owner)
+		ui.Say("    2. Press New project, pick Board, name it %s and create it.", boardTitle)
+		ui.Say("    3. Leave it empty. Setup adds the columns.")
+		if _, err := ui.Ask("  Press Enter here when the board exists", "", func(string) error { return nil }); err != nil {
+			return err
+		}
+		return b.choose(ctx, ui, st, owner, repo)
 	}
 	st.Board = created.CreateProjectV2.ProjectV2.Number
 	return nil

@@ -102,8 +102,10 @@ What the setup does:
    cannot merge.
 3. **Installs the App on one repository** of your choice and confirms that it can obtain a token
    for it.
-4. **Creates the board**, for a repository in an organization: it asks what this machine is
-   called and what your GitHub user name is, then creates a board named Symphony with the columns
+4. **Sets up the board**, for a repository in an organization: it asks what this machine is
+   called and what your GitHub user name is. GitHub lets only a person create a board, so setup
+   asks you to make an empty one (open the organization's Projects page, press New project, pick
+   Board, name it Symphony) and waits. Then it gives the board the columns
    Backlog, Idea, Planned, Todo, In Progress, Human Review, Rework, Blocked and Done, and a field named Worker
    that says which machine takes a card. If the organization already has a board you can pick
    that one. For a repository on a personal account this step creates the labels instead.
@@ -287,7 +289,7 @@ Last updated 2026-11-21.
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
-| Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels; the organization and board path has not been run against github.com yet. |
+| Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. On an organization, creating the App and installing it worked against github.com; setting up the columns of the board has not been confirmed there yet. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |

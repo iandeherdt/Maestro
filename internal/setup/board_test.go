@@ -60,11 +60,11 @@ func (g *github) graphql(w http.ResponseWriter, r *http.Request) {
 		}
 		return opts
 	}
-	field := func(opts []option, id, kind string) any {
+	field := func(name string, opts []option, id, kind string) any {
 		if kind == "" {
 			kind = "ProjectV2SingleSelectField"
 		}
-		return map[string]any{"__typename": kind, "id": id, "options": opts}
+		return map[string]any{"__typename": kind, "id": id, "name": name, "options": opts}
 	}
 	if g.gqlRefuse != "" && strings.Contains(in.Query, g.gqlRefuse) {
 		fail("Resource not accessible\x1b[31m by integration")
@@ -113,12 +113,14 @@ func (g *github) graphql(w http.ResponseWriter, r *http.Request) {
 		var project any
 		for _, b := range g.boards {
 			if b.number == int(n) {
-				m := map[string]any{"id": "PVT_" + b.title, "title": b.title, "closed": b.closed, "worker": nil,
-					"items": map[string]int{"totalCount": b.items}, "status": field(b.status, "F_status_"+b.title, "")}
+				// As on github.com: the fields are listed, with others between them.
+				fields := []any{map[string]any{"__typename": "ProjectV2Field", "id": "F_title", "name": "Title"},
+					field("Status", b.status, "F_status_"+b.title, "")}
 				if b.hasWorker {
-					m["worker"] = field(b.worker, "F_worker_"+b.title, b.workerKind)
+					fields = append(fields, field("Worker", b.worker, "F_worker_"+b.title, b.workerKind))
 				}
-				project = m
+				project = map[string]any{"id": "PVT_" + b.title, "title": b.title, "closed": b.closed,
+					"items": map[string]int{"totalCount": b.items}, "fields": map[string]any{"nodes": fields}}
 			}
 		}
 		answer(map[string]any{"organization": map[string]any{"projectV2": project}})
@@ -263,12 +265,24 @@ func TestBoardStepExplainsRefusals(t *testing.T) {
 	}
 
 	g.gqlRefuse = "createProjectV2("
-	u, _ = ui("\nian\ny\n")
+	// GitHub refuses an App that creates a board. Setup says how to make
+	// one by hand, waits, and then uses it.
+	u, out := ui("\nian\ny\n")
 	err := step.Run(ctx, u, st)
-	if err == nil || !strings.Contains(err.Error(), "create it by hand") || !strings.Contains(err.Error(), "/orgs/ian/projects") ||
-		strings.Contains(err.Error(), "\x1b") || st.Board != 0 {
+	for _, want := range []string{"only a person can", "/orgs/ian/projects", "Press Enter here"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("a refused creation lacks %q:\n%s", want, out)
+		}
+	}
+	if !errors.Is(err, ErrAborted) || strings.Contains(out.String(), "\x1b") || st.Board != 0 {
 		t.Fatalf("a refused creation: %v", err)
 	}
+	g.boards = []*fakeBoard{{number: 6, title: "Symphony", status: []option{{"Todo", "GREEN", "x"}}}}
+	u, out = ui("\nian\n\ny\n\n6\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil || st.Board != 6 || names(g.boards[0].status) != allColumns {
+		t.Fatalf("after creating it by hand: board %d, %v\n%s", st.Board, err, out)
+	}
+	g.boards = nil
 
 	// An App from before boards has no right to them.
 	g.gqlRefuse, g.noBoards = "", true
