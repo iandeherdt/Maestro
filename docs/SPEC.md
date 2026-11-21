@@ -312,10 +312,11 @@ Markdown with OPTIONAL YAML front matter, parsed exactly as upstream Section 5.2
 ### 5.3 Front Matter Schema
 
 Top-level keys: `tracker`, `polling`, `workspace`, `hooks`, `agent`, `claude`, `sandbox`, `verify`,
-`publish`, `policy`, `budget`, `worker`, `server`, and the list `conventions` (Section 23).
+`screenshots`, `publish`, `policy`, `budget`, `worker`, `server`, and the list `conventions`
+(Section 23).
 
-Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sandbox`, `publish`
-and `policy` MUST fail validation, because a typo there can silently disable a control.
+Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sandbox`,
+`screenshots`, `publish` and `policy` MUST fail validation, because a typo there can silently disable a control.
 
 #### 5.3.1 `tracker` (object)
 
@@ -461,6 +462,20 @@ Replaces upstream `codex`.
 
 - `port` (integer, OPTIONAL): enables the HTTP extension (Section 16.5). The listener MUST bind
   loopback. There is no option to bind another address.
+
+#### 5.3.14 `screenshots` (object)
+
+See Section 24. Absent or empty: no screenshots.
+
+- `pages` (list of strings): at most 6. Each is a file in the repository, written as a clean
+  relative path, or an address that starts with `http://localhost` or `http://127.0.0.1`.
+  Anything else MUST fail validation.
+- `start` (shell script): started before the pages are opened and left running. Needs `pages`.
+- `command` (shell script): the operator's own way to take the pictures. Cannot be combined with
+  `pages`.
+- `timeout_ms` (integer): default `300000`.
+- `width`, `height` (integers): the browser window for `pages`. Default `1280` by `800`, at most
+  `4000`.
 
 ### 5.4 Prompt Template Contract
 
@@ -2733,6 +2748,86 @@ that is switched on but not applied fails with an explanation.
 - `typescript` measures coverage with vitest only.
 - Static analysis services that need an account (SonarQube server, code scanning) are not part
   of a pack.
+
+## 24. Screenshots
+
+A pull request for something a person looks at is easier to judge with a picture. The service
+takes the pictures itself. The agent is not asked for them and cannot supply them.
+
+### 24.1 Taking them
+
+After the verify command passed and left the tree clean, and before publishing, the service runs
+one more step in the sandbox, on exactly the commits that will be published. It runs like the
+verify step: as the sandbox user, without the agent's login, and always without network.
+
+- With `screenshots.pages`: the step starts `screenshots.start` if set, then opens each page in
+  the browser of the sandbox image, headless, in a window of `width` by `height`, and saves one
+  PNG per page. For an address it first waits, up to 90 seconds, until something answers there.
+- With `screenshots.command`: the step runs the command with `SCREENSHOT_DIR` set. Every `*.png`
+  file directly in that directory is a picture.
+
+The directory for the pictures is next to the repository in the workspace, so a picture is never
+committed. The step empties it first, because the agent can write there as well. Afterwards the
+service puts the repository back as it was exported (`git reset --hard`, `git clean -fd`) and
+removes the directory: what a build left behind does not turn up in a later commit.
+
+Screenshots never fail the work. When the step fails, runs too long or yields nothing, the pull
+request says so in the service's own words. The output of the step is not quoted.
+
+### 24.2 Taking them out of the sandbox
+
+No directory is shared with the sandbox for this. Each picture is read by a step of its own that
+prints the file name, the size and the content as base64. The service then:
+
+- takes at most 6 pictures, in the order of their names, each at most 700 KB;
+- reads the size from the PNG header first and refuses a picture wider or higher than 12000
+  pixels or with more than 24 million pixels, so a small file that claims to be huge is never
+  unpacked;
+- decodes the picture and encodes it again. What is stored holds pixels only: text chunks,
+  metadata and trailing data do not survive;
+- with `pages`, labels the picture with the page from the settings. With `command`, the label is
+  the file name reduced to letters, digits, space, dot, dash and underscore, at most 60
+  characters, and placed in inline code.
+
+What the pixels show comes from the agent's code. The pull request says that the pictures were
+taken by the service and that nobody has judged them.
+
+### 24.3 Storing and showing them
+
+GitHub offers an App no place for a picture other than the repository. The service keeps them on
+one branch, `<publish.branch_prefix>screenshots`, that holds nothing else. It is written through
+the Git data API with the repository token: one blob per picture, and one commit per publish that
+adds `<workspace_key>/<first 12 characters of the head commit>/<n>.png` to the tree of the
+branch's tip. The first commit has no parent. The branch is only ever moved forward, never forced;
+when another worker moved it first, the commit is built again on the new tip, at most three
+times.
+
+The pull request description gets a section "Screenshots" with each picture as an image whose
+address names that commit: `<web>/<owner>/<repo>/blob/<commit>/<path>?raw=true`. An address that
+names the commit keeps showing the same picture whatever is added later. For a private
+repository GitHub serves it to whoever may read the repository.
+
+When storing fails, the pull request is opened without pictures and says so.
+
+The branch grows with every publish. The owner may delete it at any time; pull requests that
+were opened before then lose their pictures after a while, and the next publish creates the
+branch again.
+
+### 24.4 The image
+
+`symphony image` adds a browser (Chromium) and fonts to the sandbox image when
+`screenshots.pages` is set. With `screenshots.command` the operator's image has to hold what the
+command needs.
+
+### 24.5 Limits
+
+- The browser runs inside the sandbox with its own sandboxing switched off, because the
+  container already drops all capabilities and that is what the browser's would need. A page can
+  therefore read the files of the sandbox it runs in. That sandbox holds the repository and
+  nothing of the service or the agent's login.
+- A page is shown as it looks about four seconds after loading, without scrolling.
+- Nothing can be shown that needs a host outside the sandbox: a web font from a CDN is missing
+  in the picture.
 
 ## Appendix A. Linux Worker Deployment
 

@@ -498,3 +498,35 @@ func TestConventionsAddToTheSettings(t *testing.T) {
 		t.Error("a pack name that is not a list was accepted")
 	}
 }
+
+func TestScreenshots(t *testing.T) {
+	if c := mustBuild(t, minimal); c.Screenshots.On() {
+		t.Fatalf("on without being asked for: %+v", c.Screenshots)
+	}
+	c := mustBuild(t, with("", "", "screenshots:\n  pages: [index.html, \"docs/a b.html\", \"http://localhost:3000/\", \"http://127.0.0.1:8080/x?y=1\"]\n  start: npm run start\n"))
+	if s := c.Screenshots; !s.On() || len(s.Pages) != 4 || s.Start != "npm run start" || s.Width != 1280 || s.Height != 800 || s.TimeoutMS != 300000 {
+		t.Fatalf("%+v", s)
+	}
+	if c := mustBuild(t, with("", "", "screenshots:\n  command: node shots.mjs\n  timeout_ms: 1000\n")); !c.Screenshots.On() || c.Screenshots.Command != "node shots.mjs" || c.Screenshots.TimeoutMS != 1000 {
+		t.Fatalf("%+v", c.Screenshots)
+	}
+	for name, block := range map[string]string{
+		"another machine":     "pages: [\"https://example.com/\"]",
+		"a name on the lan":   "pages: [\"http://nas.local/\"]",
+		"localhost lookalike": "pages: [\"http://localhost.example.com/\"]",
+		"a file address":      "pages: [\"file:///etc/passwd\"]",
+		"outside":             "pages: [\"../secret.html\"]",
+		"absolute":            "pages: [\"/etc/passwd\"]",
+		"an option":           "pages: [\"--remote-debugging-port=9222\"]",
+		"not clean":           "pages: [\"a/../../b.html\"]",
+		"too many":            "pages: [a, b, c, d, e, f, g]",
+		"both":                "pages: [a.html]\n  command: x",
+		"start alone":         "start: npm start",
+		"a typo":              "page: [a.html]",
+		"too wide":            "pages: [a.html]\n  width: 9000",
+	} {
+		if _, err := build(t, with("", "", "screenshots:\n  "+block+"\n"), nil); err == nil || !strings.Contains(err.Error(), "screenshots") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

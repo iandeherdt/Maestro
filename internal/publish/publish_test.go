@@ -36,7 +36,19 @@ type hub struct {
 	status   map[string]int
 	srv      *httptest.Server
 	badAuth  bool
+	// The branch with the screenshots: its tip, and how many times moving
+	// it is refused first.
+	shotTip string
+	refuse  int
 }
+
+const (
+	blobSHA   = "b10b000000000000000000000000000000000000"
+	treeSHA   = "74ee000000000000000000000000000000000000"
+	commitSHA = "c0aa000000000000000000000000000000000000"
+	oldTip    = "01d0000000000000000000000000000000000000"
+	oldTree   = "01d7000000000000000000000000000000000000"
+)
 
 func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
@@ -44,11 +56,13 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	key := r.Method + " " + r.URL.Path
 	h.requests = append(h.requests, key)
 	if r.Header.Get("Authorization") != "Bearer "+token {
+		h.bodies = append(h.bodies, nil)
 		h.badAuth = true
 		w.WriteHeader(401)
 		return
 	}
 	if code := h.status[key]; code != 0 {
+		h.bodies = append(h.bodies, nil)
 		w.WriteHeader(code)
 		io.WriteString(w, `{"message":"server detail"}`)
 		return
@@ -70,6 +84,31 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"number": 31})
 	case key == "PATCH /repos/ian/app/pulls/31":
 		json.NewEncoder(w).Encode(map[string]any{"number": 31})
+	case key == "POST /repos/ian/app/git/blobs":
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"sha": blobSHA})
+	case key == "GET /repos/ian/app/git/ref/heads/symphony/screenshots":
+		if h.shotTip == "" {
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"object": map[string]any{"sha": h.shotTip}})
+	case key == "GET /repos/ian/app/git/commits/"+oldTip:
+		json.NewEncoder(w).Encode(map[string]any{"tree": map[string]any{"sha": oldTree}})
+	case key == "POST /repos/ian/app/git/trees":
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"sha": treeSHA})
+	case key == "POST /repos/ian/app/git/commits":
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"sha": commitSHA})
+	case key == "POST /repos/ian/app/git/refs" || key == "PATCH /repos/ian/app/git/refs/heads/symphony/screenshots":
+		if h.refuse > 0 {
+			h.refuse--
+			w.WriteHeader(422)
+			return
+		}
+		h.shotTip = commitSHA
+		json.NewEncoder(w).Encode(map[string]any{})
 	default:
 		w.WriteHeader(404)
 	}
@@ -948,5 +987,100 @@ func TestALongCommentIsCut(t *testing.T) {
 	fs, err := p.Feedback(ctx, ticket)
 	if err != nil || len(fs) != 1 || !strings.HasSuffix(fs[0].Body, "[cut off here]") || len([]rune(fs[0].Body)) > maxNoteRunes+20 {
 		t.Fatalf("%d notes, %v", len(fs), err)
+	}
+}
+
+func (h *hub) sent(key string) []map[string]any {
+	var out []map[string]any
+	for i, r := range h.requests {
+		if r == key {
+			out = append(out, h.bodies[i])
+		}
+	}
+	return out
+}
+
+func TestScreenshotsAreStoredAndShown(t *testing.T) {
+	l := newLab(t)
+	l.pub.GitURL = "" // links go to github.com
+	head := l.change("index.html", "<h1>Hello</h1>\n")
+	v := worker.VerifyResult{Passed: true, ScreenshotNote: "Left out: \"c\" is not a PNG picture of a usable size.",
+		Screenshots: []worker.Screenshot{{Caption: "index.html", PNG: []byte("one")}, {Caption: "a `b` @ian", PNG: []byte("two")}}}
+	links, err := l.pub.storeFor(ctx, l.ws.Key, head, v.Screenshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://github.com/ian/app/blob/" + commitSHA + "/GH-7-abc/" + head[:12] + "/1.png?raw=true"
+	if len(links) != 2 || links[0].url != want || links[0].caption != "index.html" {
+		t.Fatalf("links %+v", links)
+	}
+	// A new branch: one commit without a parent, holding both pictures below the ticket and the commit.
+	tree := l.hub.sent("POST /repos/ian/app/git/trees")[0]
+	entries := tree["tree"].([]any)
+	if _, based := tree["base_tree"]; based || len(entries) != 2 || entries[1].(map[string]any)["path"] != "GH-7-abc/"+head[:12]+"/2.png" ||
+		entries[1].(map[string]any)["sha"] != blobSHA {
+		t.Fatalf("tree %v", tree)
+	}
+	if c := l.hub.sent("POST /repos/ian/app/git/commits")[0]; len(c["parents"].([]any)) != 0 || c["tree"] != treeSHA {
+		t.Fatalf("commit %v", c)
+	}
+	if r := l.hub.sent("POST /repos/ian/app/git/refs")[0]; r["ref"] != "refs/heads/symphony/screenshots" || r["sha"] != commitSHA {
+		t.Fatalf("ref %v", r)
+	}
+	if b := l.hub.sent("POST /repos/ian/app/git/blobs")[0]; b["content"] != "b25l" || b["encoding"] != "base64" {
+		t.Fatalf("blob %v", b)
+	}
+
+	// The branch exists: the commit is added to it, and it is never forced.
+	l.hub.shotTip, l.hub.refuse = oldTip, 1
+	if _, err := l.pub.storeFor(ctx, l.ws.Key, head, v.Screenshots); err != nil {
+		t.Fatal(err)
+	}
+	trees := l.hub.sent("POST /repos/ian/app/git/trees")
+	if trees[1]["base_tree"] != oldTree || len(trees) != 3 {
+		t.Fatalf("%d trees, base %v", len(trees), trees[1]["base_tree"])
+	}
+	moves := l.hub.sent("PATCH /repos/ian/app/git/refs/heads/symphony/screenshots")
+	if len(moves) != 2 || moves[1]["force"] != false || moves[1]["sha"] != commitSHA {
+		t.Fatalf("moves %v", moves)
+	}
+
+	// In the description.
+	text := body("", nil, Proof{Screenshots: []shotLink{{"index.html", want}, {"a `b` @ian", want}}, ScreenshotNote: v.ScreenshotNote}, "")
+	for _, part := range []string{"## Screenshots", "`index.html`\n\n![Screenshot 1](" + want + ")", "`a 'b' @\u200bian`", "Left out: \"c\""} {
+		if !strings.Contains(text, part) {
+			t.Errorf("the description lacks %q:\n%s", part, text)
+		}
+	}
+	if strings.Contains(body("", nil, Proof{}, ""), "Screenshots") {
+		t.Error("a section without screenshots")
+	}
+}
+
+func TestPublishGoesOnWithoutScreenshotsThatCannotBeStored(t *testing.T) {
+	l := newLab(t)
+	l.change("index.html", "<h1>Hello</h1>\n")
+	l.hub.status["POST /repos/ian/app/git/blobs"] = 403
+	v := worker.VerifyResult{Passed: true, Screenshots: []worker.Screenshot{{Caption: "index.html", PNG: []byte("one")}}}
+	rec, rej, err := l.pub.Publish(ctx, l.is, l.ws, v)
+	if err != nil || rej != nil || rec.PRNumber != 31 {
+		t.Fatalf("record %+v, rejection %+v, error %v", rec, rej, err)
+	}
+	text := l.hub.sent("POST /repos/ian/app/pulls")[0]["body"].(string)
+	if !strings.Contains(text, "## Screenshots\n\nThe screenshots were taken but could not be stored in the repository.") || strings.Contains(text, "![") {
+		t.Fatalf("description:\n%s", text)
+	}
+}
+
+func TestPublishShowsScreenshots(t *testing.T) {
+	l := newLab(t)
+	head := l.change("index.html", "<h1>Hello</h1>\n")
+	v := worker.VerifyResult{Passed: true, Screenshots: []worker.Screenshot{{Caption: "index.html", PNG: []byte("one")}}}
+	if _, rej, err := l.pub.Publish(ctx, l.is, l.ws, v); err != nil || rej != nil {
+		t.Fatalf("rejection %+v, error %v", rej, err)
+	}
+	text := l.hub.sent("POST /repos/ian/app/pulls")[0]["body"].(string)
+	if !strings.Contains(text, "/ian/app/blob/"+commitSHA+"/GH-7-abc/"+head[:12]+"/1.png?raw=true)") {
+		t.Fatalf("description:\n%s", text)
 	}
 }

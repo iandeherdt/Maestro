@@ -195,6 +195,47 @@ Only comments by you and the other people in `tracker.allowed_commenters` count.
 anyone else is ignored. Set `publish.rework_on_comments: false` to switch this off, and
 `publish.review_quiet_ms` to change the wait.
 
+### Screenshots on the pull request
+
+For anything you look at, a picture tells you more than the diff. Add this to the settings at
+the top of your `WORKFLOW.md`:
+
+```yaml
+screenshots:
+  pages: [index.html]
+```
+
+and build the sandbox image again, because it needs a browser now:
+
+```sh
+symphony image
+```
+
+From then on every pull request has a **Screenshots** section with a picture of each page, taken
+by the service itself after the checks passed. The agent has no part in it.
+
+A page is a file in the repository, or an address on `localhost` when the site needs a server.
+In that case say how to start it:
+
+```yaml
+screenshots:
+  pages: ["http://localhost:3000/", "http://localhost:3000/about"]
+  start: npm run start
+```
+
+Things to know:
+
+- At most 6 pages. Each picture is 1280 by 800 pixels unless you set `width` and `height`.
+- The pictures are taken without network, like the checks. A font or script that the page
+  loads from another site is missing in the picture.
+- The pictures are stored in your repository on a branch called `symphony/screenshots`, because
+  GitHub gives a service no other place for them. That branch holds nothing else and you can
+  delete it whenever you like.
+- When a picture cannot be taken, the pull request is opened anyway and says why.
+- If you have your own way to take pictures, for example a Playwright script, use
+  `command: node shots.mjs` instead of `pages`. The command writes PNG files into the folder
+  named by `$SCREENSHOT_DIR`.
+
 ### Something bigger: let it plan first
 
 For an idea that is too big or too vague for one pull request, move the card to **Idea** instead
@@ -354,6 +395,7 @@ changed ones:
 |---|---|---|
 | `conventions` | none | Rule packs that are switched on, for example `[typescript]`. Set it with `symphony conventions enable` |
 | `verify.command` | none | What the service runs to decide whether the work is acceptable. With a rule pack, the pack's checks run first and this may be left out |
+| `screenshots.pages` | none | Pages the service takes a picture of for the pull request, see [Screenshots on the pull request](#screenshots-on-the-pull-request) |
 | `publish.required_checks` | the repository's checks | `none` hands a pull request to you without waiting for CI. A list of names waits for exactly those. |
 | `publish.rework_on_comments` | `true` | Your comments on a pull request send the card back to work, see [Asking for changes](#asking-for-changes) |
 | `publish.review_quiet_ms` | `120000` | How long you have to be quiet on the pull request before that happens, in milliseconds |
@@ -387,6 +429,7 @@ Last updated 2026-11-21.
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Comments on a pull request send the card back to work | Written, tested against a fake GitHub API. Not yet run against github.com. |
+| Screenshots on the pull request | Written. Taking the pictures is tested here with a real Chromium, storing them against a stand-in for GitHub. Not yet run through the service on a real project: the image with the browser has not been built with `symphony image`, and the pictures have not been seen in a pull request on github.com. |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |

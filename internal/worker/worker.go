@@ -87,6 +87,20 @@ type VerifyResult struct {
 	ExitStatus int
 	// OutputTail is the end of the command's output. Untrusted.
 	OutputTail string
+	// Screenshots were taken by the service after the command passed
+	// (SPEC 24). ScreenshotNote says in the service's own words why there
+	// are none, or fewer than asked for.
+	Screenshots    []Screenshot
+	ScreenshotNote string
+}
+
+// Screenshot is one picture of the work. PNG was decoded and written again
+// by the service, so it holds pixels and nothing else. What the pixels
+// show comes from the agent's code.
+type Screenshot struct {
+	// Caption is a configured page, or a cleaned file name.
+	Caption string
+	PNG     []byte
 }
 
 // Rejection is a gate refusing the work: an import or diff-policy denial.

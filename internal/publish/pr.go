@@ -179,6 +179,9 @@ type Proof struct {
 	Worker        string
 	Commits       int
 	Files         int
+	// Screenshots the service took, and what it has to say about them.
+	Screenshots    []shotLink
+	ScreenshotNote string
 }
 
 // body builds the pull request description from a fixed template. Nothing
@@ -209,6 +212,22 @@ func body(closes string, flags []flagLine, p Proof, summary string) string {
 	fmt.Fprintf(&b, "- %d commit(s), %d file(s) changed. Diff policy and secret scan passed.\n", p.Commits, p.Files)
 	if p.Worker != "" {
 		b.WriteString("- Worker: " + code(p.Worker) + "\n")
+	}
+	if len(p.Screenshots) > 0 || p.ScreenshotNote != "" {
+		b.WriteString("\n## Screenshots\n\n")
+		if len(p.Screenshots) > 0 {
+			b.WriteString("Taken by the service after the checks passed, from the commits in this pull request. " +
+				"They show what the code draws; nobody has judged them yet.\n")
+		}
+		for i, s := range p.Screenshots {
+			fmt.Fprintf(&b, "\n%s\n\n![Screenshot %d](%s)\n", code(s.caption), i+1, s.url)
+		}
+		if p.ScreenshotNote != "" {
+			if len(p.Screenshots) > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(p.ScreenshotNote + "\n")
+		}
 	}
 	if strings.TrimSpace(summary) != "" {
 		b.WriteString("\n## Agent's summary (not verified)\n\n" + tracker.Fence(summary) + "\n")
