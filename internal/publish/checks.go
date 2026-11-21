@@ -90,6 +90,10 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 	if pr.Head.SHA != rec.HeadSHA {
 		return orchestrator.CheckStatus{State: orchestrator.ChecksForeignPush}, nil
 	}
+	if p.Config().Publish.NoChecks {
+		// The operator said this repository has no checks to wait for.
+		return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
+	}
 
 	results := map[string]result{}
 	details := map[string]string{}

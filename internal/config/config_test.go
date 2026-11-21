@@ -275,7 +275,7 @@ func TestInvalid(t *testing.T) {
 		{"missing verify command", with("command: make test", "command: '  '", ""), "verify.command"},
 		{"branch prefix without slash", minimal + "publish:\n  branch_prefix: symphony\n", "publish.branch_prefix"},
 		{"branch prefix matches base branch", with("repo: owner/repo", "repo: owner/repo\n  base_branch: main", "publish:\n  branch_prefix: main/\n"), "publish.branch_prefix"},
-		{"bad required checks string", minimal + "publish:\n  required_checks: none\n", "publish.required_checks"},
+		{"bad required checks string", minimal + "publish:\n  required_checks: all\n", "publish.required_checks"},
 		{"zero failure attempts", with("state_dir: /srv/symphony/state", "state_dir: /srv/symphony/state\n  max_failure_attempts: 0", ""), "budget.max_failure_attempts"},
 		{"missing state dir", with("  state_dir: /srv/symphony/state\n", "  max_runs_per_day: 5\n", ""), "budget.state_dir"},
 		{"state dir inside workspace root", with("state_dir: /srv/symphony/state", "state_dir: /srv/agent/workspaces/state", ""), "budget.state_dir"},
@@ -400,5 +400,36 @@ func TestStallTimeoutMayBeDisabled(t *testing.T) {
 	c := mustBuild(t, minimal+"claude:\n  stall_timeout_ms: 0\n")
 	if c.Claude.StallTimeoutMS != 0 {
 		t.Errorf("stall_timeout_ms = %d, want 0", c.Claude.StallTimeoutMS)
+	}
+}
+
+func TestDockerBackend(t *testing.T) {
+	docker := strings.Replace(with("backend: systemd", "backend: docker", ""), "  network:\n    proxy: 127.0.0.1:3128\n", "", 1)
+	c := mustBuild(t, docker)
+	if c.Sandbox.Backend != "docker" || c.Sandbox.Image != "symphony-sandbox:latest" || c.Sandbox.Proxy != "" {
+		t.Errorf("%+v", c.Sandbox)
+	}
+	c = mustBuild(t, strings.Replace(docker, "backend: docker", "backend: docker\n  image: ghcr.io/me/box:1.2", 1))
+	if c.Sandbox.Image != "ghcr.io/me/box:1.2" {
+		t.Errorf("image = %q", c.Sandbox.Image)
+	}
+	for _, bad := range []string{"'--privileged'", "'a b'", "'box:'", "'Box'", "'x;y'"} {
+		_, err := build(t, strings.Replace(docker, "backend: docker", "backend: docker\n  image: "+bad, 1), nil)
+		if _, ok := keys(err)["sandbox.image"]; !ok {
+			t.Errorf("image %s was accepted: %v", bad, err)
+		}
+	}
+}
+
+func TestRequiredChecksNone(t *testing.T) {
+	c := mustBuild(t, minimal+"publish:\n  required_checks: none\n")
+	if !c.Publish.NoChecks || c.Publish.RequiredChecksFromBranchProtection || len(c.Warnings) == 0 {
+		t.Errorf("%+v, warnings %v", c.Publish, c.Warnings)
+	}
+	if c := mustBuild(t, minimal); c.Publish.NoChecks {
+		t.Error("checks are not required by default")
+	}
+	if c := mustBuild(t, minimal+"publish:\n  required_checks: [test]\n"); c.Publish.NoChecks {
+		t.Error("a list of checks switched the gate off")
 	}
 }

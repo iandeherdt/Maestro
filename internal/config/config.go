@@ -85,6 +85,7 @@ type Claude struct {
 
 type Sandbox struct {
 	Backend    string
+	Image      string
 	MemoryMax  string
 	CPUQuota   string
 	TasksMax   int64
@@ -107,11 +108,14 @@ type Publish struct {
 	// taken from the base branch's protection settings.
 	RequiredChecksFromBranchProtection bool
 	RequiredChecks                     []string
-	DraftUntilGreen                    bool
-	ChecksTimeoutMS                    int64
-	ChecksPollIntervalMS               int64
-	ReworkOnChangesRequested           bool
-	MaxBundleBytes                     int64
+	// NoChecks is the operator saying the repository has no checks: a
+	// pull request is handed to review as soon as it is open.
+	NoChecks                 bool
+	DraftUntilGreen          bool
+	ChecksTimeoutMS          int64
+	ChecksPollIntervalMS     int64
+	ReworkOnChangesRequested bool
+	MaxBundleBytes           int64
 }
 
 type Policy struct {
@@ -164,9 +168,10 @@ var (
 	credEnvRE     = regexp.MustCompile(`^(ANTHROPIC_.*|CLAUDE_.*TOKEN.*|.*_API_KEY|GITHUB_.*|GH_.*|LINEAR_.*)$`)
 	sizeRE        = regexp.MustCompile(`^[1-9][0-9]*[KMGT]?$`)
 	cpuQuotaRE    = regexp.MustCompile(`^[1-9][0-9]*%$`)
+	imageRE       = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,127}(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$`)
 	branchRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 	permModes     = set("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
-	backends      = set("systemd", "macos-vm", "macos-user")
+	backends      = set("systemd", "docker", "macos-vm", "macos-user")
 	trackerKinds  = set("github", "linear")
 	knownTopLevel = []string{"tracker", "polling", "workspace", "hooks", "agent", "claude",
 		"sandbox", "verify", "publish", "policy", "budget", "worker", "server"}
@@ -491,6 +496,7 @@ func (b *builder) claude(s *section) {
 func (b *builder) sandbox(s *section) {
 	sb := &b.cfg.Sandbox
 	sb.Backend = s.str("backend", "")
+	sb.Image = s.str("image", "symphony-sandbox:latest")
 	sb.MemoryMax = s.str("memory_max", "6G")
 	sb.CPUQuota = s.str("cpu_quota", "300%")
 	sb.TasksMax = b.positive("sandbox.tasks_max", s.integer("tasks_max", 2048))
@@ -514,7 +520,12 @@ func (b *builder) sandbox(s *section) {
 	if !cpuQuotaRE.MatchString(sb.CPUQuota) {
 		b.fail("sandbox.cpu_quota", "must be a percentage such as 300%%")
 	}
-	if sb.Proxy == "" {
+	if !imageRE.MatchString(sb.Image) {
+		b.fail("sandbox.image", "must be an image name such as symphony-sandbox:latest")
+	}
+	// The docker backend runs its own proxy next to the containers.
+	if sb.Proxy == "" && sb.Backend == "docker" {
+	} else if sb.Proxy == "" {
 		b.fail("sandbox.network.proxy", "is required")
 	} else if host, port, err := net.SplitHostPort(sb.Proxy); err != nil || host == "" || !validPort(port) {
 		b.fail("sandbox.network.proxy", "must have the form host:port")
@@ -576,10 +587,16 @@ func (b *builder) publish(s *section) {
 		p.RequiredChecksFromBranchProtection = true
 	default:
 		if str, isStr := v.(string); isStr {
-			if str != "branch-protection" {
-				b.fail("publish.required_checks", `must be "branch-protection" or a list of check names`)
+			switch str {
+			case "none":
+				p.NoChecks = true
+				b.cfg.Warnings = append(b.cfg.Warnings,
+					"publish.required_checks is none: pull requests are handed to review without waiting for CI")
+			case "branch-protection":
+				p.RequiredChecksFromBranchProtection = true
+			default:
+				b.fail("publish.required_checks", `must be "branch-protection", "none" or a list of check names`)
 			}
-			p.RequiredChecksFromBranchProtection = true
 			break
 		}
 		p.RequiredChecks = trimAll(s.strList("required_checks", nil))

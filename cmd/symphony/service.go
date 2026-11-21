@@ -1,0 +1,517 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"github.com/iandeherdt/Symphony-beads/internal/budget"
+	"github.com/iandeherdt/Symphony-beads/internal/claude"
+	"github.com/iandeherdt/Symphony-beads/internal/config"
+	"github.com/iandeherdt/Symphony-beads/internal/dockerbox"
+	"github.com/iandeherdt/Symphony-beads/internal/gate"
+	"github.com/iandeherdt/Symphony-beads/internal/ghapp"
+	"github.com/iandeherdt/Symphony-beads/internal/httpapi"
+	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Symphony-beads/internal/logging"
+	"github.com/iandeherdt/Symphony-beads/internal/mirror"
+	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Symphony-beads/internal/proxy"
+	"github.com/iandeherdt/Symphony-beads/internal/publish"
+	"github.com/iandeherdt/Symphony-beads/internal/reload"
+	"github.com/iandeherdt/Symphony-beads/internal/setup"
+	"github.com/iandeherdt/Symphony-beads/internal/tracker/github"
+	"github.com/iandeherdt/Symphony-beads/internal/worker"
+	"github.com/iandeherdt/Symphony-beads/internal/workspace"
+)
+
+// install is what `run`, `image` and `login` share: the workflow, the setup
+// state and the sandbox they describe.
+type install struct {
+	path   string
+	source *reload.Source
+	cfg    *config.Config
+	state  *setup.State
+	box    *dockerbox.Box
+	// Directories of the control zone.
+	mirrorDir, handoffDir, allowDir, auditDir string
+}
+
+// problem is an error whose text is written for the person at the terminal.
+type problem struct{ text string }
+
+func (p *problem) Error() string { return p.text }
+
+func explain(format string, a ...any) error { return &problem{fmt.Sprintf(format, a...)} }
+
+// parse reads the flags the service commands share.
+func parse(name string, args []string, stderr io.Writer) (dir, explicit string, ok bool) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	d := fs.String("dir", "", "where setup keeps its state (default: the user's configuration directory)")
+	if err := fs.Parse(args); err != nil || fs.NArg() > 1 {
+		fmt.Fprintf(stderr, "usage: symphony %s [--dir DIR] [path-to-WORKFLOW.md]\n", name)
+		return "", "", false
+	}
+	return *d, fs.Arg(0), true
+}
+
+// open loads the workflow and the setup state and describes the sandbox.
+// It starts nothing.
+func open(dir, explicit string, log *slog.Logger) (*install, error) {
+	in := &install{path: workflowPath(explicit)}
+	home, _ := os.UserHomeDir()
+	src, err := reload.Open(in.path, config.Options{Env: os.Getenv, HomeDir: home}, log)
+	if err != nil {
+		return nil, explain("%v\nThe settings file is %s. Run `symphony setup` if you have not yet.", err, in.path)
+	}
+	in.source, in.cfg = src, src.Current().Config
+	if in.cfg.Sandbox.Backend != "docker" {
+		return nil, explain("%s says `sandbox.backend: %s`, which is not built yet. The Docker sandbox is.\n"+
+			"If setup wrote this file, the easiest fix is to let it write a new one:\n"+
+			"  mv %q %q\n  symphony setup\n"+
+			"Setup skips the steps that are done and only asks the last questions again.",
+			in.path, in.cfg.Sandbox.Backend, in.path, in.path+".old")
+	}
+	if in.cfg.Tracker.Kind != "github" {
+		return nil, explain("only the github tracker is built so far")
+	}
+	if dir == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return nil, explain("no configuration directory was found for this user, pass --dir: %v", err)
+		}
+		dir = filepath.Join(base, "symphony")
+	}
+	if dir, err = filepath.Abs(dir); err != nil {
+		return nil, err
+	}
+	st, err := setup.LoadState(dir)
+	if err != nil {
+		return nil, err
+	}
+	if st.AppID == "" || st.AppKeyFile == "" || st.InstallationID == "" || st.AppSlug == "" {
+		return nil, explain("the GitHub App is not set up in %s. Run `symphony setup` first.", dir)
+	}
+	if !strings.EqualFold(st.Repo, in.cfg.Workspace.Repo) {
+		return nil, explain("setup was done for %s, but %s is about %s. Run `symphony setup` for that repository.",
+			st.Repo, in.path, in.cfg.Workspace.Repo)
+	}
+	in.state = st
+
+	stateDir := in.cfg.Budget.StateDir
+	in.mirrorDir = filepath.Join(stateDir, "mirror")
+	in.allowDir = filepath.Join(stateDir, "proxy")
+	in.auditDir = filepath.Join(stateDir, "audit")
+	in.handoffDir = filepath.Join(in.cfg.Workspace.Root, ".handoff")
+	bot := st.AppSlug + "[bot]"
+	in.box = &dockerbox.Box{
+		Worker: in.cfg.Worker.Name, Image: in.cfg.Sandbox.Image,
+		MirrorDir: in.mirrorDir, HandoffDir: in.handoffDir,
+		Memory: strings.ToLower(in.cfg.Sandbox.MemoryMax), CPUs: cpus(in.cfg.Sandbox.CPUQuota), PIDs: in.cfg.Sandbox.TasksMax,
+		BotName: bot, BotEmail: bot + "@users.noreply.github.com",
+	}
+	return in, nil
+}
+
+// cpus turns "300%" into docker's "3.00".
+func cpus(quota string) string {
+	n, err := strconv.Atoi(strings.TrimSuffix(quota, "%"))
+	if err != nil || n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d.%02d", n/100, n%100)
+}
+
+// docker checks that the docker client is installed and its daemon answers.
+func (in *install) docker(ctx context.Context) error {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return explain("the `docker` command was not found. Install Docker Desktop (Mac) or Docker Engine (Linux) and try again.")
+	}
+	c, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(c, "docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+		return explain("Docker is installed but not running. Start Docker Desktop, wait until it says it is running, and try again.")
+	}
+	return nil
+}
+
+// allow writes the proxies' allowlists from the configuration.
+func (in *install) allow(cfg *config.Config) error {
+	agent := append(append([]string{}, proxy.DefaultAgentHosts...), cfg.Sandbox.AllowAgent...)
+	if err := dockerbox.WriteAllow(in.allowDir, "agent", agent); err != nil {
+		return err
+	}
+	return dockerbox.WriteAllow(in.allowDir, "hooks", cfg.Sandbox.AllowHooks)
+}
+
+// up prepares the directories and starts the proxies.
+func (in *install) up(ctx context.Context) error {
+	if err := os.MkdirAll(in.auditDir, 0o700); err != nil {
+		return err
+	}
+	// Containers read the mirror and the allowlists, and write the
+	// hand-off, as the sandbox user and not as the service. The mirror
+	// holds the repository and the allowlists hold host names.
+	for _, d := range []string{in.mirrorDir, in.allowDir, in.handoffDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0o755); err != nil {
+			return err
+		}
+	}
+	if err := in.allow(in.cfg); err != nil {
+		return err
+	}
+	return in.box.Up(ctx, in.allowDir)
+}
+
+func report(stderr io.Writer, err error) int {
+	var p *problem
+	if errors.As(err, &p) {
+		fmt.Fprintln(stderr, p.text)
+	} else {
+		fmt.Fprintln(stderr, "error:", err)
+	}
+	return 1
+}
+
+func interruptible() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+// runImage builds the sandbox image.
+func runImage(args []string, stdout, stderr io.Writer) int {
+	dir, explicit, ok := parse("image", args, stderr)
+	if !ok {
+		return 2
+	}
+	ctx, stop := interruptible()
+	defer stop()
+	in, err := open(dir, explicit, nil)
+	if err == nil {
+		err = in.docker(ctx)
+	}
+	if err != nil {
+		return report(stderr, err)
+	}
+	b := dockerbox.Build{Out: stdout, Version: version}
+	if !strings.HasPrefix(b.Version, "v") {
+		b.Version = "v" + b.Version
+	}
+	if runtime.GOOS == "linux" {
+		if self, err := os.Executable(); err == nil {
+			b.Binary = self
+		}
+	}
+	fmt.Fprintf(stdout, "Building the sandbox image %s. The first time takes a few minutes: it downloads\n", in.cfg.Sandbox.Image)
+	fmt.Fprintf(stdout, "Node.js, git and Claude Code %s. Nothing is installed on this machine outside Docker.\n\n", dockerbox.ClaudeVersion)
+	if err := in.box.BuildImage(ctx, b); err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintln(stdout, "\nThe image is ready.")
+	fmt.Fprintln(stdout, "Next: symphony login    (sign Claude Code in inside the sandbox, once)")
+	return 0
+}
+
+// image explains what to do when the image is missing.
+func (in *install) image(ctx context.Context) error {
+	if !in.box.ImageExists(ctx) {
+		return explain("the sandbox image %s does not exist yet. Build it with: symphony image", in.cfg.Sandbox.Image)
+	}
+	return nil
+}
+
+// runLogin signs Claude Code in inside the sandbox.
+func runLogin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	dir, explicit, ok := parse("login", args, stderr)
+	if !ok {
+		return 2
+	}
+	ctx, stop := interruptible()
+	defer stop()
+	in, err := open(dir, explicit, nil)
+	if err == nil {
+		err = in.docker(ctx)
+	}
+	if err == nil {
+		err = in.image(ctx)
+	}
+	if err != nil {
+		return report(stderr, err)
+	}
+	// A running service already has the proxies up. Starting them again
+	// would stop its work, so they are only started when they are missing.
+	if !in.box.ProxyRunning(ctx, "agent") {
+		if err := in.up(ctx); err != nil {
+			return report(stderr, err)
+		}
+		defer in.box.Down(context.Background())
+	}
+	fmt.Fprintln(stdout, "Claude Code's sign-in now runs inside the sandbox, with your Claude subscription.")
+	fmt.Fprintln(stdout, "  1. It shows a link. Open it in your browser and approve.")
+	fmt.Fprintln(stdout, "  2. The browser shows a code. Paste it back here and press Enter.")
+	fmt.Fprintln(stdout, "The login is stored in a Docker volume that only the agent's containers get. It is not copied")
+	fmt.Fprintln(stdout, "to this machine's files or keychain.")
+	fmt.Fprintln(stdout)
+	in.box.Login(ctx, []string{in.cfg.Claude.Command, "auth", "login", "--claudeai"}, stdin, stdout, stderr)
+	fmt.Fprintln(stdout)
+	yes, err := in.box.LoggedIn(ctx, in.cfg.Claude.Command)
+	if err != nil {
+		return report(stderr, err)
+	}
+	if !yes {
+		fmt.Fprintln(stderr, "Claude Code is not signed in yet. Run `symphony login` again and finish the sign-in.")
+		return 1
+	}
+	fmt.Fprintln(stdout, "Claude Code is signed in inside the sandbox.")
+	fmt.Fprintln(stdout, "Next: symphony run")
+	return 0
+}
+
+// view is the configuration in force, shared between goroutines.
+type view struct{ p atomic.Pointer[reload.Loaded] }
+
+func (v *view) config() *config.Config { return v.p.Load().Config }
+
+// audit appends the raw agent stream of a workspace to a file.
+type audit struct{ path string }
+
+func (a audit) Write(p []byte) (int, error) {
+	f, err := os.OpenFile(a.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	return f.Write(p)
+}
+
+// synced refreshes the mirror before a workspace is created or continued,
+// so that new work starts from the current base branch.
+type synced struct {
+	*workspace.Manager
+	sync func(context.Context) error
+	log  *slog.Logger
+	mu   sync.Mutex
+}
+
+func (s *synced) Ensure(ctx context.Context, is issue.Issue) (workspace.Workspace, error) {
+	s.mu.Lock()
+	if err := s.sync(ctx); err != nil {
+		// The mirror from the last fetch is still good to work from.
+		s.log.Warn("the mirror could not be refreshed", "error", err)
+	}
+	s.mu.Unlock()
+	return s.Manager.Ensure(ctx, is)
+}
+
+// defaultBranch asks GitHub for the repository's default branch.
+func defaultBranch(ctx context.Context, apiURL, repo, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL+"/repos/"+repo, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err := hc.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub answered %d for the repository", res.StatusCode)
+	}
+	var body struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&body); err != nil {
+		return "", err
+	}
+	if !mirror.ValidBranch(body.DefaultBranch) {
+		return "", fmt.Errorf("the repository's default branch has a name the service does not accept")
+	}
+	return body.DefaultBranch, nil
+}
+
+// endpoints are where GitHub is. They change only in tests.
+type endpoints struct {
+	api, git string
+	// fileRemote lets git be a local directory.
+	fileRemote bool
+}
+
+var gitHub = endpoints{api: "https://api.github.com", git: "https://github.com"}
+
+// runService is `symphony run`.
+func runService(args []string, stdout, stderr io.Writer) int {
+	dir, explicit, ok := parse("run", args, stderr)
+	if !ok {
+		return 2
+	}
+	ctx, stop := interruptible()
+	defer stop()
+	log := logging.New(stderr, slog.LevelInfo)
+	in, err := open(dir, explicit, log)
+	if err == nil {
+		err = in.docker(ctx)
+	}
+	if err == nil {
+		err = in.image(ctx)
+	}
+	if err == nil {
+		err = serve(ctx, in, gitHub, log, stdout)
+	}
+	if err != nil {
+		return report(stderr, err)
+	}
+	return 0
+}
+
+// serve runs the service until ctx ends.
+func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, stdout io.Writer) error {
+	cfg := in.cfg
+	if _, err := exec.LookPath("git"); err != nil {
+		return explain("the `git` command was not found on this machine. Install git and try again.")
+	}
+	app, err := ghapp.New(ghapp.Config{AppID: in.state.AppID, InstallationID: in.state.InstallationID,
+		KeyFile: in.state.AppKeyFile, APIURL: gh.api})
+	if err != nil {
+		return err
+	}
+	_, name, _ := strings.Cut(cfg.Workspace.Repo, "/")
+	// One token for the tickets, one for the code, each limited to this
+	// repository and to what it is used for.
+	tickets, err := app.Source(ghapp.Scope{Repositories: []string{name}, Permissions: map[string]string{"issues": "write"}})
+	if err != nil {
+		return err
+	}
+	code, err := app.Source(ghapp.Scope{Repositories: []string{name}, Permissions: map[string]string{
+		"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"}})
+	if err != nil {
+		return err
+	}
+	token, err := code.Token(ctx)
+	if err != nil {
+		return explain("GitHub did not give the App a token for %s: %v\nRun `symphony setup` to check the App and its installation.",
+			cfg.Workspace.Repo, err)
+	}
+	base := cfg.Workspace.BaseBranch
+	if base == "" {
+		if base, err = defaultBranch(ctx, gh.api, cfg.Workspace.Repo, token); err != nil {
+			return err
+		}
+	}
+	// A reloaded file that names no base branch gets the same answer.
+	patch := func(l *reload.Loaded) *reload.Loaded {
+		if l.Config.Workspace.BaseBranch == "" {
+			l.Config.Workspace.BaseBranch = base
+		}
+		return l
+	}
+	var cur view
+	cur.p.Store(patch(in.source.Current()))
+
+	if err := in.up(ctx); err != nil {
+		return err
+	}
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		in.box.Down(c)
+	}()
+	yes, err := in.box.LoggedIn(ctx, cfg.Claude.Command)
+	if err != nil {
+		return err
+	}
+	if !yes {
+		return explain("Claude Code is not signed in inside the sandbox. Sign in with: symphony login")
+	}
+
+	mir := &mirror.Mirror{Dir: in.mirrorDir, OwnerUID: -1, MaxBundleBytes: cfg.Publish.MaxBundleBytes, AllowFileRemote: gh.fileRemote}
+	remote := gh.git + "/" + cfg.Workspace.Repo + ".git"
+	syncMirror := func(ctx context.Context) error {
+		t, err := code.Token(ctx)
+		if err != nil {
+			return err
+		}
+		return mir.Sync(ctx, remote, t)
+	}
+	if err := syncMirror(ctx); err != nil {
+		return explain("the repository %s could not be fetched: %v", cfg.Workspace.Repo, err)
+	}
+
+	trk, err := github.New(cfg, github.Options{Token: tickets.Token, Log: log})
+	if err != nil {
+		return err
+	}
+	store, err := budget.Open(cfg.Budget.StateDir)
+	if err != nil {
+		return err
+	}
+	pub := &publish.Publisher{
+		Config: cur.config, Mirror: mir, HandoffDir: in.handoffDir, Token: code.Token,
+		HeldSecrets: func() []string { return []string{tickets.Current(), code.Current()} },
+		BotName:     in.box.BotName, BotEmail: in.box.BotEmail, BotLogin: in.box.BotName,
+		APIURL: gh.api, GitURL: gh.git,
+	}
+	spaces := workspace.New(cur.config(), in.box, log)
+	wk := &worker.Worker{
+		Settings: func() worker.Settings {
+			l := cur.p.Load()
+			return worker.Settings{Config: l.Config, Prompt: l.Prompt}
+		},
+		Tracker:    trk,
+		Workspaces: &synced{Manager: spaces, sync: syncMirror, log: log},
+		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
+			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} }},
+		Gates: &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub},
+	}
+	orch := orchestrator.New(cur.config(), orchestrator.Deps{
+		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Log: log,
+		Preflight: func() (*config.Config, error) {
+			l, err := in.source.Check()
+			if l == nil {
+				return nil, err
+			}
+			cur.p.Store(patch(l))
+			if werr := in.allow(l.Config); werr != nil {
+				log.Warn("the network allowlists could not be rewritten", "error", werr)
+			}
+			return l.Config, err
+		},
+	})
+	if cfg.Server.Port != nil {
+		srv, err := httpapi.Listen(int(*cfg.Server.Port), orch)
+		if err != nil {
+			return err
+		}
+		go srv.Serve()
+		defer srv.Shutdown(context.Background())
+		fmt.Fprintf(stdout, "Status page: http://%s/\n", srv.Addr())
+	}
+	fmt.Fprintf(stdout, "Symphony is running for %s (worker %q, base branch %s).\n", cfg.Workspace.Repo, cfg.Worker.Name, base)
+	fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
+	fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))
+	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
+	orch.Run(ctx)
+	fmt.Fprintln(stdout, "Stopped.")
+	return nil
+}

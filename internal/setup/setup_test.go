@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -180,13 +181,13 @@ func TestMachineChecks(t *testing.T) {
 		want []string
 	}{
 		"all good linux": {machine(nil, "git version 2.43.0", "linux", true), nil},
-		"all good mac":   {machine(map[string]bool{"systemd-run": true}, "git version 2.39.5 (Apple Git-154)", "darwin", false), nil},
+		"all good mac":   {machine(nil, "git version 2.39.5 (Apple Git-154)", "darwin", false), nil},
 		"rhel 8 git":     {machine(nil, "git version 2.31.1", "linux", true), nil},
 		"no git":         {machine(map[string]bool{"git": true}, "", "linux", true), []string{"Git is not installed"}},
 		"old git":        {machine(nil, "git version 2.30.2", "linux", true), []string{"too old"}},
-		"no claude":      {machine(map[string]bool{"claude": true}, "git version 2.43.0", "linux", true), []string{"Claude Code CLI is not installed"}},
-		"no systemd":     {machine(map[string]bool{"systemd-run": true}, "git version 2.43.0", "linux", true), []string{"systemd-run"}},
-		"cgroup v1":      {machine(nil, "git version 2.43.0", "linux", false), []string{"cgroup v2"}},
+		"no claude":      {machine(map[string]bool{"claude": true, "systemd-run": true}, "git version 2.43.0", "linux", false), nil},
+		"no docker":      {machine(map[string]bool{"docker": true}, "git version 2.43.0", "linux", true), []string{"Docker is not installed"}},
+		"no docker mac":  {machine(map[string]bool{"docker": true}, "git version 2.43.0", "darwin", true), []string{"Docker is not installed"}},
 		"windows":        {machine(nil, "git version 2.43.0", "windows", true), []string{"not supported"}},
 	} {
 		status, err := tc.m.Check(ctx, nil)
@@ -205,14 +206,14 @@ func TestMachineChecks(t *testing.T) {
 }
 
 func TestMachineRunRechecksUntilFixed(t *testing.T) {
-	missing := map[string]bool{"claude": true}
+	missing := map[string]bool{"docker": true}
 	m := machine(missing, "git version 2.43.0", "linux", true)
 	u, out := ui("y\n")
 	err := m.Run(ctx, u, nil) // one recheck, then the input ends
 	if !errors.Is(err, ErrAborted) || strings.Count(out.String(), "Please fix") != 2 {
 		t.Fatalf("still missing: %v\n%s", err, out)
 	}
-	delete(missing, "claude")
+	delete(missing, "docker")
 	u, _ = ui("")
 	if err := m.Run(ctx, u, nil); err != nil {
 		t.Fatalf("fixed: %v", err)
@@ -583,7 +584,7 @@ func TestWorkflowFileStep(t *testing.T) {
 		st := installed(t, g)
 		st.Worker = "linux"
 		step := &WorkflowFile{GOOS: goos}
-		u, out := ui("  go test ./...  \ny\n")
+		u, out := ui("  go test ./...  \ny\ny\n")
 		if err := Run(ctx, u, st, []Step{step}); err != nil {
 			t.Fatalf("%s: %v\n%s", goos, err, out)
 		}
@@ -592,7 +593,11 @@ func TestWorkflowFileStep(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"repo: ian/app", "state_source: labels", `bot_login: "symphony-ian-abc123[bot]"`,
-			"allowed_authors: [ian]", "    go test ./...\n", "name: linux"} {
+			"allowed_authors: [ian]", "    go test ./...\n", "name: linux", "backend: docker",
+			"root: " + strconv.Quote(filepath.Join(st.Dir(), "workspaces")), "state_dir: " + strconv.Quote(filepath.Join(st.Dir(), "state"))} {
+			if strings.Contains(string(raw), "required_checks") {
+				t.Errorf("%s: checks were switched off after a yes:\n%s", goos, raw)
+			}
 			if !strings.Contains(string(raw), want) {
 				t.Errorf("%s: the file lacks %q:\n%s", goos, want, raw)
 			}
@@ -633,7 +638,7 @@ func TestWorkflowFileNeedsAYesAndAcceptsNoTests(t *testing.T) {
 	st := installed(t, g)
 	st.Worker = "linux"
 	step := &WorkflowFile{GOOS: "linux"}
-	u, _ := ui("make check\nn\n")
+	u, _ := ui("make check\ny\nn\n")
 	if err := step.Run(ctx, u, st); !errors.Is(err, ErrAborted) {
 		t.Fatal(err)
 	}
@@ -641,13 +646,16 @@ func TestWorkflowFileNeedsAYesAndAcceptsNoTests(t *testing.T) {
 		t.Fatal("the file was written after a no")
 	}
 	// Enter alone: a file that passes validation, with a plain warning.
-	u, out := ui("\ny\n")
+	u, out := ui("\nn\ny\n")
 	if err := step.Run(ctx, u, st); err != nil {
 		t.Fatal(err)
 	}
 	text, _ := os.ReadFile(st.WorkflowFile)
 	if !strings.Contains(string(text), "verify:\n  command: |\n    true\n") || validate(st.WorkflowFile) != nil {
 		t.Fatalf("file:\n%s", text)
+	}
+	if !strings.Contains(string(text), "publish:\n  required_checks: none\n") {
+		t.Errorf("answering no to the CI question did not switch the checks off:\n%s", text)
 	}
 	if !strings.Contains(out.String(), "published without being tested") || !strings.Contains(out.String(), "how do you test "+st.Repo) {
 		t.Errorf("output:\n%s", out)

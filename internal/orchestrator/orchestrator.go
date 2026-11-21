@@ -696,6 +696,8 @@ func (o *Orchestrator) failed(ctx context.Context, e *runEntry, kind, category, 
 func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt int, kind, category, message string, feedback []issue.Feedback) {
 	n := o.d.Budget.IncFailure(is.ID)
 	o.persist()
+	// The category alone does not tell a person what to fix.
+	o.d.Log.Warn("attempt failed", "issue", is.Identifier, "attempt", attempt, "category", category, "detail", message)
 	if n >= o.cfg.Budget.MaxFailureAttempts {
 		o.block(ctx, is, category, message, 0)
 		return

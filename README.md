@@ -46,9 +46,12 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 
 ## Requirements
 
-- Linux (RHEL 9 or compatible, in a VM) or macOS.
+- macOS or Linux.
 - Git 2.31 or newer.
-- The [Claude Code CLI](https://code.claude.com/docs), logged in with your subscription.
+- Docker: [Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac, Docker
+  Engine on Linux. The agent works inside containers.
+- A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
+  installed on the machine itself.
 - A GitHub repository you own. Private repositories work.
 
 ## Install
@@ -79,28 +82,37 @@ can be stopped and run again at any time:
 symphony setup
 ```
 
-What the setup does today:
+What the setup does:
 
-1. **Checks the machine** for Git, the Claude Code CLI and, on Linux, what the sandbox needs. For
-   anything missing it tells you what to install.
+1. **Checks the machine** for Git and Docker. For anything missing it tells you what to install.
 2. **Creates a GitHub App for the service.** You open a local page, press one button on
    github.com, and the App's key is saved on your machine in a file only you can read. The App can
    open pull requests and read check results. It cannot change settings, workflows or secrets,
    and it cannot merge.
 3. **Installs the App on one repository** of your choice and confirms that it can obtain a token
    for it.
-
 4. **Creates the labels** in the repository, after showing you which ones are missing.
-5. **Writes the workflow file** from your verify command, shows it to you first, and validates it.
-
-Still to come in the setup: installing the service (systemd or launchd) and a final self-test.
+5. **Writes the settings file** from two questions (how you test the repository, and whether it
+   runs checks on pull requests), shows it to you first, and validates it.
 
 If the machine has no browser, the setup shows an `ssh -L` command to run on your own computer so
 that the page opens there.
 
+Three commands are left, in this order, with Docker running:
+
+```sh
+symphony image    # builds the container the agent works in. A few minutes, once.
+symphony login    # signs Claude Code in inside that container. Once.
+symphony run      # starts the service. Stop it with Ctrl-C.
+```
+
+`symphony login` shows a link. Open it in your browser, approve, and paste the code it gives you
+back into the terminal. The login is kept in a Docker volume that only the agent's containers
+get. It is not written to your files or your keychain, and no API key is involved.
+
 ## Use
 
-Not available yet: this section describes how the finished service is used.
+While `symphony run` is running, it looks at the repository every 30 seconds.
 
 Approve a ticket by labelling an issue you wrote:
 
@@ -113,19 +125,21 @@ Then watch the labels change:
 |---|---|
 | `status:todo` | Approved, waiting for a free slot |
 | `status:in progress` | An agent is working on it |
-| `status:human review` | A pull request is open and CI is green. Your turn. |
+| `status:human review` | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
 | `status:rework` | You asked for changes. Your comments on the issue and the pull request go to the agent. |
 | `status:blocked` | The service gave up after repeated failures. The status comment says why. |
 
-Day to day:
+What happens to a ticket, step by step: the service clones the repository into a fresh
+container, runs Claude Code there on a branch named `symphony/GH-<number>`, runs your test
+command itself, checks the changes against its rules, pushes the branch and opens a pull request.
+The agent's container has no GitHub token and can reach only the Claude service. Merging is
+always yours: merge the pull request and the ticket is closed, or request changes and the agent
+continues.
 
-```sh
-symphony status            # what is running, what is queued, today's usage
-symphony pause "on holiday"
-symphony resume
-symphony unblock GH-12     # give a blocked ticket another chance
-symphony doctor            # check the installation and the repository's protection
-```
+If something goes wrong, the service writes why in a comment on the issue and in the terminal.
+
+Not built yet: `symphony status`, `pause`, `resume`, `unblock` and `doctor`, and running as a
+background service that starts with the machine.
 
 ## Configure
 
@@ -143,12 +157,16 @@ tracker:
     bot_login: your-app[bot]
   allowed_authors: [your-account]
 workspace:
-  root: /var/lib/symphony-agent/workspaces
+  root: "/home/you/.config/symphony/workspaces"
   repo: your-account/your-repo
+sandbox:
+  backend: docker
 verify:
   command: |
     npm run lint
     npm test
+budget:
+  state_dir: "/home/you/.config/symphony/state"
 worker:
   name: linux
 ---
@@ -170,6 +188,8 @@ changed ones:
 | Setting | Default | What it does |
 |---|---|---|
 | `verify.command` | none | What the service runs to decide whether the work is acceptable |
+| `publish.required_checks` | the repository's checks | `none` hands a pull request to you without waiting for CI. A list of names waits for exactly those. |
+| `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
 | `budget.max_failure_attempts` | 3 | Failed attempts before a ticket is blocked |
 | `budget.max_runs_per_day` | 20 | Daily limit on agent runs |
@@ -194,13 +214,16 @@ Last updated 2026-11-21.
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
-| Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), run once on a Mac against github.com |
+| Guided setup | Five of seven steps done (machine, App, installation, labels, settings file), run once on a Mac against github.com |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
-| Running the service: `symphony run`, `status`, `pause`, `doctor` | Not started |
-| Claude Code runner | Written from the CLI documentation and tested against a scripted agent. Needs one real run on a machine with the CLI logged in. |
-| Linux sandbox | Not started. Needs the server. |
-| Mac worker | Not started. Needs the Mac. |
+| Docker sandbox (containers, isolated network, proxies, image) | Done, tested with real containers. The image with the real Claude Code is built in CI. |
+| `symphony image`, `symphony login`, `symphony run` | Done. The whole path from an issue to a pull request is tested in real containers against a stand-in for GitHub and for Claude Code. Not yet run with the real Claude Code and github.com. |
+| `symphony status`, `pause`, `resume`, `unblock`, `doctor`, start-up self-test | Not started |
+| Running as a background service (systemd, launchd) | Not started |
+| Claude Code runner | Written from the CLI documentation and tested against a scripted agent. Needs one real run with a login. |
+| Native Linux sandbox (systemd) | Not started |
+| Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board | Not started |
 
 ## Documentation

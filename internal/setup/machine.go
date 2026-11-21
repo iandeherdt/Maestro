@@ -64,20 +64,17 @@ func (m *Machine) problems(ctx context.Context) []string {
 			out = append(out, fmt.Sprintf("Git %d.%d is too old, 2.31 or newer is needed.", major, minor))
 		}
 	}
-	if _, err := m.LookPath("claude"); err != nil {
-		out = append(out, "The Claude Code CLI is not installed or not on the PATH. Install it as described at https://code.claude.com/docs, then log in once by running: claude")
-	} else if _, err := m.Output(ctx, "claude", "--version"); err != nil {
-		out = append(out, "The Claude Code CLI is installed but does not run: "+err.Error())
+	if _, err := m.LookPath("docker"); err != nil {
+		if m.GOOS == "darwin" {
+			out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it")
+		} else {
+			out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Engine as described at https://docs.docker.com/engine/install/")
+		}
+	} else if _, err := m.Output(ctx, "docker", "--version"); err != nil {
+		out = append(out, "Docker is installed but does not run: "+err.Error())
 	}
 	switch m.GOOS {
-	case "linux":
-		if _, err := m.LookPath("systemd-run"); err != nil {
-			out = append(out, "systemd-run was not found. The Linux sandbox needs systemd.")
-		}
-		if !m.Exists("/sys/fs/cgroup/cgroup.controllers") {
-			out = append(out, "This system does not use cgroup v2, which the sandbox's resource limits need. RHEL 9 and compatible systems use it by default.")
-		}
-	case "darwin":
+	case "linux", "darwin":
 	default:
 		out = append(out, "This operating system is not supported. The service runs on Linux and macOS.")
 	}
@@ -87,7 +84,7 @@ func (m *Machine) problems(ctx context.Context) []string {
 func (m *Machine) Check(ctx context.Context, _ *State) (Status, error) {
 	p := m.problems(ctx)
 	if len(p) == 0 {
-		return Status{Done: true, Detail: "Git and the Claude Code CLI are installed."}, nil
+		return Status{Done: true, Detail: "Git and Docker are installed."}, nil
 	}
 	return Status{Detail: fmt.Sprintf("%d thing(s) to fix: %s", len(p), strings.Join(short(p), "; "))}, nil
 }
