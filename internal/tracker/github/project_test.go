@@ -64,10 +64,15 @@ func (h *hub) gqlIssue(fi *fakeIssue) map[string]any {
 	for _, l := range fi.labels {
 		labels = append(labels, map[string]string{"name": l})
 	}
+	// As on github.com: GraphQL names an App's account without "[bot]".
+	author := map[string]string{"__typename": "User", "login": fi.author}
+	if name, ok := strings.CutSuffix(fi.author, "[bot]"); ok {
+		author = map[string]string{"__typename": "Bot", "login": name}
+	}
 	return map[string]any{
 		"__typename": "Issue", "id": fi.nodeID, "number": fi.number, "title": fi.title, "body": fi.body,
 		"state": strings.ToUpper(fi.state), "url": w["html_url"], "createdAt": w["created_at"], "updatedAt": w["updated_at"],
-		"author": map[string]string{"login": fi.author}, "assignees": map[string]any{"nodes": []any{}},
+		"author": author, "assignees": map[string]any{"nodes": []any{}},
 		"labels": map[string]any{"nodes": labels}, "repository": map[string]string{"nameWithOwner": owner + "/app"},
 	}
 }
@@ -299,6 +304,25 @@ func TestBoardColumnIsTheStateAndWorkerFieldRoutes(t *testing.T) {
 	}
 	if h.count("/issues?") != 0 || h.count("GET /repos/"+owner+"/app/issues ") != 0 {
 		t.Error("the issue list was read in board mode")
+	}
+}
+
+// The tasks of an approved plan are written by the service's own App. They
+// have to be picked up like the owner's own tickets.
+func TestBoardTaskWrittenByTheServiceIsDispatchable(t *testing.T) {
+	h := newBoardHub(t)
+	h.card(1, bot, "Todo", "linux")
+	h.card(2, "stranger[bot]", "Todo", "linux")
+	got, err := boardAdapter(t, h).FetchIssuesByStates(ctx, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := byIdent(got)
+	if !m["GH-1"].Dispatchable || m["GH-1"].AuthorID != bot {
+		t.Errorf("a task the service created is not picked up: %+v", m["GH-1"])
+	}
+	if m["GH-2"].Dispatchable {
+		t.Error("a card written by another App is dispatchable")
 	}
 }
 
