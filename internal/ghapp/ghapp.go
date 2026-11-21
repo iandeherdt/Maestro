@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -46,6 +47,7 @@ type Config struct {
 	// AppID is the App's numeric ID or its client ID.
 	AppID string
 	// InstallationID is the numeric ID of the installation on the account.
+	// It may be empty for an App that is only used to look one up.
 	InstallationID string
 	// KeyFile is the path of the App's private key in PEM form.
 	KeyFile string
@@ -75,10 +77,11 @@ type App struct {
 }
 
 var (
-	idRE   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	numRE  = regexp.MustCompile(`^[0-9]{1,20}$`)
-	repoRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
-	permRE = regexp.MustCompile(`^[a-z_]{1,64}$`)
+	idRE    = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	numRE   = regexp.MustCompile(`^[0-9]{1,20}$`)
+	ownerRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
+	repoRE  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+	permRE  = regexp.MustCompile(`^[a-z_]{1,64}$`)
 )
 
 // New reads the key and validates the configuration. It makes no request.
@@ -86,8 +89,8 @@ func New(cfg Config) (*App, error) {
 	if !idRE.MatchString(cfg.AppID) {
 		return nil, errors.New("ghapp: the App ID is missing or malformed")
 	}
-	if !numRE.MatchString(cfg.InstallationID) {
-		return nil, errors.New("ghapp: the installation ID is missing or malformed")
+	if cfg.InstallationID != "" && !numRE.MatchString(cfg.InstallationID) {
+		return nil, errors.New("ghapp: the installation ID is malformed")
 	}
 	api := cfg.APIURL
 	if api == "" {
@@ -219,7 +222,54 @@ func (e *Error) Error() string {
 	return "ghapp: " + e.Msg
 }
 
+// FindInstallation returns the ID of the App's installation that covers a
+// repository. A nil error with an empty ID means the App is not installed
+// on it.
+func (a *App) FindInstallation(ctx context.Context, owner, repo string) (string, error) {
+	if !ownerRE.MatchString(owner) || !repoRE.MatchString(repo) {
+		return "", errors.New("ghapp: the repository must be owner/name")
+	}
+	jwt, err := a.assertion()
+	if err != nil {
+		return "", err
+	}
+	u := *a.base
+	u.Path = u.Path + "/repos/" + owner + "/" + repo + "/installation"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	resp, err := a.hc.Do(req)
+	if err != nil {
+		return "", &Error{Msg: "the installation lookup failed: " + err.Error()}
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return "", nil
+	case http.StatusUnauthorized:
+		return "", &Error{Status: resp.StatusCode, Msg: "GitHub did not accept the App's key or ID, or this machine's clock is wrong"}
+	default:
+		return "", &Error{Status: resp.StatusCode, Msg: "the installation lookup was refused"}
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.ID <= 0 {
+		return "", &Error{Msg: "the installation response could not be read"}
+	}
+	return strconv.FormatInt(out.ID, 10), nil
+}
+
 func (a *App) mint(ctx context.Context, scope Scope) (string, time.Time, error) {
+	if a.cfg.InstallationID == "" {
+		return "", time.Time{}, errors.New("ghapp: no installation ID is configured")
+	}
 	jwt, err := a.assertion()
 	if err != nil {
 		return "", time.Time{}, err

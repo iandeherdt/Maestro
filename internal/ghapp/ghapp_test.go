@@ -361,12 +361,12 @@ func TestKeyFileChecks(t *testing.T) {
 func TestConfigChecks(t *testing.T) {
 	k := writeKey(t, key(t), false, 0o600)
 	for name, c := range map[string]Config{
-		"no app id":       {InstallationID: "42", KeyFile: k},
-		"bad app id":      {AppID: "a/b", InstallationID: "42", KeyFile: k},
-		"no installation": {AppID: "1", KeyFile: k},
-		"path in id":      {AppID: "1", InstallationID: "42/../1", KeyFile: k},
-		"plain http":      {AppID: "1", InstallationID: "42", KeyFile: k, APIURL: "http://api.example.com"},
-		"user in url":     {AppID: "1", InstallationID: "42", KeyFile: k, APIURL: "https://u@api.github.com"},
+		"no app id":        {InstallationID: "42", KeyFile: k},
+		"bad app id":       {AppID: "a/b", InstallationID: "42", KeyFile: k},
+		"bad installation": {AppID: "1", InstallationID: "x", KeyFile: k},
+		"path in id":       {AppID: "1", InstallationID: "42/../1", KeyFile: k},
+		"plain http":       {AppID: "1", InstallationID: "42", KeyFile: k, APIURL: "http://api.example.com"},
+		"user in url":      {AppID: "1", InstallationID: "42", KeyFile: k, APIURL: "https://u@api.github.com"},
 	} {
 		if _, err := New(c); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -374,5 +374,51 @@ func TestConfigChecks(t *testing.T) {
 	}
 	if _, err := New(Config{AppID: "Iv23liABCDEF", InstallationID: "42", KeyFile: k}); err != nil {
 		t.Errorf("a client ID was refused: %v", err)
+	}
+}
+
+func TestFindInstallation(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)}
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		switch r.URL.Path {
+		case "/repos/ian/app/installation":
+			io.WriteString(w, `{"id": 987654}`)
+		case "/repos/ian/denied/installation":
+			w.WriteHeader(401)
+		case "/repos/ian/odd/installation":
+			io.WriteString(w, `{"id": "x"}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	a, err := New(Config{AppID: "12345", KeyFile: writeKey(t, key(t), false, 0o600), APIURL: srv.URL, Now: c.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, err := a.FindInstallation(ctx, "ian", "app"); err != nil || id != "987654" {
+		t.Fatalf("%q %v", id, err)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ey") {
+		t.Errorf("no assertion was sent: %q", gotAuth)
+	}
+	if id, err := a.FindInstallation(ctx, "ian", "other"); err != nil || id != "" {
+		t.Errorf("not installed: %q %v", id, err)
+	}
+	if _, err := a.FindInstallation(ctx, "ian", "denied"); err == nil {
+		t.Error("a 401 was accepted")
+	}
+	if _, err := a.FindInstallation(ctx, "ian", "odd"); err == nil {
+		t.Error("a malformed response was accepted")
+	}
+	if _, err := a.FindInstallation(ctx, "ian/x", "app"); err == nil {
+		t.Error("a malformed owner was accepted")
+	}
+	// Without an installation ID no token can be requested.
+	s, _ := a.Source(Scope{})
+	if _, err := s.Token(ctx); err == nil {
+		t.Error("a token was minted without an installation")
 	}
 }
