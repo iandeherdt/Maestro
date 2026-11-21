@@ -36,9 +36,12 @@ the result itself, and opens a pull request for the owner to review and merge.
 4. Claude: subscription through a logged-in CLI.
 5. Board: existing product, GitHub first, Linear second. Beads is not used as the board.
 6. Mac worker: Unity and Xcode.
-7. GitHub: repositories and the Project board stay on the owner's personal account. The service
-   uses a GitHub App for the repository and a classic token with only the `project` scope for
-   the board (SPEC 12.5, user-owned Project).
+7. GitHub: repositories stay on the owner's personal account and the service uses a GitHub App
+   for them. Ticket state is kept in labels (`state_source: labels`): the owner approves a
+   ticket by adding the `status:todo` label. A Project board on a personal account was tested
+   and dropped for now, because a token limited to Projects cannot see the issue behind a card
+   in a private repository, and GitHub does not say who moved a card. Dragging cards remains
+   possible later with an organization-owned Project (SPEC 12.5).
 8. Claude Code runner: two runners behind one interface, selected by configuration. The pilot
    uses headless mode (`claude -p`), which is documented and reports structured events. Since
    2026-06-15 Anthropic bills headless use on a subscription from a separate monthly credit
