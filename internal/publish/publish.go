@@ -65,6 +65,11 @@ type Publisher struct {
 
 var repoRE = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)$`)
 
+var (
+	shaRE  = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+	nodeRE = regexp.MustCompile(`^[A-Za-z0-9_=-]{1,200}$`)
+)
+
 func (p *Publisher) now() time.Time {
 	if p.Now != nil {
 		return p.Now()

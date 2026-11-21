@@ -42,6 +42,9 @@ type Deps struct {
 	// Prober is optional. Without it an in-progress issue found after a
 	// restart is always dispatched as a retry.
 	Prober Prober
+	// Checks is optional. Without it published work holds its claim and
+	// nothing moves it on, which is only useful in tests.
+	Checks Checker
 	// Preflight is the optional per-tick validation (SPEC 6.2, 6.3). It
 	// returns a configuration to apply when the workflow file changed, or
 	// nil. An error skips dispatch for that tick; reconciliation still
@@ -74,12 +77,15 @@ type Orchestrator struct {
 	cfg *config.Config
 	d   Deps
 
-	running   map[string]*runEntry
-	awaiting  map[string]*PublishRecord
-	claimed   map[string]bool
-	retries   map[string]*RetryEntry
-	completed map[string]bool
-	totals    Totals
+	running  map[string]*runEntry
+	awaiting map[string]*PublishRecord
+	// checkedAt and awaitAttempt belong to awaiting entries.
+	checkedAt    map[string]time.Time
+	awaitAttempt map[string]int
+	claimed      map[string]bool
+	retries      map[string]*RetryEntry
+	completed    map[string]bool
+	totals       Totals
 
 	gen           uint64
 	spawnFailures int
@@ -106,6 +112,7 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		d:         d,
 		running:   map[string]*runEntry{},
 		awaiting:  map[string]*PublishRecord{},
+		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{},
 		claimed:   map[string]bool{},
 		retries:   map[string]*RetryEntry{},
 		completed: map[string]bool{},
@@ -271,8 +278,7 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 	}
 
 	o.reconcile(ctx)
-	// Checks and hand-off watch (SPEC 15.6, 15.8) attach here once the
-	// publisher exists.
+	o.watchChecks(ctx)
 
 	if o.configError != "" {
 		return
@@ -649,6 +655,7 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 			return
 		}
 		o.awaiting[id] = out.Publish
+		o.awaitAttempt[id] = e.attempt
 		o.comment(ctx, is, fmt.Sprintf("Pull request #%d opened. Waiting for required checks.",
 			out.Publish.PRNumber), "")
 	case Normal:
@@ -675,15 +682,122 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 
 // failed counts a failure attempt, then retries or blocks.
 func (o *Orchestrator) failed(ctx context.Context, e *runEntry, kind, category, message string, feedback []issue.Feedback) {
-	is := e.issue
+	o.failIssue(ctx, e.issue, e.attempt, kind, category, message, feedback)
+}
+
+func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt int, kind, category, message string, feedback []issue.Feedback) {
 	n := o.d.Budget.IncFailure(is.ID)
 	o.persist()
 	if n >= o.cfg.Budget.MaxFailureAttempts {
 		o.block(ctx, is, category, message, 0)
 		return
 	}
-	o.schedule(&RetryEntry{IssueID: is.ID, Identifier: is.Identifier, Attempt: e.attempt + 1,
+	o.schedule(&RetryEntry{IssueID: is.ID, Identifier: is.Identifier, Attempt: attempt + 1,
 		Kind: kind, Feedback: feedback, Error: category})
+}
+
+// ---- checks gate ----------------------------------------------------------
+
+// dropAwaiting forgets a published record. The claim is not touched.
+func (o *Orchestrator) dropAwaiting(id string) {
+	delete(o.awaiting, id)
+	delete(o.checkedAt, id)
+	delete(o.awaitAttempt, id)
+}
+
+// watchChecks looks at every published pull request that is due for a look
+// (SPEC 15.6). A ticket reaches the hand-off state only from here: after
+// the required checks have passed on exactly the commit that was pushed.
+func (o *Orchestrator) watchChecks(ctx context.Context) {
+	if o.d.Checks == nil || len(o.awaiting) == 0 {
+		return
+	}
+	interval := time.Duration(o.cfg.Publish.ChecksPollIntervalMS) * time.Millisecond
+	ids := make([]string, 0, len(o.awaiting))
+	for id := range o.awaiting {
+		if at, ok := o.checkedAt[id]; ok && o.now().Sub(at) < interval {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	sort.Strings(ids)
+	fresh, err := o.d.Tracker.FetchIssuesByIDs(ctx, ids)
+	if err != nil {
+		o.d.Log.Warn("issue refresh failed, checks are looked at next tick", "error", err)
+		return
+	}
+	byID := map[string]issue.Issue{}
+	for _, is := range fresh {
+		byID[is.ID] = is
+	}
+	for _, id := range ids {
+		rec := o.awaiting[id]
+		o.checkedAt[id] = o.now()
+		is, found := byID[id]
+		inProgress := issue.NormalizeState(is.State) == issue.NormalizeState(o.cfg.Tracker.InProgressState)
+		switch {
+		case !found, o.isTerminal(is):
+			// Closed or deleted while waiting. The pull request is left alone.
+			o.dropAwaiting(id)
+			o.release(id)
+			if found {
+				o.cleanup(ctx, is)
+			}
+			continue
+		case !inProgress:
+			// A person moved the ticket. Their state stands: it is not
+			// overwritten with the hand-off state when checks pass.
+			o.dropAwaiting(id)
+			o.release(id)
+			continue
+		}
+
+		st, err := o.d.Checks.Check(ctx, *rec)
+		if err != nil {
+			o.d.Log.Warn("checks could not be read, will retry", "issue", rec.Identifier, "error", err)
+			if o.now().After(rec.ChecksDeadline) {
+				o.dropAwaiting(id)
+				o.block(ctx, is, "checks_timeout", "", 0)
+			}
+			continue
+		}
+		switch st.State {
+		case ChecksPassed:
+			if err := o.d.Checks.MarkReady(ctx, *rec); err != nil {
+				o.d.Log.Warn("pull request not marked ready, will retry", "issue", rec.Identifier, "error", err)
+				continue
+			}
+			if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.HandoffState); err != nil {
+				o.d.Log.Warn("hand-off state not written, will retry", "issue", rec.Identifier, "error", err)
+				continue
+			}
+			o.d.Budget.ClearIssue(id)
+			o.persist()
+			o.comment(ctx, is, fmt.Sprintf("Pull request #%d passed its required checks and is ready for review.", rec.PRNumber), "")
+			o.dropAwaiting(id)
+			o.release(id)
+		case ChecksFailed:
+			attempt := o.awaitAttempt[id]
+			o.dropAwaiting(id)
+			o.failIssue(ctx, is, attempt, KindGate, "checks_failed", st.Detail, st.Feedback)
+		case ChecksForeignPush:
+			// Someone else pushed to the branch. What was verified is not
+			// what is there now, so the service stops and a person decides.
+			o.dropAwaiting(id)
+			o.block(ctx, is, "foreign_push", "", 0)
+		case ChecksClosed:
+			o.dropAwaiting(id)
+			o.block(ctx, is, "pull_request_closed", "", 0)
+		default:
+			if o.now().After(rec.ChecksDeadline) {
+				o.dropAwaiting(id)
+				o.block(ctx, is, "checks_timeout", st.Detail, 0)
+			}
+		}
+	}
 }
 
 // block moves the issue to the blocked state and releases the claim. If the

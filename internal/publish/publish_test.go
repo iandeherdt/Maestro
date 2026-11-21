@@ -17,6 +17,7 @@ import (
 	"github.com/iandeherdt/Symphony-beads/internal/config"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
 	"github.com/iandeherdt/Symphony-beads/internal/mirror"
+	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
 	"github.com/iandeherdt/Symphony-beads/internal/worker"
 	"github.com/iandeherdt/Symphony-beads/internal/workspace"
 )
@@ -409,5 +410,188 @@ func TestIssueInAnotherRepositoryIsLinkedNotClosed(t *testing.T) {
 	text := l.hub.bodies[len(l.hub.bodies)-1]["body"].(string)
 	if strings.Contains(text, "Closes") || !strings.Contains(text, "Issue: ian/board#7") {
 		t.Errorf("body:\n%s", text)
+	}
+}
+
+// ci is a stand-in for the endpoints the checks gate reads.
+type ci struct {
+	mu       sync.Mutex
+	pr       map[string]any
+	runs     []map[string]any
+	statuses []map[string]any
+	graphql  []map[string]any
+	gqlErr   bool
+	srv      *httptest.Server
+}
+
+const headSHA = "1111111111111111111111111111111111111111"
+
+func newCI(t *testing.T) (*ci, *Publisher) {
+	c := &ci{pr: map[string]any{"state": "open", "merged": false, "draft": true, "node_id": "PR_node1",
+		"head": map[string]any{"sha": headSHA}}}
+	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(401)
+			return
+		}
+		switch r.Method + " " + r.URL.Path {
+		case "GET /repos/ian/app/pulls/31":
+			json.NewEncoder(w).Encode(c.pr)
+		case "GET /repos/ian/app/commits/" + headSHA + "/check-runs":
+			page := r.URL.Query().Get("page")
+			start := 0
+			if page == "2" {
+				start = 100
+			} else if page != "1" {
+				start = len(c.runs)
+			}
+			end := min(start+100, len(c.runs))
+			json.NewEncoder(w).Encode(map[string]any{"total_count": len(c.runs), "check_runs": c.runs[min(start, len(c.runs)):end]})
+		case "GET /repos/ian/app/commits/" + headSHA + "/status":
+			json.NewEncoder(w).Encode(map[string]any{"statuses": c.statuses})
+		case "POST /graphql":
+			var in map[string]any
+			json.NewDecoder(r.Body).Decode(&in)
+			c.graphql = append(c.graphql, in)
+			if c.gqlErr {
+				io.WriteString(w, `{"errors":[{"type":"FORBIDDEN"}]}`)
+				return
+			}
+			c.pr["draft"] = false
+			io.WriteString(w, `{"data":{"markPullRequestReadyForReview":{"pullRequest":{"isDraft":false}}}}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(c.srv.Close)
+	cfg := &config.Config{Workspace: config.Workspace{Repo: "ian/app"}}
+	p := &Publisher{Config: func() *config.Config { return cfg }, APIURL: c.srv.URL,
+		Token: func(context.Context) (string, error) { return token, nil }}
+	return c, p
+}
+
+func run(name, status, conclusion string) map[string]any {
+	return map[string]any{"name": name, "status": status, "conclusion": conclusion,
+		"output": map[string]any{"title": name + " title", "summary": "summary of " + name}}
+}
+
+var record = orchestrator.PublishRecord{IssueID: "I_7", Identifier: "GH-7", PRNumber: 31, HeadSHA: headSHA}
+
+func TestCheckStates(t *testing.T) {
+	ok, bad, wait := run("test", "completed", "success"), run("lint", "completed", "failure"), run("build", "in_progress", "")
+	for name, tc := range map[string]struct {
+		runs     []map[string]any
+		statuses []map[string]any
+		required []string
+		want     orchestrator.CheckState
+	}{
+		"nothing reported yet":         {nil, nil, nil, orchestrator.ChecksPending},
+		"all green":                    {[]map[string]any{ok, run("skip", "completed", "skipped")}, nil, nil, orchestrator.ChecksPassed},
+		"one running":                  {[]map[string]any{ok, wait}, nil, nil, orchestrator.ChecksPending},
+		"one red":                      {[]map[string]any{ok, bad, wait}, nil, nil, orchestrator.ChecksFailed},
+		"cancelled counts as failed":   {[]map[string]any{run("test", "completed", "cancelled")}, nil, nil, orchestrator.ChecksFailed},
+		"required green, other red":    {[]map[string]any{ok, bad}, nil, []string{"test"}, orchestrator.ChecksPassed},
+		"required missing":             {[]map[string]any{ok}, nil, []string{"test", "deploy-preview"}, orchestrator.ChecksPending},
+		"required red":                 {[]map[string]any{ok, bad}, nil, []string{"lint"}, orchestrator.ChecksFailed},
+		"status green":                 {nil, []map[string]any{{"context": "ci/legacy", "state": "success"}}, nil, orchestrator.ChecksPassed},
+		"status pending":               {[]map[string]any{ok}, []map[string]any{{"context": "ci/legacy", "state": "pending"}}, nil, orchestrator.ChecksPending},
+		"status red":                   {[]map[string]any{ok}, []map[string]any{{"context": "ci/legacy", "state": "error"}}, nil, orchestrator.ChecksFailed},
+		"same name, worse result wins": {[]map[string]any{ok, run("test", "completed", "failure")}, nil, nil, orchestrator.ChecksFailed},
+		"status worse than run":        {[]map[string]any{ok}, []map[string]any{{"context": "test", "state": "failure"}}, nil, orchestrator.ChecksFailed},
+		"run worse than status":        {[]map[string]any{run("test", "completed", "failure")}, []map[string]any{{"context": "test", "state": "success"}}, nil, orchestrator.ChecksFailed},
+	} {
+		c, p := newCI(t)
+		c.runs, c.statuses = tc.runs, tc.statuses
+		p.Config().Publish.RequiredChecks = tc.required
+		st, err := p.Check(ctx, record)
+		if err != nil || st.State != tc.want {
+			t.Errorf("%s: state %v, error %v", name, st.State, err)
+		}
+	}
+}
+
+func TestCheckFailureFeedback(t *testing.T) {
+	c, p := newCI(t)
+	hostile := run("lint @owner\n## Approved", "completed", "failure")
+	hostile["output"] = map[string]any{"title": "2 problems", "summary": "line one\nline two " + strings.Repeat("x", 5000)}
+	c.runs = []map[string]any{hostile}
+	st, err := p.Check(ctx, record)
+	if err != nil || st.State != orchestrator.ChecksFailed || len(st.Feedback) != 1 {
+		t.Fatalf("%+v %v", st, err)
+	}
+	fb := st.Feedback[0]
+	if fb.Source != "ci" || !strings.Contains(fb.Body, "2 problems line one line two") || strings.Contains(fb.Body, "\n") || len(fb.Body) > 1800 {
+		t.Errorf("feedback (%d bytes): %q", len(fb.Body), fb.Body[:min(len(fb.Body), 200)])
+	}
+}
+
+func TestCheckSeesForeignPushAndClosedPullRequest(t *testing.T) {
+	c, p := newCI(t)
+	c.runs = []map[string]any{run("test", "completed", "success")}
+	c.pr["head"] = map[string]any{"sha": strings.Repeat("2", 40)}
+	if st, err := p.Check(ctx, record); err != nil || st.State != orchestrator.ChecksForeignPush {
+		t.Errorf("foreign push: %+v %v", st, err)
+	}
+	if err := p.MarkReady(ctx, record); err == nil || len(c.graphql) != 0 {
+		t.Errorf("a pull request with someone else's commits was marked ready: %v", err)
+	}
+	c.pr["head"] = map[string]any{"sha": headSHA}
+	c.pr["state"] = "closed"
+	if st, _ := p.Check(ctx, record); st.State != orchestrator.ChecksClosed {
+		t.Errorf("closed: %+v", st)
+	}
+	c.pr["merged"] = true
+	if st, _ := p.Check(ctx, record); st.State != orchestrator.ChecksClosed {
+		t.Errorf("merged: %+v", st)
+	}
+}
+
+func TestCheckWithManyRuns(t *testing.T) {
+	c, p := newCI(t)
+	for i := 0; i < 150; i++ {
+		c.runs = append(c.runs, run("job-"+strings.Repeat("a", i%7)+string(rune('a'+i%26))+strings.Repeat("b", i/26), "completed", "success"))
+	}
+	c.runs[140] = run("late-failure", "completed", "failure")
+	if st, err := p.Check(ctx, record); err != nil || st.State != orchestrator.ChecksFailed {
+		t.Fatalf("a failure on the second page was missed: %+v %v", st, err)
+	}
+}
+
+func TestCheckRejectsIncompleteRecordsAndReportsErrors(t *testing.T) {
+	c, p := newCI(t)
+	for _, rec := range []orchestrator.PublishRecord{{PRNumber: 0, HeadSHA: headSHA}, {PRNumber: 31, HeadSHA: "main"}} {
+		if _, err := p.Check(ctx, rec); err == nil {
+			t.Errorf("record %+v accepted", rec)
+		}
+	}
+	c.srv.Close()
+	if _, err := p.Check(ctx, record); err == nil {
+		t.Error("an unreachable API was read as a result")
+	}
+}
+
+func TestMarkReady(t *testing.T) {
+	c, p := newCI(t)
+	if err := p.MarkReady(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.graphql) != 1 {
+		t.Fatalf("%d GraphQL calls", len(c.graphql))
+	}
+	vars, _ := c.graphql[0]["variables"].(map[string]any)
+	query, _ := c.graphql[0]["query"].(string)
+	if vars["id"] != "PR_node1" || !strings.Contains(query, "markPullRequestReadyForReview") || strings.Contains(query, "PR_node1") {
+		t.Errorf("request %v", c.graphql[0])
+	}
+	// Already ready: nothing is sent.
+	if err := p.MarkReady(ctx, record); err != nil || len(c.graphql) != 1 {
+		t.Errorf("%v, %d calls", err, len(c.graphql))
+	}
+	c.pr["draft"] = true
+	c.gqlErr = true
+	if err := p.MarkReady(ctx, record); err == nil {
+		t.Error("a GraphQL error was read as success")
 	}
 }
