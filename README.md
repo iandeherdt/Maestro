@@ -110,6 +110,10 @@ can be stopped and run again at any time:
 symphony setup
 ```
 
+In a terminal it shows each step with its progress, answers yes and no with one key, and lets you
+pick from a list with the arrow keys. When its output goes to a file or another program, or when
+the `NO_COLOR` environment variable is set, it prints plain lines instead.
+
 What the setup does:
 
 1. **Checks the machine** for Git and Docker or Podman. For anything missing it tells you what to install.

@@ -414,9 +414,29 @@ func (b *Board) choose(ctx context.Context, ui *UI, st *State, owner, repo strin
 	if found.Repository == nil || found.Repository.ID == "" || found.Repository.Owner.ID == "" || found.Organization == nil {
 		return fmt.Errorf("%s could not be read with the App. Check that the App is installed on it", st.Repo)
 	}
+	if ui.Styled {
+		// In a terminal the boards are a list to pick from.
+		options, numbers := []string{"Create a new board named " + boardTitle}, []int{0}
+		for _, p := range found.Organization.ProjectsV2.Nodes {
+			if p != nil && !p.Closed && p.Number > 0 {
+				options = append(options, fmt.Sprintf("Use board #%d  %s", p.Number, oneLine(p.Title)))
+				numbers = append(numbers, p.Number)
+			}
+		}
+		if len(options) > 1 {
+			i, err := ui.Choose(fmt.Sprintf("%s already has boards. Which one should hold the tickets?", owner), options)
+			if err != nil {
+				return err
+			}
+			if numbers[i] != 0 {
+				st.Board = numbers[i]
+				return nil
+			}
+		}
+	}
 	open := map[int]bool{}
 	for _, p := range found.Organization.ProjectsV2.Nodes {
-		if p != nil && !p.Closed && p.Number > 0 {
+		if p != nil && !p.Closed && p.Number > 0 && !ui.Styled {
 			if len(open) == 0 {
 				ui.Say("  %s already has these boards:", owner)
 			}

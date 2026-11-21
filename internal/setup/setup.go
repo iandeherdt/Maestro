@@ -23,13 +23,30 @@ import (
 type UI struct {
 	In  *bufio.Reader
 	Out io.Writer
+
+	// Styled switches on colour and drawing. Width is the width of the
+	// terminal, and Raw switches the terminal to single key presses and
+	// returns how to switch back. Both are only used when Styled is set,
+	// and both may be nil.
+	Styled bool
+	Width  func() int
+	Raw    func() (restore func(), err error)
+
+	inStep bool
+	hang   int // indent of the text of the list item being printed
 }
 
 // NewUI wraps a terminal's input and output.
 func NewUI(in io.Reader, out io.Writer) *UI { return &UI{In: bufio.NewReader(in), Out: out} }
 
 // Say prints one line.
-func (u *UI) Say(format string, a ...any) { fmt.Fprintf(u.Out, format+"\n", a...) }
+func (u *UI) Say(format string, a ...any) {
+	if u.Styled {
+		u.say(fmt.Sprintf(format, a...))
+		return
+	}
+	fmt.Fprintf(u.Out, format+"\n", a...)
+}
 
 // ErrAborted is returned when the operator declines or the input ends.
 var ErrAborted = errors.New("setup stopped; run `symphony setup` again to continue where you left off")
@@ -45,10 +62,21 @@ func (u *UI) line() (string, error) {
 // Ask asks for a value. An empty answer takes the default. The answer is
 // checked by valid, and the question is repeated until it passes.
 func (u *UI) Ask(question, def string, valid func(string) error) (string, error) {
-	for {
+	if u.Styled {
+		hint := ""
 		if def != "" {
+			hint = "Enter for " + def
+		}
+		u.question(question, hint)
+		fmt.Fprintln(u.Out)
+	}
+	for {
+		switch {
+		case u.Styled:
+			fmt.Fprint(u.Out, prompt)
+		case def != "":
 			fmt.Fprintf(u.Out, "%s [%s]: ", question, def)
-		} else {
+		default:
 			fmt.Fprintf(u.Out, "%s: ", question)
 		}
 		ans, err := u.line()
@@ -57,10 +85,18 @@ func (u *UI) Ask(question, def string, valid func(string) error) (string, error)
 		}
 		if ans == "" {
 			ans = def
+			if u.Styled && def != "" && u.Raw != nil {
+				// Show what Enter stood for, on the line it was pressed on.
+				fmt.Fprintf(u.Out, "\x1b[1A%s%s\n", prompt, def)
+			}
 		}
 		if valid != nil {
 			if err := valid(ans); err != nil {
-				u.Say("  %v", err)
+				if u.Styled {
+					fmt.Fprintf(u.Out, "  %s✖%s  %v\n", red, reset, err)
+				} else {
+					u.Say("  %v", err)
+				}
 				continue
 			}
 		}
@@ -70,6 +106,14 @@ func (u *UI) Ask(question, def string, valid func(string) error) (string, error)
 
 // Confirm asks a yes or no question. Only an explicit yes continues.
 func (u *UI) Confirm(question string) (bool, error) {
+	if u.Styled && u.Raw != nil {
+		return u.confirmKey(question)
+	}
+	if u.Styled {
+		u.question(question, "y / n")
+		fmt.Fprint(u.Out, "\n"+prompt)
+		return u.confirmLine()
+	}
 	for {
 		fmt.Fprintf(u.Out, "%s [y/n]: ", question)
 		ans, err := u.line()
@@ -178,6 +222,9 @@ type Step interface {
 // skipped. After a step runs, it is checked again, and the wizard stops if
 // it still is not done.
 func Run(ctx context.Context, ui *UI, st *State, steps []Step) error {
+	if ui.Styled {
+		return runStyled(ctx, ui, st, steps)
+	}
 	for i, step := range steps {
 		ui.Say("")
 		ui.Say("Step %d of %d: %s", i+1, len(steps), step.Title())
@@ -210,5 +257,52 @@ func Run(ctx context.Context, ui *UI, st *State, steps []Step) error {
 	}
 	ui.Say("")
 	ui.Say("All %d steps are complete.", len(steps))
+	return nil
+}
+
+// runStyled is Run as it looks in a terminal. A step that is already done
+// takes one line; the others open up.
+func runStyled(ctx context.Context, ui *UI, st *State, steps []Step) error {
+	check := func(step Step) (Status, error) {
+		stop := ui.Waiting("Checking: " + step.Title())
+		defer stop()
+		status, err := step.Check(ctx, st)
+		if err != nil {
+			return status, fmt.Errorf("%s: %w", step.Title(), err)
+		}
+		return status, nil
+	}
+	fmt.Fprintln(ui.Out)
+	for i, step := range steps {
+		status, err := check(step)
+		if err != nil {
+			return err
+		}
+		if status.Done {
+			ui.stepEnd(green, "✔", step.Title()+dim+"  ·  "+status.Detail+reset)
+			continue
+		}
+		ui.stepHead(i+1, len(steps), step.Title())
+		if status.Detail != "" {
+			ui.Say("  %s", status.Detail)
+		}
+		err = step.Run(ctx, ui, st)
+		if err == nil {
+			err = st.Save()
+		}
+		if err != nil {
+			ui.inStep = false
+			return err
+		}
+		if status, err = check(step); err != nil {
+			ui.inStep = false
+			return err
+		}
+		if !status.Done {
+			ui.stepEnd(yellow, "▲", "Not finished yet. "+status.Detail)
+			return ErrAborted
+		}
+		ui.stepEnd(green, "✔", "Done. "+status.Detail)
+	}
 	return nil
 }
