@@ -42,6 +42,9 @@ const (
 	PlanBriefError      = "plan_brief_error"
 	PlanMalformed       = "plan_malformed"
 	afterRunGracePeriod = 2 * time.Minute
+	// maxOwnerComments is how many of the owner's most recent comments on a
+	// ticket are given to the agent.
+	maxOwnerComments = 20
 )
 
 // Turn is one agent turn to run.
@@ -203,6 +206,21 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		return w.plan(ctx, a, set, ws, sink)
 	}
 
+	// What the owner wrote on the ticket belongs to the task: a
+	// clarification, or what to change when the ticket came back for
+	// rework. Only allowlisted commenters are returned.
+	comments, err := w.Tracker.FetchFeedback(ctx, is, time.Time{})
+	if err != nil {
+		return failed(RefreshError, err)
+	}
+	if len(comments) > maxOwnerComments {
+		comments = comments[len(comments)-maxOwnerComments:]
+	}
+	feedback := append([]issue.Feedback(nil), a.Feedback...)
+	for _, c := range comments {
+		feedback = append(feedback, issue.Feedback{Source: "tracker", Author: c.Author, Body: c.Body})
+	}
+
 	maxTurns := int(cfg.Agent.MaxTurns)
 	sessionID, reason := "", ""
 	sessionReset := false
@@ -214,7 +232,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		phase(orchestrator.BuildingPrompt)
 		first := func() (string, error) {
 			return set.Prompt.First(prompt.Input{
-				Issue: is, Attempt: a.Number, RetryKind: a.RetryKind, Feedback: a.Feedback,
+				Issue: is, Attempt: a.Number, RetryKind: a.RetryKind, Feedback: feedback,
 				WorkerName: cfg.Worker.Name, RepoName: cfg.Workspace.Repo,
 				BaseBranch: cfg.Workspace.BaseBranch, Branch: ws.Branch,
 			})
