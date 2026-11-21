@@ -45,6 +45,9 @@ type Deps struct {
 	// Checks is optional. Without it published work holds its claim and
 	// nothing moves it on, which is only useful in tests.
 	Checks Checker
+	// Reviews is optional. Without it nothing follows a ticket once it is
+	// handed to a person.
+	Reviews Reviews
 	// Preflight is the optional per-tick validation (SPEC 6.2, 6.3). It
 	// returns a configuration to apply when the workflow file changed, or
 	// nil. An error skips dispatch for that tick; reconciliation still
@@ -82,10 +85,14 @@ type Orchestrator struct {
 	// checkedAt and awaitAttempt belong to awaiting entries.
 	checkedAt    map[string]time.Time
 	awaitAttempt map[string]int
-	claimed      map[string]bool
-	retries      map[string]*RetryEntry
-	completed    map[string]bool
-	totals       Totals
+	// handoffAt is when the hand-off watch last ran. closedNoted holds the
+	// issues whose closed pull request was already commented on.
+	handoffAt   time.Time
+	closedNoted map[string]bool
+	claimed     map[string]bool
+	retries     map[string]*RetryEntry
+	completed   map[string]bool
+	totals      Totals
 
 	gen           uint64
 	spawnFailures int
@@ -112,7 +119,7 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		d:         d,
 		running:   map[string]*runEntry{},
 		awaiting:  map[string]*PublishRecord{},
-		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{},
+		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{}, closedNoted: map[string]bool{},
 		claimed:   map[string]bool{},
 		retries:   map[string]*RetryEntry{},
 		completed: map[string]bool{},
@@ -279,6 +286,7 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 
 	o.reconcile(ctx)
 	o.watchChecks(ctx)
+	o.watchHandoff(ctx)
 
 	if o.configError != "" {
 		return
@@ -798,6 +806,87 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// reworkState is where a ticket goes when a reviewer asks for changes.
+const reworkState = "Rework"
+
+// watchHandoff looks at the tickets waiting for a person (SPEC 15.8). It
+// keeps no state of its own between runs beyond a throttle: after a restart
+// it finds the same tickets on the board again.
+func (o *Orchestrator) watchHandoff(ctx context.Context) {
+	if o.d.Reviews == nil {
+		return
+	}
+	interval := time.Duration(o.cfg.Publish.ChecksPollIntervalMS) * time.Millisecond
+	if !o.handoffAt.IsZero() && o.now().Sub(o.handoffAt) < interval {
+		return
+	}
+	o.handoffAt = o.now()
+	issues, err := o.d.Tracker.FetchIssuesByStates(ctx, []string{o.cfg.Tracker.HandoffState})
+	if err != nil {
+		o.d.Log.Warn("hand-off tickets could not be read, will retry", "error", err)
+		return
+	}
+	seen := map[string]bool{}
+	for _, is := range issues {
+		// Another worker's tickets, and tickets this worker is busy with,
+		// are left alone.
+		if !is.HasLabels(o.cfg.Tracker.RequiredLabels) || o.claimed[is.ID] {
+			continue
+		}
+		seen[is.ID] = true
+		st, err := o.d.Reviews.Review(ctx, is)
+		if err != nil {
+			o.d.Log.Warn("pull request could not be read, will retry", "issue", is.Identifier, "error", err)
+			continue
+		}
+		switch st.State {
+		case ReviewMerged:
+			// The branch goes first. If the state write then fails, the
+			// next run finds the merged pull request again and retries.
+			if err := o.d.Reviews.DeleteBranch(ctx, is); err != nil {
+				o.d.Log.Warn("merged branch not deleted", "issue", is.Identifier, "error", err)
+			}
+			if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.DoneState); err != nil {
+				o.d.Log.Warn("done state not written, will retry", "issue", is.Identifier, "error", err)
+				continue
+			}
+			o.cleanup(ctx, is)
+			o.comment(ctx, is, fmt.Sprintf("Pull request #%d was merged.", st.PRNumber), "")
+			delete(o.closedNoted, is.ID)
+		case ReviewClosed:
+			if !o.closedNoted[is.ID] {
+				o.closedNoted[is.ID] = true
+				o.comment(ctx, is, fmt.Sprintf("Pull request #%d was closed without being merged. "+
+					"The ticket stays where it is: move it to Rework to have it picked up again, or close it.", st.PRNumber), "")
+			}
+		case ReviewChangesRequested:
+			delete(o.closedNoted, is.ID)
+			if !o.cfg.Publish.ReworkOnChangesRequested || !o.hasActiveState(reworkState) {
+				continue
+			}
+			if err := o.d.Tracker.SetState(ctx, is, reworkState); err != nil {
+				o.d.Log.Warn("rework state not written, will retry", "issue", is.Identifier, "error", err)
+			}
+		default:
+			delete(o.closedNoted, is.ID)
+		}
+	}
+	for id := range o.closedNoted {
+		if !seen[id] {
+			delete(o.closedNoted, id)
+		}
+	}
+}
+
+func (o *Orchestrator) hasActiveState(state string) bool {
+	for _, s := range o.cfg.Tracker.ActiveStates {
+		if issue.NormalizeState(s) == issue.NormalizeState(state) {
+			return true
+		}
+	}
+	return false
 }
 
 // block moves the issue to the blocked state and releases the claim. If the
