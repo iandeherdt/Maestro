@@ -1,12 +1,30 @@
 # Maestro
 
-Maestro turns tickets into pull requests. You approve a ticket on GitHub, Claude Code works
-on it inside a sandbox on your own machine, and you get a pull request to review. Nothing is merged
-without you.
+**Maestro turns a GitHub board into a team of Claude Code agents that you can leave alone.** You
+write an idea on a card. Maestro plans it with you in the comments, splits it into tasks, does the
+work in a locked box on your own machines, and hands you a pull request that already passed its
+checks. Nothing is merged without you.
 
-It is built for one person running agents on their own hardware with their own Claude
-subscription, where the agent must not be able to do damage even if a ticket, a web page or a
-dependency tries to trick it.
+What sets it apart:
+
+- **The agent is not trusted.** It works in a sandbox with no token and no way to push. Maestro
+  itself runs the tests, checks the diff against a policy, scans for secrets and opens the pull
+  request. A ticket, a web page or a dependency that tries to trick the agent gets nowhere.
+- **Your Claude subscription, not an API bill.** It drives the official `claude` command that you
+  logged in to yourself. No key is passed around.
+- **Only GitHub.** The board, the tickets, the comments and the pull requests all live there. No
+  other tracker, no extra server, no database.
+- **From idea to done, not only from ticket to code.** Planning, your answers, rework when you ask
+  for changes, and closing the card after the merge are all part of it.
+- **Rules that tools enforce.** Rule packs for .NET and TypeScript are checked by linters,
+  analyzers and coverage, in places the agent cannot edit.
+- **Your machines.** A Mac and a home server can share one board, and each card says which one
+  does the work.
+- **One guided setup.** `symphony setup` walks you through every step.
+
+It follows the [Symphony specification](https://github.com/openai/symphony) published by OpenAI,
+whose reference setup pairs Linear with Codex. Maestro is a separate implementation for GitHub and
+Claude Code, built for one person running agents on their own hardware.
 
 > **Status: early.** The service has taken a real ticket to a merged pull request on a Mac, with
 > labels. The board and the planning stage described below have had one real run on a Mac: setup,
