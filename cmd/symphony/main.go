@@ -152,8 +152,12 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "setup failed:", err)
 		return 1
 	}
-	ui.Say("The workflow file is %s", st.WorkflowFile)
-	ui.Say("Check it at any time with: symphony check")
-	ui.Say("Installing and starting the service is not built yet, so nothing is running.")
+	ui.Say("")
+	ui.Say("Setup is finished as far as it goes today.")
+	ui.Say("  Done: the GitHub App, its installation on %s, the labels and the settings file.", st.Repo)
+	ui.Say("  Not built yet: the service that picks up tickets. Nothing is running, and labelling an")
+	ui.Say("  issue does nothing until it is. You do not need to do anything else for now.")
+	ui.Say("  Your settings: %s", st.WorkflowFile)
+	ui.Say("  To check them at any time: symphony check")
 	return 0
 }

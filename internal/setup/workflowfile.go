@@ -16,6 +16,9 @@ import (
 
 const workflowFileName = "WORKFLOW.md"
 
+// noTests is the verify command written when the operator has none.
+const noTests = "true"
+
 // WorkflowFile writes the workflow file from a few answers and validates
 // it with the same code the service uses at startup.
 type WorkflowFile struct {
@@ -46,9 +49,6 @@ func (w *WorkflowFile) Check(_ context.Context, st *State) (Status, error) {
 }
 
 func validCommand(s string) error {
-	if strings.TrimSpace(s) == "" {
-		return errors.New("a verify command is required: it is how the service checks the agent's work")
-	}
 	for _, r := range s {
 		if unicode.IsControl(r) {
 			return errors.New("write the command on one line; you can edit the file later for more")
@@ -75,13 +75,24 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	ui.Say("  After the agent finishes, the service runs a command of yours to decide whether the work")
-	ui.Say("  is acceptable, for example: npm test   or: go test ./...   or: make check")
-	verify, err := ui.Ask("  Verify command", "", validCommand)
+	ui.Say("  One question: how do you test %s?", st.Repo)
+	ui.Say("  When the agent says it is done, the service runs your test command itself, in the agent's")
+	ui.Say("  copy of the repository. If the command fails, the work is not published and the agent")
+	ui.Say("  gets the output to fix it. Type the command you would run yourself, for example:")
+	ui.Say("      npm test        go test ./...        make check")
+	ui.Say("  If the repository has no tests yet, just press Enter.")
+	verify, err := ui.Ask("  Test command", "", validCommand)
 	if err != nil {
 		return err
 	}
 	verify = strings.TrimSpace(verify)
+	if verify == "" {
+		// "true" always succeeds. The file must hold a command, and a
+		// first try on an empty repository should not need one.
+		verify = noTests
+		ui.Say("  No test command: the agent's work will be published without being tested. That is")
+		ui.Say("  fine for a first try. Later, change verify.command in the file below.")
+	}
 	text := render(goos, st, m[1], verify)
 	ui.Say("  This file will be written to %s:", path)
 	ui.Say("")

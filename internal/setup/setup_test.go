@@ -628,20 +628,29 @@ func TestWorkflowFileStep(t *testing.T) {
 	}
 }
 
-func TestWorkflowFileNeedsAVerifyCommandAndAYes(t *testing.T) {
+func TestWorkflowFileNeedsAYesAndAcceptsNoTests(t *testing.T) {
 	g := newGitHub(t)
 	st := installed(t, g)
 	st.Worker = "linux"
 	step := &WorkflowFile{GOOS: "linux"}
-	u, out := ui("\n   \nmake check\nn\n")
+	u, _ := ui("make check\nn\n")
 	if err := step.Run(ctx, u, st); !errors.Is(err, ErrAborted) {
 		t.Fatal(err)
 	}
-	if strings.Count(out.String(), "a verify command is required") != 2 {
-		t.Errorf("empty answers were accepted:\n%s", out)
-	}
 	if _, err := os.Stat(filepath.Join(st.Dir(), workflowFileName)); err == nil {
 		t.Fatal("the file was written after a no")
+	}
+	// Enter alone: a file that passes validation, with a plain warning.
+	u, out := ui("\ny\n")
+	if err := step.Run(ctx, u, st); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := os.ReadFile(st.WorkflowFile)
+	if !strings.Contains(string(text), "verify:\n  command: |\n    true\n") || validate(st.WorkflowFile) != nil {
+		t.Fatalf("file:\n%s", text)
+	}
+	if !strings.Contains(out.String(), "published without being tested") || !strings.Contains(out.String(), "how do you test "+st.Repo) {
+		t.Errorf("output:\n%s", out)
 	}
 	if err := validCommand("a\nb"); err == nil {
 		t.Error("a multi-line command was accepted")
