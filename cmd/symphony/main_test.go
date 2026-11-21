@@ -72,3 +72,10 @@ func TestCheckRejectsBadTemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"version"}, &out, &errOut); code != 0 || out.String() != "symphony dev\n" {
+		t.Fatalf("exit %d, output %q", code, out.String())
+	}
+}

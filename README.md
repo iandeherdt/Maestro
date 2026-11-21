@@ -50,23 +50,33 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 - Git 2.31 or newer.
 - The [Claude Code CLI](https://code.claude.com/docs), logged in with your subscription.
 - A GitHub repository you own. Private repositories work.
-- Go 1.24 to build from source, until there are release downloads.
 
 ## Install
 
-Build the binary:
+Install the binary on macOS or Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iandeherdt/Symphony-beads/main/install.sh | sh
+```
+
+The script downloads the latest release for your machine, checks it against the release's
+checksum file, and puts `symphony` in `~/.local/bin`. It does not use `sudo`. To read it before
+running it, open [install.sh](install.sh). To choose a version or a directory, set
+`SYMPHONY_VERSION=v0.1.0` or `SYMPHONY_INSTALL_DIR=/some/dir` before `sh`.
+
+Or build it yourself with Go 1.24 or newer:
 
 ```sh
 git clone https://github.com/iandeherdt/Symphony-beads.git
 cd Symphony-beads
-go build ./cmd/symphony
+go build -o ~/.local/bin/symphony ./cmd/symphony
 ```
 
 Then run the guided setup. It explains each step, waits for you before it changes anything, and
 can be stopped and run again at any time:
 
 ```sh
-./symphony setup
+symphony setup
 ```
 
 What the setup does today:
@@ -151,7 +161,7 @@ Follow the conventions in CLAUDE.md. Add or update tests for every behaviour you
 Check a workflow file without starting anything:
 
 ```sh
-./symphony check examples/WORKFLOW.example.md
+symphony check examples/WORKFLOW.example.md
 ```
 
 Every setting, with its default, is listed in [docs/SPEC.md](docs/SPEC.md), section 5. Commonly
@@ -181,6 +191,7 @@ Last updated 2026-11-21.
 | Diff policy and secret scan | Done |
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, not yet tried against github.com |
+| Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
 | Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), not yet tried against github.com |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |

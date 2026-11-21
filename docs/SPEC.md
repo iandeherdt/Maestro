@@ -1978,6 +1978,12 @@ Stated so the operator can accept or reject them:
 
 - Dependencies are pinned and vendored or checksum-verified. Builds are reproducible from a tag.
 - The release binary's checksum is recorded. Workers install only a verified binary.
+  A version tag builds archives for macOS and Linux (amd64 and arm64) and a `SHA256SUMS` file
+  and attaches them to a GitHub release. `install.sh` downloads over HTTPS only, refuses an
+  archive whose checksum does not match or is not listed, and installs into the user's own
+  directory without `sudo`. The checksum file comes from the same release as the archive, so it
+  protects against a damaged or swapped download, not against a compromised release. Signing the
+  release is open.
 - The service updates itself never. Updating is an operator action.
 - This repository is public: it contains no secret, host name, address or token, and its own CI
   runs a secret scan.
