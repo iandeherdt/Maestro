@@ -130,3 +130,14 @@ func SortForDispatch(issues []Issue) {
 		return x.Identifier < y.Identifier
 	})
 }
+
+// Feedback is one item carried into a retry or rework attempt: a gate
+// result, or a comment by an allowlisted human (SPEC 13.3). Body is
+// untrusted text in every case.
+type Feedback struct {
+	Source string // "ci", "policy", "verify", "review" or "tracker"
+	Author string
+	Body   string
+	Path   string // review comments only
+	Line   int    // review comments only, 0 when absent
+}

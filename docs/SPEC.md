@@ -458,9 +458,26 @@ Rendering requirements (as upstream):
 - The engine MUST NOT support file inclusion, rendering of other templates, or any filter with
   side effects.
 
+Supported subset. Anything else is a parse error, so a template that validates behaves the same
+on every worker:
+
+- Output: `{{ value | filter: arg, arg }}`. A list or an object cannot be printed directly.
+- Tags: `if` / `elsif` / `else` / `endif`, `unless`, `for x in list` / `else` / `endfor` with
+  `forloop.index`, `index0`, `first`, `last` and `length`, `comment`, `raw`. Whitespace control
+  with `{{-`, `-}}`, `{%-`, `-%}`.
+- Conditions: `==`, `!=`, `<`, `>`, `<=`, `>=`, `contains`, `and`, `or` (evaluated right to left
+  without precedence, as Liquid does), and the literals `nil`, `true`, `false`, `blank`, `empty`.
+- Filters: `upcase`, `downcase`, `capitalize`, `strip`, `default`, `size`, `join`, `first`,
+  `last`, `truncate`, `replace`, `append`, `prepend`, `plus`, `minus`.
+- Not supported: `include`, `render`, `assign`, `capture`, `case`, `cycle`, `tablerow`, loop
+  options, ranges, and every other filter. A template cannot define variables or reach anything
+  outside its inputs.
+- Limits: 32 levels of nesting, 1 MiB of output.
+- A value is inserted as text. Template syntax inside a value is never evaluated.
+
 Template input variables:
 
-- `issue` (object): all normalized fields.
+- `issue` (object): all normalized fields except `native_ref`. A field without a value is `nil`.
 - `attempt` (integer or null)
 - `retry_kind` (string or null): `continuation`, `failure`, `gate`.
 - `feedback` (list): entries `{source, author, body, path, line}` from allowlisted humans and from
@@ -473,6 +490,9 @@ safety text, and cannot remove it.
 
 Fallback: if the body is empty, the runtime uses
 `You are working on an issue from the configured tracker. Implement it in this repository.`
+
+`symphony check` parses the template and renders it once with sample data, so most template
+errors are found before the first dispatch.
 
 ### 5.5 Workflow Validation and Error Surface
 

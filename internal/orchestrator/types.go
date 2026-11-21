@@ -74,9 +74,9 @@ const (
 // Outcome is reported exactly once per attempt.
 type Outcome struct {
 	Kind     OutcomeKind
-	Category string   // error category, SPEC 10.7 and 17.1
-	Message  string   // untrusted when it comes from the agent or a tool
-	Feedback []string // gate output for the next attempt
+	Category string           // error category, SPEC 10.7 and 17.1
+	Message  string           // untrusted when it comes from the agent or a tool
+	Feedback []issue.Feedback // gate output for the next attempt
 	Publish  *PublishRecord
 	// QuotaResetAt is the reset time the CLI reported, if it did.
 	QuotaResetAt time.Time
@@ -100,7 +100,7 @@ type Attempt struct {
 	// Number is 0 for the first run, >= 1 for retries and continuations.
 	Number    int
 	RetryKind string
-	Feedback  []string
+	Feedback  []issue.Feedback
 }
 
 // Sink receives updates from one attempt. Both methods may be called from
@@ -147,7 +147,7 @@ type RetryEntry struct {
 	Identifier string
 	Attempt    int
 	Kind       string
-	Feedback   []string
+	Feedback   []issue.Feedback
 	DueAt      time.Time
 	Error      string
 
