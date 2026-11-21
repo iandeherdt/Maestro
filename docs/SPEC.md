@@ -366,11 +366,13 @@ Replaces upstream `codex`.
   The service builds the argument vector itself (Section 10.1).
 - `model` (string or null): default null (CLI default).
 - `max_steps_per_turn` (positive integer): default `150`. Passed as the CLI's own step limit.
-- `permission_mode` (string): default `bypassPermissions`. Any value other than `plan` requires
+- `permission_mode` (string): default `bypassPermissions`. One of `acceptEdits`, `auto`,
+  `bypassPermissions`, `manual`, `dontAsk`, `plan`. Any value other than `plan` requires
   `sandbox.backend` to be a real backend (Section 11), enforced by validation.
 - `disallowed_tools` (list): default `["WebFetch", "WebSearch"]`.
 - `inner_sandbox` (boolean): default `false`. Enables Claude Code's own command sandbox in addition
-  to the OS sandbox. To verify: compatibility with the unit restrictions in Section 11.3.
+  to the OS sandbox. It needs `bubblewrap`, `socat` and user namespaces, covers shell commands
+  only, and is incompatible with `RestrictNamespaces` (Section 11.3).
 - `turn_timeout_ms` (integer): default `3600000`. Maximum silence while a turn is streaming.
 - `turn_total_timeout_ms` (integer): default `5400000`. Hard wall-clock cap per turn. Extension.
 - `read_timeout_ms` (integer): default `30000`. Time allowed from launch to the first stream event.
@@ -894,33 +896,48 @@ Each turn is one process, started by the sandbox launcher:
   --output-format stream-json --verbose
   --max-turns <claude.max_steps_per_turn>
   --permission-mode <claude.permission_mode>
+  --permission-prompts none
+  --setting-sources user
   --disallowedTools <claude.disallowed_tools...>
-  --strict-mcp-config --mcp-config <empty config>
+  --strict-mcp-config --mcp-config '{"mcpServers":{}}'
   [--model <claude.model>]
-  [--resume <session_id>]        # continuation turns only
+  --session-id <uuid>            # first turn: chosen by the service
+  --resume <session_id>          # continuation turns instead of --session-id
 ```
 
+- Every flag is passed again on continuation turns. The CLI does not restore `--mcp-config` or
+  settings on resume.
+- `--setting-sources user` excludes the repository's project and local settings, and with them
+  project hooks. `--strict-mcp-config` excludes the repository's `.mcp.json`. Without these, print
+  mode runs project hooks and MCP servers with no trust prompt.
+- `--bare`, `--safe-mode` and `--restricted` MUST NOT be passed. `--bare` never reads the
+  subscription login.
+- The CLI version is pinned in the deployment. The documentation states that `--bare` will become
+  the default for `-p` in a future release, which would disable the subscription login. `doctor`
+  runs `claude auth status` and a no-op print-mode probe against the pinned version.
 - The prompt is written to the process's standard input, then standard input is closed. It is
   never passed as an argument (argument length limits, and visibility in process listings).
 - Working directory: the workspace path.
 - No shell is involved. The argument vector is built by the service.
 - Environment: built from an allowlist, never inherited. `HOME` (the agent user's home), `PATH`
   (fixed), `LANG`, `TZ`, `CI=1`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY=` (empty), `TERM=dumb`,
-  plus `sandbox.env`. The service MUST NOT set any variable that carries an Anthropic credential,
+  `CLAUDE_CONFIG_DIR` (the agent's Claude Code state directory),
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, plus `sandbox.env`. `ANTHROPIC_API_KEY` in
+  particular is never present: in print mode the CLI would use it in place of the login. The service MUST NOT set any variable that carries an Anthropic credential,
   and startup validation fails if `sandbox.env` contains a key matching
   `ANTHROPIC_*`, `CLAUDE_*TOKEN*`, `*_API_KEY`, `GITHUB_*`, `GH_*`, `LINEAR_*`.
 - Authentication: the CLI uses the login stored in the agent user's profile by an earlier
   interactive `claude` login performed by the operator. The service does not read that store.
 - Maximum accepted line size on the stream: 10 MB. A longer line is a `malformed` event.
 
-To verify: exact flag spellings, that `--resume` continues a headless session, how to pass an empty
-MCP configuration, and that project-level settings in the repository cannot re-enable disallowed
-tools or MCP servers. If they can, the launcher mounts an empty file over those settings paths.
+Verified against the documentation and `--help` of Claude Code 2.1.330 (see `phase0.md`). To
+verify by a real run: that `--max-turns` is accepted (it is documented but absent from `--help`),
+and whether project skills and commands still load under `--setting-sources user`.
 
 ### 10.2 Session Startup
 
-- The first stream event that carries a session ID starts the session. The runner emits
-  `session_started` with `session_id`.
+- The first stream event is `system` with subtype `init`. The runner emits `session_started`
+  with its `session_id`, which MUST equal the ID the service chose.
 - If no event arrives within `claude.read_timeout_ms`, fail with `response_timeout`.
 - Continuation turns pass `--resume <session_id>` and send only continuation guidance
   (Section 13.2), not the original prompt.
@@ -933,8 +950,9 @@ The runner reads newline-delimited JSON from standard output until the process e
 
 Completion conditions:
 
-- A final result event with a success subtype, then exit status `0`: turn success.
-- A final result event marking an error, or a non-zero exit: turn failure, mapped in Section 10.7.
+- A final `result` event with subtype `success`, then exit status `0`: turn success.
+- A final `result` event with any other subtype (`error_max_turns`, `error_max_budget_usd`,
+  `error_during_execution`), or a non-zero exit: turn failure, mapped in Section 10.7.
 - No output for `claude.turn_timeout_ms`: `turn_timeout`.
 - Wall clock above `claude.turn_total_timeout_ms`: `turn_timeout`.
 - Process exit without a result event: `port_exit`.
@@ -945,16 +963,16 @@ The whole stream is appended to the audit log (Section 16.2) before interpretati
 
 ### 10.4 Event Mapping
 
-| Stream content (to verify) | Emitted runtime event |
+| Stream content | Emitted runtime event |
 |---|---|
-| Init event with session ID | `session_started` |
-| Assistant message | `notification` (text summarized to 200 characters) |
-| Tool use / tool result | `tool_call` / `tool_result` (tool name, and for shell commands the first 200 characters) |
-| Result, success | `turn_completed` |
-| Result, error: step limit | `turn_ended_with_error` (`max_steps`) |
-| Result, error: execution | `turn_failed` |
-| Permission or input request | `turn_input_required` |
-| Usage or limit notice | `rate_limit` |
+| `system` / `init` | `session_started` |
+| `assistant` | `notification` (text summarized to 200 characters), and `tool_call` for tool use blocks (tool name, and for shell commands the first 200 characters) |
+| `user` (tool results) | `tool_result` |
+| `system` / `api_retry` | `api_retry` (`attempt`, `error_status`, `error`). An `error` of `rate_limit` or `billing_error` also emits `rate_limit`. |
+| `permission_denied` | `permission_denied` (recorded, not a failure) |
+| `result` / `success` | `turn_completed` |
+| `result` / `error_max_turns` | `turn_ended_with_error` (`max_steps`) |
+| `result` / other error subtype | `turn_failed` |
 | Unparseable line | `malformed` |
 | Anything else | `other_message` |
 
@@ -967,8 +985,9 @@ Documented posture (REQUIRED by upstream Section 10.5):
 - The agent runs with tool permissions pre-granted (`bypassPermissions`). This is acceptable only
   because every agent process is confined by Section 11. Validation refuses the combination of a
   permissive mode and an unavailable sandbox.
-- No approval is ever granted at runtime. If the stream contains a permission or input request,
-  the runner terminates the turn and fails the attempt with `turn_input_required`.
+- No approval is ever granted at runtime. `--permission-prompts none` makes the CLI deny anything
+  that would prompt and continue. Denials are recorded in the audit log and counted in the status
+  API. A run cannot stall waiting for input.
 - Web tools are disabled by default. No MCP servers are configured. No tracker or repository tools
   are advertised. The agent's capabilities are: read and write files in the workspace, run
   commands in the sandbox, and reach the hosts on the proxy allowlist.
@@ -997,16 +1016,24 @@ Normalized categories:
 - `turn_timeout`
 - `port_exit`
 - `turn_failed`
-- `turn_input_required`
 - `max_steps`
 - `max_turns_exhausted`
 - `no_changes`
 - `agent_declared_blocked`
 - `sandbox_launch_failed`
 
-To verify: how the CLI signals `agent_not_logged_in` and `agent_quota_exhausted` (exit status,
-result subtype, message text). Until verified, detection is by documented result fields first and
-by message pattern second, and an unrecognized failure is `turn_failed`.
+Detection:
+
+- `agent_not_logged_in`: before each dispatch the service runs `claude auth status` as an `agent`
+  sandbox step (exit status `1` means logged out). During a run: an `api_retry` event with
+  `error: authentication_failed`, or a result whose text starts with "Not logged in" or
+  "Login expired".
+- `agent_quota_exhausted`: an `api_retry` event with `error: rate_limit` or `billing_error`
+  followed by a failed result, or result text matching "hit your ... limit". The reset time is
+  available only as text ("resets 3:45pm"). It is parsed when present and otherwise
+  `budget.quota_backoff_ms` applies.
+- The exit status and result subtype for these two cases are not documented. Until a real run
+  shows them, text matching is the fallback and an unrecognized failure is `turn_failed`.
 
 ### 10.8 Agent Runner Contract
 
@@ -1099,8 +1126,10 @@ IPAddressAllow=<proxy address>          # only for steps with network access
   addresses, and logs every request with the unit name.
 - Allowlists by network profile:
   - `none`: no proxy access (verify by default, export, populate, `after_run`, `before_remove`).
-  - `agent`: the Claude service hosts required by the CLI (to verify: the exact list) plus
-    `sandbox.network.allow_agent`.
+  - `agent`: `api.anthropic.com`, `claude.ai` and `platform.claude.com`, plus
+    `sandbox.network.allow_agent`. Non-essential traffic (updates, telemetry, error reports) is
+    switched off by environment (Section 10.1). To verify by observing the proxy log: whether all
+    three hosts are needed for inference and login refresh.
   - `hooks`: `sandbox.network.allow_hooks`.
 - GitHub is not on any default allowlist. The agent gets the repository from the local mirror and
   has no reason to reach it.
@@ -1222,8 +1251,7 @@ Identity and fields:
   project_item_id}`.
 - `author_id`: the issue author's login, compared case-insensitively with `allowed_authors`.
 - `priority`: from labels `p1`..`p4` (or `priority:1`..`4`), else null.
-- `blocked_by`: from the issue dependency relation if the API exposes it, else an empty list
-  (to verify).
+- `blocked_by`: from `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`.
 - Pull requests returned by the Issues API are skipped. Closed issues are terminal regardless of
   the state source.
 
@@ -1240,8 +1268,8 @@ Approval provenance:
 
 - Labels: the adapter reads the issue's timeline and requires that the most recent `labeled`
   event for each required label (and, in `labels` mode, for the state label) has an actor in
-  `allowed_authors`. On GitHub, applying a label requires triage permission or higher, so an
-  outside contributor cannot approve work. The timeline check also covers a collaborator who is
+  `allowed_authors` (to verify: the actor field on timeline events). On GitHub, applying a label
+  requires the Triage role or higher, so an outside contributor cannot approve work. The timeline check also covers a collaborator who is
   not on the allowlist.
 - Project status: changing a Project field requires write access to the Project. The adapter
   profile documents that the actor of a status change is not verified (to verify: whether the API
@@ -1254,12 +1282,17 @@ Public repository rules:
   dispatch, and `fetch_feedback` returns only allowlisted commenters.
 - The adapter never returns issue comments in the Issue model. Only `title` and `description`.
 
-Token scope:
+Credentials:
 
-- Fine-grained token limited to the listed repositories: Issues read and write, Metadata read.
-- To verify: whether a fine-grained token can read and update a user-owned Project. If not,
-  `project.token` is a separate token carrying only the project scope, or `state_source: labels`
-  is used.
+- Issue reads and writes use the GitHub App installation token described in Section 15.5, with
+  Issues read and write.
+- Project access depends on who owns the Project. Fine-grained personal tokens cannot access a
+  Project owned by a user account, and neither can a GitHub App.
+  - Organization-owned Project (RECOMMENDED): the App carries the organization permission
+    Projects read and write. No personal token is involved.
+  - User-owned Project: `project.token` is a classic personal token with only the `project` scope.
+    It can read and change the owner's Projects and nothing else.
+  - `state_source: labels` needs no Project access at all.
 
 Requests: REST with pagination of 100, conditional requests (ETag) for polling, and respect for
 rate-limit headers (`tracker_rate_limited` with `retry_after_ms`).
@@ -1289,9 +1322,8 @@ were made by an allowlisted user ID (to verify: history fields available through
 
 Scope and paging: reads are filtered by team (and project), pages of 50.
 
-Token scope: Linear personal API keys are not restricted to a team (to verify). The team MUST
-therefore be in a workspace that contains nothing else of value, or an OAuth application with
-restricted scope is used. The key is used only by the control zone.
+Token scope: the API key is created restricted to the dedicated team and to the Read and Write
+permissions only. Admin permission MUST NOT be granted. The key is used only by the control zone.
 
 Account requirements, checked by `doctor` where the API allows: the team has no members outside
 `allowed_authors`.
@@ -1459,7 +1491,7 @@ Push (control zone, from the mirror):
 - `refs/symphony/incoming/<key>` to `refs/heads/<branch_name>` on the target repository.
 - Force is permitted only with a lease on the previously pushed head, and only for refs under
   `publish.branch_prefix`. Startup validation refuses a prefix that could match the base branch.
-- The repository token is supplied through an ephemeral `GIT_ASKPASS` helper.
+- The installation token is supplied through an ephemeral `GIT_ASKPASS` helper.
 
 Pull request (GitHub REST):
 
@@ -1476,10 +1508,24 @@ Pull request (GitHub REST):
 - The orchestrator never approves, merges, enables auto-merge, dismisses reviews or edits branch
   protection.
 
-Repository token scope: fine-grained, limited to the target repository, Contents read and write,
-Pull requests read and write, Metadata read, Commit statuses and Checks read. It MUST NOT include
-Administration, Workflows, Secrets, Actions write or Environments. Without the Workflows
-permission GitHub rejects pushes that change workflow files (to verify), which backs rule D1.
+Repository credential: a GitHub App owned by the operator and installed only on the target
+repositories. The control zone holds the App's private key and mints short-lived installation
+tokens. Wherever this document says "repository token", it means such a token.
+
+Reasons a personal token is not used:
+
+- A pull request cannot be approved by its author. Pull requests opened with the operator's own
+  token could not be reviewed by the operator.
+- The operator's token carries the operator's administrator rights, which Section 15.7 forbids.
+- Fine-grained personal tokens cannot call the Checks API, which Section 15.6 needs.
+
+App permissions: Contents read and write, Pull requests read and write, Issues read and write
+(GitHub tracker only), Checks read, Commit statuses read, Metadata read, and for an
+organization-owned Project the organization permission Projects read and write. It MUST NOT have
+Administration write, Workflows, Secrets, Actions write or Environments. Without the Workflows
+permission GitHub is expected to reject pushes that change workflow files (to verify by one real
+push), which backs rule D1. To verify: which permission lets the App read branch protection for
+the startup check in Section 15.7.
 
 ### 15.6 Checks Gate
 
@@ -1676,8 +1722,8 @@ Mandatory: Invariants 1 to 5 (Section 9.5), the ownership rules for `workspace.r
 - Secrets are never logged, never written to the audit log, never placed in the status comment,
   never passed to the launcher, never present in any sandboxed process's environment.
 - Presence is validated without printing values.
-- The service holds exactly: one tracker token, one repository token (and OPTIONAL a project
-  token). It never holds, reads or forwards an Anthropic credential.
+- The service holds exactly: one GitHub App private key (from which repository tokens are
+  minted), and depending on the tracker one Linear API key or OPTIONAL one project token. It never holds, reads or forwards an Anthropic credential.
 - Each worker uses its own tokens, so one worker can be revoked alone.
 
 ### 18.5 Residual Risks
@@ -1691,8 +1737,9 @@ Stated so the operator can accept or reject them:
   replaced by a read-only caching mirror where practical.
 - R2 The agent's Claude Code state directory is shared between issues on a worker. Content planted
   there by one run (settings, memory files) could influence a later run. Mitigation: the launcher
-  resets everything in that directory except the login material before each agent step
-  (to verify: which files constitute the login).
+  resets everything in `CLAUDE_CONFIG_DIR` except `.credentials.json` at the start of each
+  attempt (not between turns, because continuation needs the session transcript under
+  `projects/`). On macOS the login is in the guest's Keychain and the whole directory is reset.
 - R3 A reviewer can approve a harmful change. The gates reduce what reaches review and highlight
   risky areas. They do not replace review.
 - R4 Kernel, hypervisor or sandbox escape. Mitigated by keeping the worker in a VM with no route to
@@ -2038,7 +2085,7 @@ For each adapter:
 - Session ID extracted. Continuation uses resume and sends only guidance.
 - Unknown-session resume falls back once to a fresh session.
 - Read, silence and total timeouts enforced. Process exit without result is `port_exit`.
-- Input or permission request terminates the turn with `turn_input_required`.
+- Permission denials are recorded and do not fail or stall the turn.
 - Error categories mapped, including not-logged-in and quota.
 - Malformed and oversized lines do not crash the runner.
 - Token totals taken from result events without double counting.

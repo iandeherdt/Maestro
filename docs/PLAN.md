@@ -54,26 +54,27 @@ Each phase lands as its own pull request and is done when the listed tests pass.
 | 8. Linear adapter | 12.6 | Test matrix 20.3 for Linear |
 | 9. Mac worker | Appendix B | Test matrix 20.6 and 20.9 on the Mac with an Xcode and a Unity sample |
 
-## Phase 0 list
+## Phase 0 status
 
-Collected from SPEC.md:
+The documentation checks are done and recorded in [phase0.md](phase0.md). SPEC.md was corrected
+where an assumption turned out wrong. The main corrections:
 
-- Claude Code: flag names, stream event schema, resume in headless mode, empty MCP configuration,
-  repository settings that could re-enable tools, how missing login and exhausted quota are
-  reported, which hosts the CLI needs, which files hold the login, whether an interactive login
-  persists for headless use on a server, credential format for the secret scan.
-- Anthropic terms: current wording on unattended use of a subscription through the official CLI.
-- GitHub: fine-grained token access to a user-owned Project, attribution of Project status
-  changes, label permissions on public repositories, issue dependency API, push rejection of
-  workflow changes without the Workflows permission.
-- Linear: issue history through the API, scope of API keys.
-- systemd on the chosen guest: every unit property in SPEC 11.3, `IPAddressDeny` enforcement.
-- macOS: Xcode and Unity inside a macOS guest (performance, graphics, licence activation), the
-  host-only command channel, guest limits.
+- The service authenticates to GitHub as a GitHub App, not with a personal token.
+- A GitHub Project owned by a personal account cannot be reached with least-privilege tokens.
+- Claude Code denies permission prompts automatically in print mode, so runs cannot stall.
+- The Claude Code version is pinned, because a future default (`--bare`) would ignore the
+  subscription login.
+
+Still open, and needing a real machine or a real run: systemd properties on the guest, the macOS
+guest with Xcode and Unity, one real `claude -p` run in the sandbox, one real push of a workflow
+file, and the remaining items marked Open in phase0.md.
 
 ## Open questions for the owner
 
-- GitHub Project or labels as the source of ticket state, if the token cannot update a Project.
+- Where the repositories and the board live. Recommended: a free GitHub organization that owns
+  the target repositories and the Project, so the service needs no personal token at all. The
+  alternative is to keep everything under the personal account and give the service one extra
+  classic token limited to Projects.
 - Which board is used day to day once both adapters exist.
 - Whether the macOS guest is acceptable for Unity, or the weaker dedicated-user backend is wanted.
 - Whether to rename the repository, since Beads is no longer part of the design.
