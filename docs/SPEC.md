@@ -1316,6 +1316,16 @@ Identity and fields:
   unknown ID, an issue that no longer exists, and an issue number that now belongs to a different
   node ID are all omitted, which the scheduler treats as "missing".
 
+List freshness:
+
+- The issue list on github.com trails writes by several seconds, while a read of a single issue
+  is current. For `list_lag` (2 minutes) after the service changes an issue's state, the adapter
+  MUST NOT take that issue's state from the list: it reads the issue itself. Without this, a
+  ticket that was just handed off could be listed in its old active state and dispatched again.
+- A change made by a person can also reach the list late. A ticket closed or moved by the owner
+  may therefore be dispatched within those seconds. Reconciliation and the refresh after each
+  turn read the single issue and stop the run.
+
 State mapping:
 
 - `project`: the state is the value of the single-select `status_field` of the issue's item in
@@ -1329,7 +1339,7 @@ Approval provenance:
 
 - Labels: the adapter reads the issue's timeline and requires that the most recent `labeled`
   event for each required label (and, in `labels` mode, for the state label) has an actor in
-  `allowed_authors` (to verify: the actor field on timeline events). On GitHub, applying a label
+  `allowed_authors`. On GitHub, applying a label
   requires the Triage role or higher, so an outside contributor cannot approve work. The timeline check also covers a collaborator who is
   not on the allowlist.
   A label with no `labeled` event, or an event without an actor, is not approval. Own account: the

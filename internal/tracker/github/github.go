@@ -36,7 +36,11 @@ const (
 	defaultAPI    = "https://api.github.com"
 	defaultPrefix = "status:"
 	blockerTTL    = 5 * time.Minute
-	reworkState   = "Rework"
+	// listLag is how long the issue list is not trusted for an issue the
+	// service has just written to. The list on github.com trails writes
+	// by several seconds, a single issue read does not.
+	listLag     = 2 * time.Minute
+	reworkState = "Rework"
 )
 
 // Options are the inputs that do not come from the workflow file.
@@ -72,6 +76,7 @@ type Adapter struct {
 	mu      sync.Mutex
 	numbers map[string]int       // node id -> issue number
 	cache   map[int]*cachedIssue // issue number -> derived facts
+	written map[int]time.Time    // issue number -> last state write
 }
 
 type cachedIssue struct {
@@ -215,7 +220,7 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 		authors:     loginSet(cfg.Tracker.AllowedAuthors),
 		commenters:  loginSet(cfg.Tracker.AllowedCommenters),
 		ownedStates: map[string]string{},
-		numbers:     map[string]int{}, cache: map[int]*cachedIssue{},
+		numbers:     map[string]int{}, cache: map[int]*cachedIssue{}, written: map[int]time.Time{},
 	}
 	// The states the orchestrator itself writes (SPEC 7.3).
 	for _, s := range []string{cfg.Tracker.InProgressState, cfg.Tracker.HandoffState, cfg.Tracker.BlockedState,
@@ -303,6 +308,23 @@ func (a *Adapter) FetchIssuesByStates(ctx context.Context, states []string) ([]i
 				if len(gi.PullRequest) > 0 || seen[gi.Number] {
 					continue
 				}
+				if a.wroteRecently(gi.Number) {
+					// The list may still show the labels from before the
+					// write, which would put a ticket the service has just
+					// handed off back into an active state.
+					var fresh ghIssue
+					_, err := a.c.do(ctx, http.MethodGet, a.c.url(a.path("/issues/%d", gi.Number), nil), nil, &fresh, false)
+					if errors.Is(err, errNotFound) {
+						continue
+					}
+					if err != nil {
+						return err
+					}
+					if fresh.NodeID != gi.NodeID || fresh.State != "open" {
+						continue
+					}
+					gi = fresh
+				}
 				is, err := a.normalize(ctx, gi)
 				if err != nil {
 					if isTransport(err) {
@@ -331,6 +353,20 @@ func (a *Adapter) FetchIssuesByStates(ctx context.Context, states []string) ([]i
 }
 
 var _ tracker.Tracker = (*Adapter)(nil)
+
+func (a *Adapter) wroteRecently(number int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	at, ok := a.written[number]
+	if !ok {
+		return false
+	}
+	if a.now().Sub(at) > listLag {
+		delete(a.written, number)
+		return false
+	}
+	return true
+}
 
 // FetchIssuesByIDs returns current snapshots of issues this adapter has
 // returned before. An issue that no longer exists is omitted.
@@ -583,6 +619,9 @@ func (a *Adapter) SetState(ctx context.Context, is issue.Issue, state string) er
 	if gi.NodeID != is.ID {
 		return terr(tracker.WriteRejected, "issue %s is not the issue that was dispatched", is.Identifier)
 	}
+	a.mu.Lock()
+	a.written[n] = a.now() // recorded first: a write that fails half way still changed labels
+	a.mu.Unlock()
 	target := a.prefix + norm(state)
 	has := false
 	var stale []string
