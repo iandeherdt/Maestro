@@ -118,7 +118,7 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	ui.Say("  This file will be written to %s:", path)
 	ui.Say("")
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
-		ui.Say("    %s", line)
+		ui.Show("    %s", line)
 	}
 	ui.Say("")
 	ok, err := ui.Confirm("  Write it?")

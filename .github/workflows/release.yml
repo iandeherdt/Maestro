@@ -28,7 +28,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # The newest stable Go, so that a binary never ships with a
+          # standard library that has known holes. go.mod names the oldest
+          # version the code builds with.
+          go-version: stable
+          check-latest: true
       - name: Version
         id: version
         env:

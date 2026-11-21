@@ -95,7 +95,7 @@ checksum file, and puts `symphony` in `~/.local/bin`. It does not use `sudo`. To
 running it, open [install.sh](install.sh). To choose a version or a directory, set
 `SYMPHONY_VERSION=v0.1.0` or `SYMPHONY_INSTALL_DIR=/some/dir` before `sh`.
 
-Or build it yourself with Go 1.24 or newer:
+Or build it yourself with Go 1.26 or newer:
 
 ```sh
 git clone https://github.com/iandeherdt/Maestro.git

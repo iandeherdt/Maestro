@@ -215,7 +215,7 @@ func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
 	g := newGitHub(t)
 	full := []option{}
 	for _, c := range columns {
-		full = append(full, option{c.Name, c.Color, c.Description})
+		full = append(full, option(c))
 	}
 	g.boards = []*fakeBoard{
 		{number: 1, title: "Partial", items: 2, status: full[:3]},

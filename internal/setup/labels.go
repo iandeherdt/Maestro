@@ -166,7 +166,7 @@ func (l *Labels) Run(ctx context.Context, ui *UI, st *State) error {
 	}
 	ui.Say("  These labels will be created in %s:", st.Repo)
 	for _, lb := range miss {
-		ui.Say("    %-22s %s", lb.name, lb.description)
+		ui.Show("    %-22s %s", lb.name, lb.description)
 	}
 	ok, err := ui.Confirm("  Create them?")
 	if err != nil {

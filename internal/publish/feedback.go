@@ -115,17 +115,29 @@ func (p *Publisher) thread(ctx context.Context, a *api, prefix string, number in
 		Path         string `json:"path"`
 		Line         int    `json:"line"`
 		OriginalLine int    `json:"original_line"`
+		ReviewID     int64  `json:"pull_request_review_id"`
 		User         user   `json:"user"`
 	}](ctx, a, prefix+"/pulls/"+n+"/comments")
 	if err != nil || !complete {
 		return t, false, err
+	}
+	// A comment on a line is written while a review is still a draft, and
+	// nobody sees it until the review is submitted. It counts from then:
+	// otherwise a mark set in between would hide it for good.
+	submitted := map[int64]string{}
+	for _, r := range reviews {
+		submitted[r.ID] = r.SubmittedAt
 	}
 	for _, c := range inline {
 		line := c.Line
 		if line == 0 {
 			line = c.OriginalLine
 		}
-		add(c.User.Login, c.CreatedAt, c.Body, c.Path, line)
+		when := c.CreatedAt
+		if s := submitted[c.ReviewID]; c.ReviewID != 0 && s > when {
+			when = s // both are UTC in the same format, so they compare as text
+		}
+		add(c.User.Login, when, c.Body, c.Path, line)
 	}
 	for _, r := range reviews {
 		if r.State != "PENDING" {

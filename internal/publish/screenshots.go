@@ -27,6 +27,11 @@ type shotLink struct{ caption, url string }
 // shotBranch is the branch the pictures are kept on.
 func shotBranch(prefix string) string { return prefix + "screenshots" }
 
+// ScreenshotBranch is the branch the pictures are kept on. The mirror
+// leaves it out, so that a workspace is not cloned with every picture ever
+// taken.
+func ScreenshotBranch(prefix string) string { return shotBranch(prefix) }
+
 type gitObject struct {
 	SHA string `json:"sha"`
 }

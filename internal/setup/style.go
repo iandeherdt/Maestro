@@ -150,6 +150,28 @@ func (u *UI) say(text string) {
 	}
 }
 
+// Show prints a line exactly as it is: a line of a file, a row of a
+// table. Nothing in it is wrapped, joined or coloured by its content.
+func (u *UI) Show(format string, a ...any) {
+	if !u.Styled {
+		fmt.Fprintf(u.Out, format+"\n", a...)
+		return
+	}
+	u.hang = 0
+	text := fmt.Sprintf(format, a...)
+	if strings.HasPrefix(text, "    ") {
+		text = text[2:]
+	}
+	fmt.Fprintln(u.Out, strings.TrimRight(rail+dim+text+reset, " "))
+}
+
+// Restore puts the terminal back as a stopped wizard should leave it.
+func (u *UI) Restore() {
+	if u.Styled {
+		fmt.Fprint(u.Out, clearLine+showCursor)
+	}
+}
+
 // Banner opens the wizard.
 func (u *UI) Banner(name, plain string, lines ...string) {
 	if !u.Styled {

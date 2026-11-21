@@ -17,11 +17,21 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # The newest stable Go, so that a binary never ships with a
+          # standard library that has known holes. go.mod names the oldest
+          # version the code builds with.
+          go-version: stable
+          check-latest: true
       - name: Format
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: Vet
         run: go vet ./...
+      - name: Static analysis
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - name: Known vulnerabilities
+        # Fails when the code calls something with a published vulnerability,
+        # in a dependency or in Go itself.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - name: Test
         # The container tests need Docker, which the runner has. With the
         # internet they also build the real sandbox image.

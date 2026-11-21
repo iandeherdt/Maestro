@@ -182,8 +182,8 @@ func TestPathCollisionsAndBadPaths(t *testing.T) {
 		"unicode twin":      {add("src/café.txt"), "D8"},
 		"same path":         {mod("README.md"), ""},
 		"control character": {add("a\nb.txt"), "D8"},
-		"bidi override":     {add("src/‮gpj.exe"), "D8"},
-		"zero width":        {add("src/ma​in.go"), "D8"},
+		"bidi override":     {add("src/\u202egpj.exe"), "D8"},
+		"zero width":        {add("src/ma\u200bin.go"), "D8"},
 		"dot dot":           {add("a/../b"), "D8"},
 		"absolute":          {add("/etc/passwd"), "D8"},
 		"backslash":         {add("a\\b"), "D8"},
@@ -194,7 +194,7 @@ func TestPathCollisionsAndBadPaths(t *testing.T) {
 			t.Errorf("%s: denied %q, want %q", name, got, tc.want)
 		}
 		for _, f := range r.Denied {
-			if strings.ContainsAny(f.Path, "\n‮​") {
+			if strings.ContainsAny(f.Path, "\n\u202e\u200b") {
 				t.Errorf("%s: the finding shows the raw path %q", name, f.Path)
 			}
 		}

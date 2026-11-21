@@ -441,7 +441,7 @@ func (b *Board) choose(ctx context.Context, ui *UI, st *State, owner, repo strin
 				ui.Say("  %s already has these boards:", owner)
 			}
 			open[p.Number] = true
-			ui.Say("    %3d  %s", p.Number, oneLine(p.Title))
+			ui.Show("    %3d  %s", p.Number, oneLine(p.Title))
 		}
 	}
 	if len(open) > 0 {
@@ -520,7 +520,7 @@ func (b *Board) prepare(ctx context.Context, ui *UI, st *State, board *boardStat
 		}
 		var opts []option
 		for _, c := range columns {
-			opts = append(opts, option{c.Name, c.Color, c.Description})
+			opts = append(opts, option(c))
 		}
 		for _, o := range board.Status.Options { // columns of your own are kept
 			known := false
