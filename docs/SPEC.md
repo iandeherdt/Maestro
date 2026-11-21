@@ -1835,7 +1835,14 @@ As upstream Section 13.7, loopback only:
   and `policy`.
 - `POST /api/v1/refresh`: queue an immediate tick. Requires a header `X-Symphony-Local: 1`, so
   that a web page open in a local browser cannot trigger it with a simple cross-site request.
-- No other mutating endpoint. Pause and resume are CLI-only.
+- `POST /api/v1/pause` with an optional JSON body `{"reason": "..."}`, and `POST /api/v1/resume`.
+  Both need the same header. They are how the CLI reaches the running service; the reason is
+  stripped of control characters and cut to 200 characters. No other mutating endpoint.
+- The server always runs. Without `server.port` it takes a free loopback port. The service writes
+  its address and process ID to `<budget.state_dir>/service.json` and removes the file when it
+  stops. The CLI reads the address from there and contacts it only if it is a loopback address.
+  A service refuses to start while another one answers at that address, because starting would
+  remove the other's containers.
 - Requests whose `Host` is not a loopback name or address are refused with `403`, which defeats
   DNS rebinding. Requests carrying a non-loopback `Origin` are refused too. The server never
   sends a cross-origin permission header. Responses carry a restrictive content security policy
@@ -1852,14 +1859,23 @@ As upstream Section 13.7, loopback only:
 
 ### 16.7 CLI
 
-- `symphony [path-to-WORKFLOW.md]`: run the service.
+- `symphony run [--dir DIR] [--file WORKFLOW.md]`: run the service in the foreground.
+- `symphony image`, `symphony login`: build the sandbox image and sign Claude Code in inside it
+  (Section 11.8).
+- `symphony service install|uninstall`: run the service in the background as the current user,
+  started at login and restarted when it stops. On macOS a launchd agent in
+  `~/Library/LaunchAgents`, on Linux a systemd user unit in `~/.config/systemd/user`. The file is
+  shown and confirmed before it is written. Uninstall removes only that file.
 - `symphony setup [--dir DIR] [--port N]`: guided installation (Section 16.8).
 - `symphony check [path-to-WORKFLOW.md]`: validate a workflow file without starting anything.
-- `symphony status`: print the state from the loopback API.
+- `symphony status`: print the state from the loopback API. Text that an agent may have written
+  is stripped of control characters before it reaches the terminal.
 - `symphony doctor [--repo]`: configuration, sandbox self-test, token scopes, branch protection,
   repository readiness (Appendix C).
-- `symphony pause [reason]`, `symphony resume`
-- `symphony unblock <identifier>`: reset `failure_attempts` for an issue.
+- `symphony pause [reason]`, `symphony resume`: through the loopback API. A pause is stored and
+  survives a restart.
+- `symphony unblock <identifier>`: reset `failure_attempts` for an issue. (not built; moving the
+  issue back to an active state does the same)
 - Exit status: `0` on normal shutdown, nonzero on startup failure or abnormal exit.
 
 ### 16.8 Guided Setup
@@ -1906,8 +1922,8 @@ Steps:
    The file uses the `docker` backend, and its directories are in the operator's own
    configuration directory.
 6. Service: the users, directories and the systemd or launchd unit are installed after the
-   wizard has shown what it will write. (not built; until then the operator runs
-   `symphony image`, `symphony login` and `symphony run` in a terminal)
+   wizard has shown what it will write. Outside the wizard for now: the operator runs
+   `symphony image`, `symphony login` and then `symphony run` or `symphony service install`.
 7. Self-test: `symphony doctor`. (not built)
 
 Steps 1 to 5 ran on a Mac against github.com on 2026-11-21 and completed: GitHub accepted the

@@ -18,7 +18,11 @@ import (
 type fakeState struct {
 	snap  orchestrator.Snapshot
 	ticks int
+	calls []string
 }
+
+func (f *fakeState) Pause(reason string) { f.calls = append(f.calls, "pause:"+reason) }
+func (f *fakeState) Resume()             { f.calls = append(f.calls, "resume") }
 
 func (f *fakeState) Latest() orchestrator.Snapshot { return f.snap }
 func (f *fakeState) RequestTick()                  { f.ticks++ }
@@ -126,6 +130,35 @@ func TestRefreshNeedsLocalHeader(t *testing.T) {
 	}
 	if res, _ := do(t, st, "POST", "/api/v1/refresh", map[string]string{LocalHeader: "1"}); res.StatusCode != 202 || st.ticks != 1 {
 		t.Fatalf("with header: %d, ticks %d", res.StatusCode, st.ticks)
+	}
+}
+
+func TestPauseAndResume(t *testing.T) {
+	st := state()
+	for _, path := range []string{"/api/v1/pause", "/api/v1/resume"} {
+		if res, _ := do(t, st, "POST", path, nil); res.StatusCode != 403 {
+			t.Errorf("%s without the header: %d", path, res.StatusCode)
+		}
+		if res, _ := do(t, st, "GET", path, map[string]string{LocalHeader: "1"}); res.StatusCode != 405 {
+			t.Errorf("GET %s: %d", path, res.StatusCode)
+		}
+		if res, _ := do(t, st, "POST", path, map[string]string{LocalHeader: "1", "Origin": "https://evil.example"}); res.StatusCode != 403 {
+			t.Errorf("%s from another origin: %d", path, res.StatusCode)
+		}
+	}
+	if len(st.calls) != 0 {
+		t.Fatalf("refused requests had an effect: %v", st.calls)
+	}
+	req := httptest.NewRequest("POST", "http://127.0.0.1:8080/api/v1/pause", strings.NewReader(`{"reason":"on\nholiday \u001b[31m`+strings.Repeat("x", 500)+`"}`))
+	req.Header.Set(LocalHeader, "1")
+	rec := httptest.NewRecorder()
+	(&Server{state: st}).Handler().ServeHTTP(rec, req)
+	do(t, st, "POST", "/api/v1/resume", map[string]string{LocalHeader: "1"})
+	if rec.Code != 202 || len(st.calls) != 2 || st.calls[1] != "resume" {
+		t.Fatalf("%d %v", rec.Code, st.calls)
+	}
+	if got := st.calls[0]; !strings.HasPrefix(got, "pause:on holiday  [31mxxx") || len(got) > 210 {
+		t.Errorf("reason = %q", got)
 	}
 }
 

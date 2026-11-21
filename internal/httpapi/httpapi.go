@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -28,6 +29,8 @@ import (
 type State interface {
 	Latest() orchestrator.Snapshot
 	RequestTick()
+	Pause(reason string)
+	Resume()
 }
 
 // LocalHeader must be present on mutating requests.
@@ -77,6 +80,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.page)
 	mux.HandleFunc("/api/v1/state", s.apiState)
 	mux.HandleFunc("/api/v1/refresh", s.apiRefresh)
+	mux.HandleFunc("/api/v1/pause", s.apiPause)
+	mux.HandleFunc("/api/v1/resume", s.apiResume)
 	mux.HandleFunc("/api/v1/", s.apiIssue)
 	return guard(mux)
 }
@@ -273,6 +278,49 @@ func (s *Server) apiRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.state.RequestTick()
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+}
+
+// local reports whether a mutating request may proceed: a POST with the
+// header a cross-site form or image request cannot set.
+func local(w http.ResponseWriter, r *http.Request) bool {
+	if !allow(w, r, http.MethodPost) {
+		return false
+	}
+	if r.Header.Get(LocalHeader) != "1" {
+		writeError(w, http.StatusForbidden, "local_header_required", "send the header "+LocalHeader+": 1")
+		return false
+	}
+	return true
+}
+
+// apiPause stops new dispatches. The optional reason is shown by status.
+func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
+	if !local(w, r) {
+		return
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in)
+	reason := strings.Map(func(c rune) rune {
+		if c < 0x20 || c == 0x7f {
+			return ' '
+		}
+		return c
+	}, in.Reason)
+	if len(reason) > 200 {
+		reason = reason[:200]
+	}
+	s.state.Pause(strings.TrimSpace(strings.ToValidUTF8(reason, "")))
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+}
+
+func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
+	if !local(w, r) {
+		return
+	}
+	s.state.Resume()
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
 }
 

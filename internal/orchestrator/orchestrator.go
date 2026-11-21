@@ -146,6 +146,33 @@ func (o *Orchestrator) RequestTick() {
 	o.post(func(context.Context) { o.forceTick = true })
 }
 
+// Pause stops new dispatches until Resume. Running attempts continue. It is
+// safe to call from any goroutine, and it survives a restart.
+func (o *Orchestrator) Pause(reason string) {
+	o.post(func(context.Context) {
+		if reason == "" {
+			reason = "paused by the operator"
+		}
+		o.d.Budget.Resume() // so that a new reason replaces an old one
+		o.d.Log.Info("dispatch paused", "reason", reason)
+		o.d.Budget.Pause(reason)
+		o.persist()
+		o.publish()
+	})
+}
+
+// Resume lifts a pause, whoever set it, and looks for work at once.
+func (o *Orchestrator) Resume() {
+	o.post(func(context.Context) {
+		o.d.Budget.Resume()
+		o.spawnFailures = 0
+		o.d.Log.Info("dispatch resumed")
+		o.persist()
+		o.publish()
+		o.forceTick = true
+	})
+}
+
 // SetConfig applies a (re)loaded configuration. Call it from the goroutine
 // that drives the orchestrator.
 func (o *Orchestrator) SetConfig(cfg *config.Config) {

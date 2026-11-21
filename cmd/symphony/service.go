@@ -62,14 +62,27 @@ func explain(format string, a ...any) error { return &problem{fmt.Sprintf(format
 
 // parse reads the flags the service commands share.
 func parse(name string, args []string, stderr io.Writer) (dir, explicit string, ok bool) {
+	dir, explicit, _, ok = parseWords(name, args, stderr, false)
+	return dir, explicit, ok
+}
+
+// parseWords is parse for a command whose remaining words are free text.
+func parseWords(name string, args []string, stderr io.Writer, words bool) (dir, explicit string, rest []string, ok bool) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	d := fs.String("dir", "", "where setup keeps its state (default: the user's configuration directory)")
-	if err := fs.Parse(args); err != nil || fs.NArg() > 1 {
-		fmt.Fprintf(stderr, "usage: symphony %s [--dir DIR] [path-to-WORKFLOW.md]\n", name)
-		return "", "", false
+	f := fs.String("file", "", "the settings file (default: the one setup wrote)")
+	err := fs.Parse(args)
+	switch {
+	case err != nil, !words && fs.NArg() > 1, !words && fs.NArg() == 1 && *f != "":
+		fmt.Fprintf(stderr, "usage: symphony %s [--dir DIR] [--file WORKFLOW.md]\n", name)
+		return "", "", nil, false
+	case words:
+		return *d, *f, fs.Args(), true
+	case *f != "":
+		return *d, *f, nil, true
 	}
-	return *d, fs.Arg(0), true
+	return *d, fs.Arg(0), nil, true
 }
 
 // open loads the workflow and the setup state and describes the sandbox.
@@ -429,6 +442,11 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	var cur view
 	cur.p.Store(patch(in.source.Current()))
 
+	// Starting a second service would stop the containers of the first.
+	if alive(ctx, cfg.Budget.StateDir) {
+		return explain("Symphony is already running for this installation, in another terminal or in the background.\n" +
+			"See what it does with `symphony status`. To stop a background service: symphony service uninstall")
+	}
 	if err := in.up(ctx); err != nil {
 		return err
 	}
@@ -503,18 +521,28 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			return l.Config, err
 		},
 	})
+	// The status server is how `symphony status`, `pause` and `resume`
+	// reach this process. It listens on loopback only; without a
+	// configured port it takes a free one.
+	port := 0
 	if cfg.Server.Port != nil {
-		srv, err := httpapi.Listen(int(*cfg.Server.Port), orch)
-		if err != nil {
-			return err
-		}
-		go srv.Serve()
-		defer srv.Shutdown(context.Background())
-		fmt.Fprintf(stdout, "Status page: http://%s/\n", srv.Addr())
+		port = int(*cfg.Server.Port)
 	}
+	srv, err := httpapi.Listen(port, orch)
+	if err != nil {
+		return err
+	}
+	go srv.Serve()
+	defer srv.Shutdown(context.Background())
+	if err := writeServiceInfo(cfg.Budget.StateDir, srv.Addr()); err != nil {
+		return err
+	}
+	defer os.Remove(filepath.Join(cfg.Budget.StateDir, serviceFile))
 	fmt.Fprintf(stdout, "Symphony is running for %s (worker %q, base branch %s).\n", cfg.Workspace.Repo, cfg.Worker.Name, base)
 	fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
 	fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))
+	fmt.Fprintln(stdout, "From another terminal: symphony status, symphony pause, symphony resume.")
+	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
