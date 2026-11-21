@@ -64,7 +64,8 @@ Progress on 2026-11-21: phase 0 is done for everything that can be checked witho
 Phase 1 is done. Phase 2 is done for label mode, and Project mode is parked (decision 7). Phase 5
 has the diff policy, the secret scan, the import step, the App tokens, the push and the pull
 request and the checks gate; the hand-off watch is open. Phase 6 has five of the seven steps of the
-guided setup. Phases 3, 4, 6, 7 and 9 need the owner's machines.
+guided setup. Phase 4 has the Claude Code runner, written from the documentation and not yet run
+against the real CLI. The sandbox launcher and everything on the Mac need the owner's machines.
 
 | Phase | Scope (SPEC sections) | Done when |
 |---|---|---|

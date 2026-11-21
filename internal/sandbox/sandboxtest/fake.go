@@ -3,6 +3,7 @@ package sandboxtest
 
 import (
 	"context"
+	"io"
 	"sync"
 
 	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
@@ -20,6 +21,20 @@ type Fake struct {
 	calls []Call
 	// Handler answers a request. A nil Handler succeeds with no output.
 	Handler func(ctx context.Context, req sandbox.Request) (sandbox.Result, error)
+	// StreamHandler answers a streamed request. A nil StreamHandler
+	// succeeds with no output.
+	StreamHandler func(ctx context.Context, req sandbox.Request, stdout io.Writer) (sandbox.Result, error)
+}
+
+func (f *Fake) Stream(ctx context.Context, req sandbox.Request, stdin []byte, stdout io.Writer) (sandbox.Result, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, Call{req, stdin})
+	h := f.StreamHandler
+	f.mu.Unlock()
+	if h == nil {
+		return sandbox.Result{}, nil
+	}
+	return h(ctx, req, stdout)
 }
 
 func (f *Fake) Run(ctx context.Context, req sandbox.Request, stdin []byte) (sandbox.Result, error) {

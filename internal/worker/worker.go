@@ -23,17 +23,20 @@ import (
 
 // Failure categories decided here. Agent categories come from the runner.
 const (
-	RefreshError        = "issue_state_refresh_error"
-	ExportError         = "export_error"
-	VerifyFailed        = "verify_failed"
-	VerifyError         = "verify_error"
-	PublishError        = "publish_error"
-	NoChanges           = "no_changes"
-	MaxTurnsExhausted   = "max_turns_exhausted"
-	DeclaredBlocked     = "agent_declared_blocked"
-	QuotaExhausted      = "agent_quota_exhausted"
-	NotLoggedIn         = "agent_not_logged_in"
-	TurnFailed          = "turn_failed"
+	RefreshError      = "issue_state_refresh_error"
+	ExportError       = "export_error"
+	VerifyFailed      = "verify_failed"
+	VerifyError       = "verify_error"
+	PublishError      = "publish_error"
+	NoChanges         = "no_changes"
+	MaxTurnsExhausted = "max_turns_exhausted"
+	DeclaredBlocked   = "agent_declared_blocked"
+	QuotaExhausted    = "agent_quota_exhausted"
+	NotLoggedIn       = "agent_not_logged_in"
+	TurnFailed        = "turn_failed"
+	// SessionUnknown: a continuation turn could not resume its session.
+	// The worker starts a fresh session with the full prompt, once.
+	SessionUnknown      = "session_unknown"
 	afterRunGracePeriod = 2 * time.Minute
 )
 
@@ -187,19 +190,23 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 
 	maxTurns := int(cfg.Agent.MaxTurns)
 	sessionID, reason := "", ""
+	sessionReset := false
 	var lastVerify *prompt.Verify
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
 			return orchestrator.Outcome{Kind: orchestrator.Normal}
 		}
 		phase(orchestrator.BuildingPrompt)
-		var text string
-		if turn == 1 {
-			text, err = set.Prompt.First(prompt.Input{
+		first := func() (string, error) {
+			return set.Prompt.First(prompt.Input{
 				Issue: is, Attempt: a.Number, RetryKind: a.RetryKind, Feedback: a.Feedback,
 				WorkerName: cfg.Worker.Name, RepoName: cfg.Workspace.Repo,
 				BaseBranch: cfg.Workspace.BaseBranch, Branch: ws.Branch,
 			})
+		}
+		var text string
+		if turn == 1 {
+			text, err = first()
 		} else {
 			text, err = set.Prompt.Continuation(turn, maxTurns, reason, lastVerify)
 		}
@@ -210,6 +217,18 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		phase(orchestrator.LaunchingAgentProcess)
 		sink.Event(orchestrator.Event{Kind: "turn_start", TurnStart: true})
 		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID}, sink.Event)
+		var lost *AgentError
+		if errors.As(err, &lost) && lost.Category == SessionUnknown && sessionID != "" && !sessionReset && ctx.Err() == nil {
+			// The agent lost the session (SPEC 10.2). The work in the
+			// workspace is still there, so a new session gets the full
+			// prompt and carries on. This happens once per attempt.
+			sessionReset = true
+			sink.Event(orchestrator.Event{Kind: "session_reset"})
+			if text, err = first(); err != nil {
+				return failed(prompt.RenderError, err)
+			}
+			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text}, sink.Event)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return orchestrator.Outcome{Kind: orchestrator.Normal}
