@@ -53,6 +53,9 @@ type hub struct {
 	nextID   int64
 	srv      *httptest.Server
 	noDeps   bool
+	// listLabels, when set for an issue, is what the list endpoint reports
+	// instead of the current labels: the list on github.com lags.
+	listLabels map[int][]string
 }
 
 func newHub(t *testing.T) *hub {
@@ -174,9 +177,15 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 			if fi.state != "open" {
 				continue
 			}
-			for _, l := range fi.labels {
+			shown := fi
+			if stale, ok := h.listLabels[n]; ok {
+				cp := *fi
+				cp.labels = stale
+				shown = &cp
+			}
+			for _, l := range shown.labels {
 				if strings.ToLower(l) == want {
-					items = append(items, h.wire(fi))
+					items = append(items, h.wire(shown))
 					break
 				}
 			}
@@ -691,5 +700,57 @@ func TestLabelWithoutARecordedLabelerIsNotApproval(t *testing.T) {
 	got, err := adapter(t, h).FetchIssuesByStates(ctx, []string{"Todo"})
 	if err != nil || len(got) != 2 || got[0].Dispatchable || got[1].Dispatchable {
 		t.Fatalf("got %+v, err %v", got, err)
+	}
+}
+
+func TestListLagAfterOwnWriteIsNotTrusted(t *testing.T) {
+	h := newHub(t)
+	h.add(1, "ian", "ian", "status:todo", "run:linux")
+	h.add(2, "ian", "ian", "status:todo", "run:linux")
+	now := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	a, err := New(testCfg(h.srv.URL), Options{Env: env, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := a.FetchIssuesByStates(ctx, []string{"Todo"})
+	if err != nil || len(list) != 2 {
+		t.Fatalf("got %v %v", list, err)
+	}
+	one := byIdent(list)["GH-1"]
+	if err := a.SetState(ctx, one, "Human Review"); err != nil {
+		t.Fatal(err)
+	}
+	// The list still reports the labels from before the write.
+	h.mu.Lock()
+	h.listLabels = map[int][]string{1: {"status:todo", "run:linux"}}
+	h.requests = nil
+	h.mu.Unlock()
+
+	list, err = a.FetchIssuesByStates(ctx, []string{"Todo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byIdent(list)
+	if _, stale := got["GH-1"]; stale || len(got) != 1 {
+		t.Fatalf("the handed-off issue came back as Todo: %v", got)
+	}
+	// Only the written issue costs an extra read.
+	h.mu.Lock()
+	reads := 0
+	for _, r := range h.requests {
+		if r == "GET /repos/ian/app/issues/1" || r == "GET /repos/ian/app/issues/2" {
+			reads++
+		}
+	}
+	h.mu.Unlock()
+	if reads != 1 {
+		t.Errorf("single-issue reads = %d, want 1", reads)
+	}
+
+	// After the window the list is trusted again.
+	now = now.Add(listLag + time.Second)
+	list, err = a.FetchIssuesByStates(ctx, []string{"Todo"})
+	if err != nil || len(list) != 2 {
+		t.Fatalf("after the window: %v %v", list, err)
 	}
 }

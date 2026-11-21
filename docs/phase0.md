@@ -45,9 +45,11 @@ security and access). Checked on 2026-11-21.
 | Who opens the pull request | Changed (found during review) | A pull request cannot be approved by its own author. If the service used the owner's personal token, the owner could not review the service's pull requests, and the token would have the owner's admin rights. The service therefore needs its own identity. |
 | Resulting credential design | Changed | A GitHub App installed on the target repositories replaces the personal token: it has its own identity, is not an administrator, can read checks, and its tokens expire after an hour. See SPEC 15.5. |
 | Label permissions | Confirmed (docs) | Applying labels needs the Triage role or higher. Read access is not enough. The table is for organization repositories. On a personal repository only the owner and collaborators can label. |
-| `labeled` event actor | Open | Believed to be in the issue timeline. The page was not read. |
+| `labeled` event actor | Confirmed (live test) | The issue timeline carries a `labeled` event with the actor for every label, including labels given when the issue is created. |
+| Label mode end to end | Confirmed (live test) | Listing, approval, state change, status comment and feedback work against a scratch repository on github.com. The test used one account as both owner and service, so the rule that separates the two is covered only by the unit tests. |
+| Freshness of the issue list | Changed (live test) | `GET /issues` filtered by label trailed writes by about seven seconds: new issues were missing and closed ones were still listed. A read of a single issue was current. The adapter no longer trusts the list for an issue it has just written to (SPEC 12.5). |
 | Actor of a Project status change | Open | Not documented in the pages read. Treated as unavailable (residual risk R6). |
-| Issue dependencies | Confirmed (docs) | `GET /repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, Issues read. |
+| Issue dependencies | Confirmed (live test) | `GET /repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, Issues read. Answers on a personal repository. |
 | Push of workflow files without the Workflows permission | Open | The permission exists and is described as the right to edit workflow files. The rejection itself needs one real push. |
 | Reading branch protection | Open | The permission needed was not in the pages read. |
 
