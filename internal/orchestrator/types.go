@@ -263,17 +263,27 @@ const (
 	// ReviewChangesRequested: the latest review of the current commit by
 	// an allowlisted reviewer asks for changes.
 	ReviewChangesRequested
+	// ReviewFeedback: an allowlisted person wrote comments on the pull
+	// request that no run has taken up yet, and has been quiet since.
+	ReviewFeedback
 )
 
 // ReviewStatus is the answer of Reviews.Review.
 type ReviewStatus struct {
 	State    ReviewState
 	PRNumber int
+	// For ReviewFeedback: how many comments are new, and the time of the
+	// newest. Acknowledge records that time on the pull request.
+	FeedbackCount   int
+	FeedbackThrough time.Time
 }
 
 // Reviews follows pull requests after hand-off (SPEC 15.8).
 type Reviews interface {
 	Review(ctx context.Context, is issue.Issue) (ReviewStatus, error)
+	// Acknowledge records on the pull request that the comments up to
+	// st.FeedbackThrough were taken up, so that they start one run only.
+	Acknowledge(ctx context.Context, is issue.Issue, st ReviewStatus) error
 	// DeleteBranch removes the ticket's branch on the remote after a
 	// merge. A branch that is already gone is not an error.
 	DeleteBranch(ctx context.Context, is issue.Issue) error

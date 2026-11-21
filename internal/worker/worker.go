@@ -126,6 +126,12 @@ type Planning interface {
 	Brief(ctx context.Context, is issue.Issue) (plan.Brief, error)
 }
 
+// PullRequestNotes supplies what the owner wrote on the ticket's pull
+// request and has not been answered by a commit yet (SPEC 15.8).
+type PullRequestNotes interface {
+	Feedback(ctx context.Context, is issue.Issue) ([]issue.Feedback, error)
+}
+
 // Worker implements orchestrator.Worker.
 type Worker struct {
 	Settings   func() Settings
@@ -135,6 +141,9 @@ type Worker struct {
 	Gates      Gates
 	// Planning is optional. Without it a planning attempt fails.
 	Planning Planning
+	// Notes is optional. Without it comments on a pull request do not
+	// reach the agent.
+	Notes PullRequestNotes
 }
 
 type handle struct {
@@ -219,6 +228,13 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	feedback := append([]issue.Feedback(nil), a.Feedback...)
 	for _, c := range comments {
 		feedback = append(feedback, issue.Feedback{Source: "tracker", Author: c.Author, Body: c.Body})
+	}
+	if w.Notes != nil {
+		notes, err := w.Notes.Feedback(ctx, is)
+		if err != nil {
+			return failed(RefreshError, err)
+		}
+		feedback = append(feedback, notes...)
 	}
 
 	maxTurns := int(cfg.Agent.MaxTurns)

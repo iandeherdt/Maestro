@@ -114,6 +114,8 @@ func TestDefaults(t *testing.T) {
 	eq("publish.draft_until_green", c.Publish.DraftUntilGreen, true)
 	eq("publish.required_checks from protection", c.Publish.RequiredChecksFromBranchProtection, true)
 	eq("publish.rework_on_changes_requested", c.Publish.ReworkOnChangesRequested, true)
+	eq("publish.rework_on_comments", c.Publish.ReworkOnComments, true)
+	eq("publish.review_quiet_ms", c.Publish.ReviewQuietMS, int64(120000))
 	eq("policy.max_changed_files", c.Policy.MaxChangedFiles, int64(200))
 	eq("policy.secret_scan", c.Policy.SecretScan, true)
 	eq("policy.allow_binary", c.Policy.AllowBinary, false)

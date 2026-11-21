@@ -177,7 +177,7 @@ func (h *fakeHub) serve(w http.ResponseWriter, r *http.Request) {
 		send(h.pull)
 	case key == "GET "+repo+"/pulls/31" || key == "PATCH "+repo+"/pulls/31":
 		send(h.pull)
-	case key == "GET "+repo+"/pulls/31/reviews":
+	case key == "GET "+repo+"/pulls/31/reviews" || key == "GET "+repo+"/issues/31/comments" || key == "GET "+repo+"/pulls/31/comments":
 		page(nil)
 	case strings.HasSuffix(r.URL.Path, "/check-runs"):
 		send(map[string]any{"total_count": 0, "check_runs": []any{}})

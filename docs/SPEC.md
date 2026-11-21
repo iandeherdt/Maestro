@@ -422,6 +422,9 @@ Replaces upstream `codex`.
 - `checks_timeout_ms` (integer): default `3600000`.
 - `checks_poll_interval_ms` (integer): default `60000`.
 - `rework_on_changes_requested` (boolean): default `true`.
+- `rework_on_comments` (boolean): default `true`. Comments on the pull request by an allowlisted
+  commenter send the issue back to work (Section 15.8).
+- `review_quiet_ms` (integer): default `120000`. How long the commenter has to be quiet first.
 - `max_bundle_bytes` (integer): default `104857600`.
 
 #### 5.3.10 `policy` (object)
@@ -616,6 +619,7 @@ skip dispatch for that tick and keep reconciling.
 - `publish.branch_prefix` `symphony/`; `publish.draft_until_green` `true`
 - `publish.required_checks` `branch-protection` (or a list, or `none`); `publish.checks_timeout_ms` `3600000`
 - `publish.rework_on_changes_requested` `true`; `publish.max_bundle_bytes` `104857600`
+- `publish.rework_on_comments` `true`; `publish.review_quiet_ms` `120000`
 - `policy.*`: see Sections 5.3.10 and 15.3
 - `budget.max_failure_attempts` `3`; `budget.max_runs_per_day` `20`
 - `budget.max_agent_seconds_per_day` `28800`; `budget.quota_backoff_ms` `3600000`
@@ -679,7 +683,7 @@ Default state names. Each transition has exactly one owner.
 | Todo, Rework | In Progress | Orchestrator | Dispatch. |
 | In Progress | Human Review | Orchestrator | Published, required checks green, pull request marked ready. |
 | In Progress | Blocked | Orchestrator | Failure budget exhausted, policy denial, checks timeout. |
-| Human Review | Rework | Human, or orchestrator | Human moves the card, or an allowlisted reviewer requests changes on the pull request (when `publish.rework_on_changes_requested`). |
+| Human Review | Rework | Human, or orchestrator | Human moves the card, or an allowlisted reviewer comments on the pull request (when `publish.rework_on_comments`) or requests changes on it (when `publish.rework_on_changes_requested`). |
 | Human Review | Done | Orchestrator | Pull request merged. |
 | Blocked | Todo | Human | After fixing the cause. Resets the failure count. |
 | any | Cancelled | Human | Stops a running session at the next reconciliation and cleans the workspace. |
@@ -1572,8 +1576,8 @@ A new attempt (new session, full prompt) carries `attempt`, `retry_kind` and `fe
 - `gate` after red checks: one entry per failing check with name, conclusion and up to 16 KiB of
   log tail, `source: ci`. CI logs are untrusted text.
 - `gate` after a diff-policy denial: the list of violations, `source: policy`.
-- Rework: review comments and review summaries on the pull request by `allowed_commenters` since
-  the last publish (`source: review`, with `path` and `line` when present), and tracker comments
+- Rework: what `allowed_commenters` wrote on the pull request and no commit has answered yet,
+  as Section 15.8 sets out (`source: review`, with `path` and `line` when present), and tracker comments
   from `fetch_feedback` (`source: tracker`).
 
 Implemented: every attempt, first or later, is given the 20 most recent issue comments by
@@ -1823,6 +1827,11 @@ repository itself (not a fork that reuses the name) and it was opened by the bot
   does not stop the rest), set the issue to the done state, clean the workspace, clear its failure
   budget, update the status comment. If the state write fails, the next run retries.
 - Pull request closed without merge: update the status comment once. No state change.
+- `publish.rework_on_comments`, and an allowlisted commenter wrote on the pull request since the
+  last mark (below), and the newest of those comments is older than `publish.review_quiet_ms`: set
+  the issue to `Rework`, if `Rework` is an active state, then write the mark. This is looked at
+  before the review verdict. While the newest comment is younger than the quiet time, nothing
+  happens, verdict included: someone who is still writing is not interrupted.
 - `publish.rework_on_changes_requested` and the latest approving or change-requesting review by
   an allowlisted commenter requests changes: set the issue to `Rework`, if `Rework` is an active
   state. Only reviews of the pull request's current head commit count. A review of an earlier
@@ -1831,6 +1840,26 @@ repository itself (not a fork that reuses the name) and it was opened by the bot
 - Issue moved to `Rework` by a human: nothing to do here. The next tick dispatches it as an active
   issue, with review feedback (Section 13.3).
 - No pull request, or an open one without such a review: nothing.
+
+What counts as a comment: a comment in the pull request's conversation, a comment on a line of
+the diff, and the summary of a submitted review. Only those by `tracker.allowed_commenters`, and
+never the bot's own. Edits are not followed.
+
+The mark is a comment by the bot on the pull request that says the new comments were picked up
+and ends in `<!-- symphony:feedback-through <RFC 3339 time of the newest comment taken up> -->`.
+A mark counts only when the bot identity wrote the comment that carries it. Without a known bot
+identity the service cannot tell its own mark from one somebody typed, and comments do not send
+an issue back. The state is written before the mark: when the mark then fails, the comments
+start one more run, which is better than losing them. When a list on the pull request is longer
+than five pages of 100, the service does not act on comments there.
+
+A run on an issue with an open pull request is given the comments since the last mark but one,
+because the last mark is the one that started this round (`source: review`, with `path` and
+`line` for comments on the diff; at most the newest 30, each cut at 4000 characters). When the
+head commit is newer than the last mark, that round is over and only comments after the last
+mark are given. Comments after the last mark are marked by the run itself: that is the case when
+a human moved the card to `Rework` before the service did. When the comments cannot be read, the
+attempt fails with `refresh_error` and is retried.
 
 The watch keeps no state between runs other than its throttle, so a restart needs no recovery.
 When the tracker closes an issue by itself on merge (a GitHub issue named by `Closes #n`), the
@@ -2375,6 +2404,8 @@ function process_handoff_watch(state):
     pr = repo.get_pull_request_for_branch(branch_name(issue))
     if pr.merged:
       tracker.set_state(issue, done_state); cleanup_workspace(issue); delete_remote_branch(issue)
+    else if rework_on_comments and allowlisted_comments_since_mark(pr) and quiet(pr):
+      tracker.set_state(issue, "Rework"); repo.write_mark(pr)
     else if rework_on_changes_requested and latest_allowlisted_review(pr) == changes_requested:
       tracker.set_state(issue, "Rework")
   return state

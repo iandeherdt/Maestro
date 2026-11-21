@@ -534,6 +534,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
 			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} }},
 		Gates: &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub},
+		Notes: pub,
 	}
 	// The planning stage needs a board. The names of its states are read
 	// at start; changing them takes a restart.

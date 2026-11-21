@@ -553,3 +553,26 @@ func TestOwnerCommentsReachTheAgentAndNobodyElses(t *testing.T) {
 		t.Errorf("order or cap of the comments is wrong:\n%s", p)
 	}
 }
+
+type notes struct {
+	fs  []issue.Feedback
+	err error
+}
+
+func (n notes) Feedback(context.Context, issue.Issue) ([]issue.Feedback, error) { return n.fs, n.err }
+
+func TestCommentsOnThePullRequestReachTheAgent(t *testing.T) {
+	r := newRig(t, script{text: "done", verifyOK: true})
+	r.w.Notes = notes{fs: []issue.Feedback{{Source: "review", Author: "ian", Body: "Rename this.", Path: "a.go", Line: 3}}}
+	r.run(orchestrator.Attempt{})
+	if p := r.f.prompts[0].Prompt; !strings.Contains(p, "source=review author=ian\npath: a.go\nline: 3\n\nRename this.") {
+		t.Fatalf("prompt = %s", p)
+	}
+
+	// When they cannot be read the run does not start without them.
+	r = newRig(t, script{text: "done", verifyOK: true})
+	r.w.Notes = notes{err: errors.New("github is down")}
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || out.Category != RefreshError || len(r.f.prompts) != 0 {
+		t.Fatalf("outcome = %+v, %d prompts", out, len(r.f.prompts))
+	}
+}
