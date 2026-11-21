@@ -1,6 +1,4 @@
 // Command symphony runs the orchestrator described in docs/SPEC.md.
-//
-// The guided setup and configuration checking are implemented so far.
 package main
 
 import (
@@ -9,13 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 
 	"github.com/iandeherdt/Symphony-beads/internal/config"
+	"github.com/iandeherdt/Symphony-beads/internal/dockerbox"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
 	"github.com/iandeherdt/Symphony-beads/internal/prompt"
+	"github.com/iandeherdt/Symphony-beads/internal/proxy"
 	"github.com/iandeherdt/Symphony-beads/internal/setup"
 	"github.com/iandeherdt/Symphony-beads/internal/workflow"
 )
@@ -30,14 +32,30 @@ var version = "dev"
 const usage = `usage:
   symphony setup [--dir DIR] [--port N]   guided installation, safe to run again
   symphony check [path-to-WORKFLOW.md]    validate a workflow file
+  symphony image                          build the sandbox image (needs Docker)
+  symphony login                          sign Claude Code in inside the sandbox
+  symphony run                            start the service, stop with Ctrl-C
   symphony version                        print the version
 
-The service itself is not implemented yet.`
+The usual order the first time: setup, image, login, run.`
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		fmt.Fprintln(stdout, "symphony", version)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "proxy" {
+		return runProxy(args[1:], stderr)
+	}
+	if len(args) > 0 {
+		switch args[0] {
+		case "run":
+			return runService(args[1:], stdout, stderr)
+		case "image":
+			return runImage(args[1:], stdout, stderr)
+		case "login":
+			return runLogin(args[1:], os.Stdin, stdout, stderr)
+		}
 	}
 	if len(args) > 0 && args[0] == "setup" {
 		return runSetup(args[1:], os.Stdin, stdout, stderr)
@@ -105,6 +123,32 @@ func workflowPath(explicit string) string {
 	return path
 }
 
+// runProxy is the egress proxy. It is started by the service inside the
+// proxy container, not by a person, so it is not in the usage text.
+func runProxy(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("proxy", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	listen := fs.String("listen", "", "address to listen on")
+	profile := fs.String("profile", "", "network profile, for the log")
+	allowFile := fs.String("allow-file", "", "JSON file with the allowed host names")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *listen == "" || *allowFile == "" {
+		fmt.Fprintln(stderr, "usage: symphony proxy --listen ADDR --profile NAME --allow-file FILE")
+		return 2
+	}
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	p := &proxy.Proxy{Profile: *profile, Log: slog.New(slog.NewTextHandler(stderr, nil)),
+		Allow: func() []string { return dockerbox.ReadAllow(*allowFile) }}
+	if err := p.Serve(ln); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
 func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -153,11 +197,12 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	ui.Say("")
-	ui.Say("Setup is finished as far as it goes today.")
-	ui.Say("  Done: the GitHub App, its installation on %s, the labels and the settings file.", st.Repo)
-	ui.Say("  Not built yet: the service that picks up tickets. Nothing is running, and labelling an")
-	ui.Say("  issue does nothing until it is. You do not need to do anything else for now.")
-	ui.Say("  Your settings: %s", st.WorkflowFile)
-	ui.Say("  To check them at any time: symphony check")
+	ui.Say("Setup is finished: the GitHub App, its installation on %s, the labels and the settings file.", st.Repo)
+	ui.Say("Three commands are left. Run them in this order, with Docker running:")
+	ui.Say("  symphony image    builds the container the agent works in (a few minutes, once)")
+	ui.Say("  symphony login    signs Claude Code in inside that container (once)")
+	ui.Say("  symphony run      starts the service; it then picks up issues labelled status:todo and run:%s", st.Worker)
+	ui.Say("Your settings: %s", st.WorkflowFile)
+	ui.Say("To check them at any time: symphony check")
 	return 0
 }

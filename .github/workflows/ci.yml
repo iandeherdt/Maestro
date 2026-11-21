@@ -23,6 +23,10 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test -race ./...
+        # The container tests need Docker, which the runner has. With the
+        # internet they also build the real sandbox image.
+        env:
+          SYMPHONY_TEST_INTERNET: "1"
+        run: go test -race -timeout 20m ./...
       - name: Install script
         run: scripts/test-install.sh

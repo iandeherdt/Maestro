@@ -383,12 +383,14 @@ Replaces upstream `codex`.
 
 #### 5.3.7 `sandbox` (object)
 
-- `backend` (string): REQUIRED. `systemd` (Linux), `macos-vm` or `macos-user` (Appendix B).
-  There is no `none` backend.
+- `backend` (string): REQUIRED. `docker` (Section 11.8), `systemd` (Linux), `macos-vm` or
+  `macos-user` (Appendix B). There is no `none` backend.
+- `image` (string): the sandbox image of the `docker` backend. Default `symphony-sandbox:latest`.
 - `memory_max` (string): default `6G`.
 - `cpu_quota` (string): default `300%`.
 - `tasks_max` (integer): default `2048`.
-- `network.proxy` (string): REQUIRED. `host:port` of the allowlisting proxy.
+- `network.proxy` (string): `host:port` of the allowlisting proxy. REQUIRED, except with the
+  `docker` backend, which runs its own proxies and ignores this key.
 - `network.allow_agent` (list of host names): hosts the agent turn may reach in addition to the
   built-in Claude service hosts.
 - `network.allow_hooks` (list of host names): hosts reachable from `after_create` and `before_run`
@@ -409,8 +411,10 @@ Replaces upstream `codex`.
 
 - `branch_prefix` (string): default `symphony/`.
 - `draft_until_green` (boolean): default `true`.
-- `required_checks` (list of check names, or `"branch-protection"`): default
-  `"branch-protection"` (use the base branch's required status checks).
+- `required_checks` (list of check names, `"branch-protection"` or `"none"`): default
+  `"branch-protection"` (use the base branch's required status checks). `"none"` is the operator
+  saying that the repository has no checks: a pull request is handed to review as soon as it is
+  open (Section 15.6). It is reported as a warning at startup.
 - `checks_timeout_ms` (integer): default `3600000`.
 - `checks_poll_interval_ms` (integer): default `60000`.
 - `rework_on_changes_requested` (boolean): default `true`.
@@ -598,14 +602,15 @@ skip dispatch for that tick and keep reconciling.
 - `claude.turn_total_timeout_ms`: default `5400000`
 - `claude.read_timeout_ms`: default `30000`
 - `claude.stall_timeout_ms`: default `300000`
-- `sandbox.backend`: `systemd` | `macos-vm` | `macos-user`, REQUIRED
+- `sandbox.backend`: `docker` | `systemd` | `macos-vm` | `macos-user`, REQUIRED
+- `sandbox.image`: `symphony-sandbox:latest` (docker backend)
 - `sandbox.memory_max` `6G`, `sandbox.cpu_quota` `300%`, `sandbox.tasks_max` `2048`
-- `sandbox.network.proxy`: REQUIRED
+- `sandbox.network.proxy`: REQUIRED except with the docker backend
 - `sandbox.network.allow_agent`, `sandbox.network.allow_hooks`: default `[]`
 - `sandbox.env`: default `{}`
 - `verify.command`: REQUIRED; `verify.timeout_ms` `1800000`; `verify.network` `false`
 - `publish.branch_prefix` `symphony/`; `publish.draft_until_green` `true`
-- `publish.required_checks` `branch-protection`; `publish.checks_timeout_ms` `3600000`
+- `publish.required_checks` `branch-protection` (or a list, or `none`); `publish.checks_timeout_ms` `3600000`
 - `publish.rework_on_changes_requested` `true`; `publish.max_bundle_bytes` `104857600`
 - `policy.*`: see Sections 5.3.10 and 15.3
 - `budget.max_failure_attempts` `3`; `budget.max_runs_per_day` `20`
@@ -1231,6 +1236,47 @@ fail closed (startup aborts) if the forbidden action succeeds:
 Defined in Appendix B. They MUST satisfy P1 to P7 and pass the same self-test. A backend that
 cannot pass is not usable, and the service refuses to start with it.
 
+### 11.8 Docker Backend (`docker`)
+
+The backend for a machine that has Docker (Docker Desktop on macOS, Docker Engine on Linux). It
+is the backend the guided setup writes. The service runs as an ordinary user who may use Docker
+and needs no root helper, because the Docker daemon is the launcher.
+
+Every step is one container that is removed when the step ends:
+
+- User `10001:10001`, all capabilities dropped, `no-new-privileges`, memory, CPU and process
+  limits from `sandbox.memory_max`, `cpu_quota` and `tasks_max`, an init process, and a fixed
+  environment in which nothing of the service's own environment appears.
+- The workspace of an issue is a named volume, `symphony-<worker>-ws-<workspace_key>`, mounted
+  at `/workspace`. No directory of the host is mounted, with two exceptions that last one step
+  each: the mirror, read-only, in the populate step, and the issue's hand-off directory in the
+  export step.
+- The agent's Claude Code state, including its login, is the volume `symphony-<worker>-claude`.
+  Only agent steps get it. Hooks and verify, which run repository scripts, never do.
+- Network: `--network none` for steps without a profile. A step with a profile is attached to
+  that profile's internal network only (`docker network create --internal`), which has no route
+  out and resolves no outside names. On that network is the profile's proxy container, the
+  service's own binary running `symphony proxy` (Section 11.4), which is also attached to
+  Docker's default bridge. It is the only way out. The allowlists are files of the control zone,
+  mounted read-only into the proxies and read for every request.
+- Cleanup (Section 11.5): at startup every container carrying this worker's label is removed.
+  Stopping a step removes its container, which kills every process in it.
+
+The image (`sandbox.image`) is built by `symphony image` from a Dockerfile inside the binary:
+a Node.js base image, git, a pinned Claude Code release, and the service's binary for the proxy.
+On Linux the running binary is copied into the image; on macOS the release of the same version
+is downloaded inside the build and checked against the release's checksum file.
+
+`symphony login` runs `claude auth login` in a container with the Claude volume and the agent
+network on the operator's terminal. The login never exists on the host. `symphony run` refuses
+to start while `claude auth status` in such a container reports no login.
+
+Limits of this backend, to be clear about what it is: on macOS the containers run in Docker
+Desktop's Linux VM, so the agent cannot build or test software that needs macOS itself (Xcode,
+Unity). On Linux, a user who may use Docker is equivalent to root on that machine; the service
+user must be treated as such. The self-test of Section 11.6 is not run at startup yet; the
+properties are covered by the package's tests, which run real containers.
+
 ## 12. Issue Tracker Integration Contract
 
 The tracker boundary is a portable read kernel for scheduling plus a small, fixed set of writes
@@ -1692,7 +1738,8 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
 4. Determine required checks: the list in `publish.required_checks`. With an empty list, every
    check reported for the commit is required and at least one must exist, so that "nothing
    reported yet" is never read as green. Reading the base branch's required status checks
-   instead is planned with Section 15.7.
+   instead is planned with Section 15.7. With `required_checks: none` no check is read and the
+   pull request counts as passed once steps 1 and 2 are done.
 5. All required checks successful: mark the pull request ready (GraphQL
    `markPullRequestReadyForReview`, refused if the head moved in the meantime), set the issue to
    the hand-off state, clear its failure budget, update the status comment, release the claim.
@@ -1834,8 +1881,8 @@ Rules for every step:
 
 Steps:
 
-1. Machine: Git 2.31 or newer, the Claude Code CLI, and on Linux systemd and cgroup v2. Nothing
-   is installed by the wizard; each missing item comes with what to do.
+1. Machine: Git 2.31 or newer and Docker. Nothing is installed by the wizard; each missing item
+   comes with what to do.
 2. GitHub App: created through GitHub's manifest flow. The wizard serves a page on a loopback
    port with a form that posts the manifest to github.com. The operator presses Create there,
    GitHub redirects back to the loopback port with a one-time code, and the wizard exchanges the
@@ -1853,9 +1900,14 @@ Steps:
    it is written, and validated with the code the service uses at startup. An existing file is
    validated and kept, never overwritten.
    The wizard asks for the test command in plain words. An empty answer writes `true` and says
-   that the agent's work will then be published without being tested.
+   that the agent's work will then be published without being tested. It then asks whether the
+   repository runs checks on pull requests; a no writes `publish.required_checks: none`, so that
+   the service does not wait an hour for checks that never come.
+   The file uses the `docker` backend, and its directories are in the operator's own
+   configuration directory.
 6. Service: the users, directories and the systemd or launchd unit are installed after the
-   wizard has shown what it will write. (not built)
+   wizard has shown what it will write. (not built; until then the operator runs
+   `symphony image`, `symphony login` and `symphony run` in a terminal)
 7. Self-test: `symphony doctor`. (not built)
 
 Steps 1 to 5 ran on a Mac against github.com on 2026-11-21 and completed: GitHub accepted the

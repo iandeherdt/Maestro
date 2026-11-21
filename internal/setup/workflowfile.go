@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -93,7 +94,15 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 		ui.Say("  No test command: the agent's work will be published without being tested. That is")
 		ui.Say("  fine for a first try. Later, change verify.command in the file below.")
 	}
-	text := render(goos, st, m[1], verify)
+	ui.Say("")
+	ui.Say("  One more: does %s run automatic checks on pull requests (GitHub Actions or another CI)?", st.Repo)
+	ui.Say("  If it does, the service waits until they pass before it hands a pull request to you.")
+	ui.Say("  If it does not, answer n, or the service would wait for checks that never come.")
+	ci, err := ui.Confirm("  Does it run checks on pull requests?")
+	if err != nil {
+		return err
+	}
+	text := render(goos, st, m[1], verify, ci)
 	ui.Say("  This file will be written to %s:", path)
 	ui.Say("")
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
@@ -123,15 +132,16 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 }
 
 // render builds the file. Every value placed in it has been validated to
-// a narrow character set, except the verify command, which goes into a
-// YAML block where no character is special.
-func render(goos string, st *State, owner, verify string) string {
-	backend, root := "systemd", "/var/lib/symphony-agent/workspaces"
-	stateDir := "/var/lib/symphony/state"
-	if goos == "darwin" {
-		backend, root = "macos-vm", "/Users/symphony-agent/workspaces"
-		stateDir = filepath.Join(st.Dir(), "state")
-	}
+// a narrow character set, except the two paths, which are quoted, and the
+// verify command, which goes into a YAML block where no character is
+// special.
+//
+// The Docker sandbox is the one that exists, on both systems. Its
+// workspaces are Docker volumes, so the directories here only hold the
+// service's own files and belong to the user who runs it.
+func render(_ string, st *State, owner, verify string, ci bool) string {
+	root := strconv.Quote(filepath.Join(st.Dir(), "workspaces"))
+	stateDir := strconv.Quote(filepath.Join(st.Dir(), "state"))
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("tracker:\n  kind: github\n  provider:\n")
@@ -140,8 +150,11 @@ func render(goos string, st *State, owner, verify string) string {
 	b.WriteString("    bot_login: \"" + st.AppSlug + "[bot]\"\n")
 	b.WriteString("  allowed_authors: [" + owner + "]\n")
 	b.WriteString("workspace:\n  root: " + root + "\n  repo: " + st.Repo + "\n")
-	b.WriteString("sandbox:\n  backend: " + backend + "\n  network:\n    proxy: 127.0.0.1:3128\n")
+	b.WriteString("sandbox:\n  backend: docker\n")
 	b.WriteString("verify:\n  command: |\n    " + verify + "\n")
+	if !ci {
+		b.WriteString("publish:\n  required_checks: none\n")
+	}
 	b.WriteString("budget:\n  state_dir: " + stateDir + "\n")
 	b.WriteString("worker:\n  name: " + st.Worker + "\n")
 	b.WriteString("---\n\n")

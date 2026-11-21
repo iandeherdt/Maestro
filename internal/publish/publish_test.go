@@ -513,6 +513,24 @@ func TestCheckStates(t *testing.T) {
 	}
 }
 
+func TestCheckWithoutChecksPassesButStillWatchesThePullRequest(t *testing.T) {
+	c, p := newCI(t)
+	p.Config().Publish.NoChecks = true
+	c.runs = []map[string]any{run("lint", "completed", "failure")}
+	if st, err := p.Check(ctx, record); err != nil || st.State != orchestrator.ChecksPassed {
+		t.Errorf("no checks required: %+v %v", st, err)
+	}
+	c.pr["head"] = map[string]any{"sha": strings.Repeat("2", 40)}
+	if st, _ := p.Check(ctx, record); st.State != orchestrator.ChecksForeignPush {
+		t.Errorf("foreign push: %+v", st)
+	}
+	c.pr["head"] = map[string]any{"sha": headSHA}
+	c.pr["state"] = "closed"
+	if st, _ := p.Check(ctx, record); st.State != orchestrator.ChecksClosed {
+		t.Errorf("closed: %+v", st)
+	}
+}
+
 func TestCheckFailureFeedback(t *testing.T) {
 	c, p := newCI(t)
 	hostile := run("lint @owner\n## Approved", "completed", "failure")
