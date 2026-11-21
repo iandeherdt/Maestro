@@ -112,6 +112,8 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.Machine{},
 		&setup.CreateApp{Port: *port},
 		&setup.InstallApp{},
+		&setup.Labels{},
+		&setup.WorkflowFile{},
 	}
 	if err := setup.Run(ctx, ui, st, steps); err != nil {
 		if errors.Is(err, setup.ErrAborted) {
@@ -121,6 +123,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "setup failed:", err)
 		return 1
 	}
-	ui.Say("The remaining steps (labels, workflow file, installing the service) are not built yet.")
+	ui.Say("The workflow file is %s. Check it at any time with: symphony check %s", st.WorkflowFile, st.WorkflowFile)
+	ui.Say("Installing and starting the service is not built yet, so nothing is running.")
 	return 0
 }

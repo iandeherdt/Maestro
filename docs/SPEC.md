@@ -1804,8 +1804,11 @@ Steps:
    without a browser the operator forwards the port over SSH.
 3. Installation: the operator installs the App on the one repository. The wizard finds the
    installation and proves the chain by requesting a token limited to that repository.
-4. Labels: the state labels and the routing label are created in the repository. (not built)
-5. Workflow file: written from a few questions and validated. (not built)
+4. Labels: the operator names the worker, and the state labels and the routing label that are
+   missing are listed and created with a token limited to Issues on the one repository.
+5. Workflow file: written from the earlier answers and the verify command, shown in full before
+   it is written, and validated with the code the service uses at startup. An existing file is
+   validated and kept, never overwritten.
 6. Service: the users, directories and the systemd or launchd unit are installed after the
    wizard has shown what it will write. (not built)
 7. Self-test: `symphony doctor`. (not built)

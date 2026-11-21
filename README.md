@@ -80,8 +80,10 @@ What the setup does today:
 3. **Installs the App on one repository** of your choice and confirms that it can obtain a token
    for it.
 
-Still to come in the setup: creating the labels, writing the workflow file, installing the
-service (systemd or launchd), and a final self-test.
+4. **Creates the labels** in the repository, after showing you which ones are missing.
+5. **Writes the workflow file** from your verify command, shows it to you first, and validates it.
+
+Still to come in the setup: installing the service (systemd or launchd) and a final self-test.
 
 If the machine has no browser, the setup shows an `ssh -L` command to run on your own computer so
 that the page opens there.
@@ -179,7 +181,7 @@ Last updated 2026-11-21.
 | Diff policy and secret scan | Done |
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, not yet tried against github.com |
-| Guided setup | Machine check and GitHub App steps done, not yet tried against github.com |
+| Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), not yet tried against github.com |
 | Checks gate (waiting for CI) | Not started |
 | Running the service: `symphony run`, `status`, `pause`, `doctor` | Not started |
 | Claude Code runner | Not started. Needs one real run on a machine with the CLI logged in. |

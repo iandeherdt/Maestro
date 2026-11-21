@@ -93,6 +93,8 @@ type State struct {
 	AppSlug        string `json:"app_slug,omitempty"`
 	AppKeyFile     string `json:"app_key_file,omitempty"`
 	InstallationID string `json:"installation_id,omitempty"`
+	Worker         string `json:"worker,omitempty"`
+	WorkflowFile   string `json:"workflow_file,omitempty"`
 
 	path string
 }
