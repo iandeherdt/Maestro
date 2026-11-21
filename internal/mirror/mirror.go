@@ -540,3 +540,44 @@ func (m *Mirror) ForgetPush(ctx context.Context, workspaceKey string) error {
 	_, err := m.git(ctx, nil, 0, "update-ref", "-d", PushedRef(workspaceKey))
 	return err
 }
+
+// Sync creates the mirror if it does not exist and fetches the remote's
+// branches into it (SPEC 9.2). Tags are not fetched. The token is handed
+// to git through an ephemeral helper and never stored in the mirror.
+func (m *Mirror) Sync(ctx context.Context, remoteURL, token string) error {
+	scheme := "https"
+	switch {
+	case strings.HasPrefix(remoteURL, "https://") && !strings.ContainsAny(remoteURL, "@ \t\n"):
+	case m.AllowFileRemote && strings.HasPrefix(remoteURL, "/"):
+		scheme = "file"
+	default:
+		return fmt.Errorf("the remote must be an https URL without credentials")
+	}
+	if _, err := os.Stat(filepath.Join(m.Dir, "HEAD")); err != nil {
+		if err := os.MkdirAll(m.Dir, 0o755); err != nil {
+			return err
+		}
+		if _, err := m.git(ctx, nil, 0, "init", "--quiet", "--bare"); err != nil {
+			return err
+		}
+	}
+	dir, err := os.MkdirTemp(m.Dir, "sync-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	helper := filepath.Join(dir, "askpass")
+	if err := os.WriteFile(helper, []byte(askpass), 0o700); err != nil {
+		return err
+	}
+	if _, err := m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "SYMPHONY_PUSH_TOKEN=" + token},
+		"-c", "protocol."+scheme+".allow=always", "-c", "http.followRedirects=false",
+		"fetch", "--quiet", "--prune", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+		remoteURL, "+refs/heads/*:refs/heads/*"); err != nil {
+		if exited(err) {
+			return fmt.Errorf("the repository could not be fetched")
+		}
+		return err
+	}
+	return nil
+}
