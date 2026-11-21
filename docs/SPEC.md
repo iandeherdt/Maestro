@@ -194,7 +194,8 @@ Typed view of the workflow config (Section 5.3).
 
 #### 4.1.4 Workspace
 
-- `path` (absolute path, inside the workspace root)
+- `path` (absolute path, inside the workspace root). Known only to the launcher. The control zone
+  identifies a workspace by its key and never holds or builds the path.
 - `workspace_key` (sanitized identifier, Section 4.2)
 - `created_now` (boolean)
 - `base_sha` (string): commit of the base branch the workspace was populated from.
@@ -1113,6 +1114,12 @@ The control zone cannot start processes as another user by itself. A small launc
   (sudoers or polkit) that allows `symphony` to run exactly that program.
 - Input: a JSON request on standard input with `{step, workspace_key, argv, network_profile,
   limits, env}`. `step` is one of `populate`, `hook`, `agent`, `verify`, `export`.
+- A `populate` request carries `populate: {op, branch, base_branch}` instead of `argv`. `op` is
+  one of `probe` (prints `missing` or `exists <base_sha>`), `clone` (prints the base commit),
+  `fast-forward` and `remove`. The launcher builds the command line for each from its own
+  configuration. The caller supplies names only, and the launcher validates them.
+- Everything a step prints is untrusted. The control zone accepts a base commit only if it is a
+  full lowercase hexadecimal object name, and treats any other probe or clone answer as a failure.
 - The launcher MUST re-derive the workspace path from `workspace_key` and its own configured
   root, re-check Invariants 2 and 3, reject any `env` key outside its allowlist, and choose the
   unit properties itself from `step` and `network_profile`. The caller cannot pass unit properties,
