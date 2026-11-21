@@ -4,11 +4,8 @@ tracker:
   provider:
     repo: your-account/your-repo
     token: $GITHUB_TOKEN
-    state_source: project
-    project:
-      owner: your-account
-      number: 1
-      token: $GITHUB_PROJECT_TOKEN
+    state_source: labels
+    bot_login: your-app[bot]
   allowed_authors: [your-account]
 workspace:
   root: /var/lib/symphony-agent/workspaces
