@@ -1,10 +1,18 @@
 name: Release
 
-# Builds the binaries for a version tag and attaches them to a GitHub
-# release, with a checksum file the install script verifies.
+# Builds the binaries for a version and attaches them to a GitHub release,
+# with a checksum file the install script verifies. It runs for a pushed
+# version tag, or from the Actions page with a version typed in, in which
+# case the release creates the tag on the commit that was built.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, such as v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,14 +29,29 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Version
+        id: version
+        env:
+          TYPED: ${{ inputs.version }}
+        run: |
+          tag="${TYPED:-$GITHUB_REF_NAME}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "version must look like v1.2.3" >&2
+            exit 1
+          fi
+          if [ -n "$TYPED" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "a typed version is released from main only" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Test
         run: go test ./...
       - name: Build
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: scripts/build-release.sh "$TAG" dist
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --target "$GITHUB_SHA"
