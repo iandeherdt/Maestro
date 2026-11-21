@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
+	"github.com/iandeherdt/Maestro/internal/config"
 )
 
 // Git file modes.

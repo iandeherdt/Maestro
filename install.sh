@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the symphony binary from a GitHub release.
 #
-#   curl -fsSL https://raw.githubusercontent.com/iandeherdt/Symphony-beads/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/iandeherdt/Maestro/main/install.sh | sh
 #
 # It downloads the archive for this machine, checks it against the
 # release's SHA256SUMS file, and puts the binary in ~/.local/bin. It does
@@ -13,7 +13,7 @@
 set -eu
 
 main() {
-  repo="iandeherdt/Symphony-beads"
+  repo="iandeherdt/Maestro"
   base="${SYMPHONY_DOWNLOAD_BASE:-https://github.com/$repo/releases}"
   version="${SYMPHONY_VERSION:-}"
   dir="${SYMPHONY_INSTALL_DIR:-$HOME/.local/bin}"

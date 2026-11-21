@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 )
 
 // This file implements state_source "project": the state of an issue is

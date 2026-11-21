@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 // Call is one recorded request.

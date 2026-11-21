@@ -1,6 +1,6 @@
-# Symphony-beads
+# Maestro
 
-Symphony-beads turns tickets into pull requests. You approve a ticket on GitHub, Claude Code works
+Maestro turns tickets into pull requests. You approve a ticket on GitHub, Claude Code works
 on it inside a sandbox on your own machine, and you get a pull request to review. Nothing is merged
 without you.
 
@@ -69,7 +69,7 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 Install the binary on macOS or Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iandeherdt/Symphony-beads/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/iandeherdt/Maestro/main/install.sh | sh
 ```
 
 The script downloads the latest release for your machine, checks it against the release's
@@ -80,8 +80,8 @@ running it, open [install.sh](install.sh). To choose a version or a directory, s
 Or build it yourself with Go 1.24 or newer:
 
 ```sh
-git clone https://github.com/iandeherdt/Symphony-beads.git
-cd Symphony-beads
+git clone https://github.com/iandeherdt/Maestro.git
+cd Maestro
 go build -o ~/.local/bin/symphony ./cmd/symphony
 ```
 
@@ -325,3 +325,9 @@ is described at the top of `internal/tracker/github/live_test.go`.
 The design follows the specification of OpenAI's Symphony, adapted for Claude Code and hardened
 for a setup where the board is reachable from the internet and the worker sits on a home network.
 [docs/SPEC.md](docs/SPEC.md), Appendix D, lists the differences.
+
+The project was first called Symphony-beads. The command is still `symphony`.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE). [NOTICE](NOTICE) says where the design comes from.

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 // ClaudeVersion is the Claude Code release the image is built with. The
@@ -49,7 +49,7 @@ USER agent
 const dockerfileDownload = `ARG SYMPHONY_VERSION
 ARG TARGETARCH
 RUN set -eu; \
-    base="https://github.com/iandeherdt/Symphony-beads/releases/download/${SYMPHONY_VERSION}"; \
+    base="https://github.com/iandeherdt/Maestro/releases/download/${SYMPHONY_VERSION}"; \
     file="symphony_linux_${TARGETARCH}.tar.gz"; \
     cd /tmp; \
     curl -fsSL --proto '=https' --tlsv1.2 -o "$file" "$base/$file"; \

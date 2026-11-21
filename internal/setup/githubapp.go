@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/ghapp"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 	// operator creates the App in a browser.
 	DefaultPort = 8976
 	keyFileName = "github-app.pem"
-	homepage    = "https://github.com/iandeherdt/Symphony-beads"
+	homepage    = "https://github.com/iandeherdt/Maestro"
 )
 
 // permissions are what SPEC 15.5 allows the App, and nothing more.

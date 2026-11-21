@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 // Config is the typed view of the workflow front matter.

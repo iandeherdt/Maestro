@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/budget"
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/budget"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
 )
 
 type fakeState struct {

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/background"
-	"github.com/iandeherdt/Symphony-beads/internal/httpapi"
-	"github.com/iandeherdt/Symphony-beads/internal/setup"
+	"github.com/iandeherdt/Maestro/internal/background"
+	"github.com/iandeherdt/Maestro/internal/httpapi"
+	"github.com/iandeherdt/Maestro/internal/setup"
 )
 
 // serviceFile is where a running service says how to reach it. It holds a

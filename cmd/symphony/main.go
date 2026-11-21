@@ -13,13 +13,13 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/dockerbox"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/prompt"
-	"github.com/iandeherdt/Symphony-beads/internal/proxy"
-	"github.com/iandeherdt/Symphony-beads/internal/setup"
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/dockerbox"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/prompt"
+	"github.com/iandeherdt/Maestro/internal/proxy"
+	"github.com/iandeherdt/Maestro/internal/setup"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 func main() {

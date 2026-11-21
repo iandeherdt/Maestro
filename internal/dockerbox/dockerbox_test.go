@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 // These tests run real containers. They are skipped where there is no

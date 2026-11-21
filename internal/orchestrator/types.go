@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/budget"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/plan"
+	"github.com/iandeherdt/Maestro/internal/budget"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/plan"
 )
 
 // Phase of a run attempt (SPEC 7.2).

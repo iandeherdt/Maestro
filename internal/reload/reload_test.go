@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/prompt"
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/prompt"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 type fixture struct {

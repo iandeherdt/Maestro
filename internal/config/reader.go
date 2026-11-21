@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 // section reads typed values from one YAML mapping and remembers which keys

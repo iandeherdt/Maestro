@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
+	"github.com/iandeherdt/Maestro/internal/config"
 )
 
 func cfg() config.Policy {

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	tracker "github.com/iandeherdt/Symphony-beads/internal/tracker/github"
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/config"
+	tracker "github.com/iandeherdt/Maestro/internal/tracker/github"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 type fakeBoard struct {

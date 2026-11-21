@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 )
 
 const (

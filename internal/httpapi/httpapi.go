@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
 )
 
 // State is what the server needs from the orchestrator. Both methods must

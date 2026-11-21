@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 const (
