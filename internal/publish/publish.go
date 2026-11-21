@@ -159,8 +159,16 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 			}
 		}
 	}
-	text := body(closes, flags, Proof{VerifyCommand: cfg.Verify.Command, VerifyStatus: v.ExitStatus, Worker: cfg.Worker.Name,
-		Commits: len(imp.Commits), Files: len(diff.Changes)}, "")
+	proof := Proof{VerifyCommand: cfg.Verify.Command, VerifyStatus: v.ExitStatus, Worker: cfg.Worker.Name,
+		Commits: len(imp.Commits), Files: len(diff.Changes), ScreenshotNote: v.ScreenshotNote}
+	if len(v.Screenshots) > 0 {
+		// Pictures are an extra. A pull request without them is better
+		// than no pull request.
+		if proof.Screenshots, err = p.store(ctx, api, owner, repo, ws.Key, imp.Head, v.Screenshots); err != nil {
+			proof.ScreenshotNote = "The screenshots were taken but could not be stored in the repository."
+		}
+	}
+	text := body(closes, flags, proof, "")
 	number, err := api.upsert(ctx, owner, repo, ws.Branch, cfg.Workspace.BaseBranch, title(is.Identifier, is.Title), text,
 		cfg.Publish.DraftUntilGreen)
 	if err != nil {

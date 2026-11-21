@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -30,6 +31,7 @@ type Config struct {
 	Claude      Claude
 	Sandbox     Sandbox
 	Verify      Verify
+	Screenshots Screenshots
 	Publish     Publish
 	Policy      Policy
 	Budget      Budget
@@ -113,6 +115,27 @@ type Verify struct {
 	OutputTailBytes int64
 }
 
+// Screenshots is how the service takes pictures of the work for the pull
+// request (SPEC 24). Either Pages or Command is set, or neither.
+type Screenshots struct {
+	// Pages are files in the repository, or addresses on localhost.
+	Pages []string
+	// Start is a command that is started first and left running, such as
+	// a development server.
+	Start string
+	// Command is the operator's own command. It writes PNG files into
+	// $SCREENSHOT_DIR.
+	Command       string
+	TimeoutMS     int64
+	Width, Height int64
+}
+
+// On reports whether screenshots are taken.
+func (s Screenshots) On() bool { return len(s.Pages) > 0 || s.Command != "" }
+
+// MaxScreenshots is how many pictures one pull request shows.
+const MaxScreenshots = 6
+
 type Publish struct {
 	BranchPrefix string
 	// RequiredChecksFromBranchProtection is true when required checks are
@@ -190,7 +213,7 @@ var (
 	backends      = set("systemd", "docker", "podman", "macos-vm", "macos-user")
 	trackerKinds  = set("github", "linear")
 	knownTopLevel = []string{"tracker", "polling", "workspace", "hooks", "agent", "claude",
-		"sandbox", "verify", "publish", "policy", "budget", "worker", "server"}
+		"sandbox", "verify", "screenshots", "publish", "policy", "budget", "worker", "server"}
 )
 
 func set(items ...string) map[string]bool {
@@ -224,6 +247,7 @@ func Build(def *workflow.Definition, opt Options) (*Config, error) {
 	b.claude(root.sub("claude"))
 	b.sandbox(root.sub("sandbox"))
 	b.verify(root.sub("verify"))
+	b.screenshots(root.sub("screenshots"))
 	b.publish(root.sub("publish"))
 	b.policy(root.sub("policy"))
 	b.budget(root.sub("budget"))
@@ -658,6 +682,41 @@ func (b *builder) verify(s *section) {
 	}
 	if v.Network {
 		b.cfg.Warnings = append(b.cfg.Warnings, "verify.network is true: the verify step can reach the hook allowlist")
+	}
+}
+
+var localPageRE = regexp.MustCompile(`^http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?(/[^\s]*)?$`)
+
+func (b *builder) screenshots(s *section) {
+	sh := &b.cfg.Screenshots
+	sh.Pages = s.strList("pages", nil)
+	sh.Start = strings.TrimSpace(s.str("start", ""))
+	sh.Command = strings.TrimSpace(s.str("command", ""))
+	sh.TimeoutMS = b.positive("screenshots.timeout_ms", s.integer("timeout_ms", 300000))
+	sh.Width = b.positive("screenshots.width", s.integer("width", 1280))
+	sh.Height = b.positive("screenshots.height", s.integer("height", 800))
+	b.strict(s)
+	if len(sh.Pages) > 0 && sh.Command != "" {
+		b.fail("screenshots.command", "cannot be set together with screenshots.pages")
+	}
+	if len(sh.Pages) == 0 && sh.Start != "" {
+		b.fail("screenshots.start", "needs screenshots.pages")
+	}
+	if len(sh.Pages) > MaxScreenshots {
+		b.fail("screenshots.pages", "has more than %d entries", MaxScreenshots)
+	}
+	if sh.Width > 4000 || sh.Height > 4000 {
+		b.fail("screenshots.width", "and screenshots.height are at most 4000")
+	}
+	for _, page := range sh.Pages {
+		switch {
+		case localPageRE.MatchString(page):
+		case strings.Contains(page, "://"):
+			b.fail("screenshots.pages", "%q is not on this machine: only http://localhost addresses and files in the repository can be shown", page)
+		case page == "" || strings.HasPrefix(page, "/") || strings.HasPrefix(page, "-") || strings.ContainsAny(page, "\n\\") ||
+			page != path.Clean(page) || strings.HasPrefix(page, ".."):
+			b.fail("screenshots.pages", "%q is not a file in the repository, written like docs/index.html", page)
+		}
 	}
 }
 

@@ -222,6 +222,9 @@ func interruptible() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
+// browserLine adds a browser and fonts to the sandbox image.
+const browserLine = "RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji && rm -rf /var/lib/apt/lists/*"
+
 // runImage builds the sandbox image.
 func runImage(args []string, stdout, stderr io.Writer) int {
 	dir, explicit, ok := parse("image", args, stderr)
@@ -242,6 +245,10 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	b := dockerbox.Build{Out: stdout, Version: version, Extra: conventions.Derive(packs).Image}
+	if len(in.cfg.Screenshots.Pages) > 0 {
+		// The service takes the screenshots with this browser (SPEC 24).
+		b.Extra = append(b.Extra, browserLine)
+	}
 	if !strings.HasPrefix(b.Version, "v") {
 		b.Version = "v" + b.Version
 	}

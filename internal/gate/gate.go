@@ -136,6 +136,9 @@ func (g *Gates) Verify(ctx context.Context, ws workspace.Workspace) (worker.Veri
 		out.OutputTail = DirtiedTree + ": the verify command changed files in the repository. " +
 			"Commit the result of formatters and generators before finishing.\n" + out.OutputTail
 	}
+	if out.Passed && g.Config().Screenshots.On() {
+		out.Screenshots, out.ScreenshotNote = g.screenshots(ctx, ws.Key)
+	}
 	return out, nil
 }
 
