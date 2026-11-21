@@ -8,27 +8,33 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 // Config is the typed view of the workflow front matter.
 type Config struct {
-	Tracker   Tracker
-	Polling   Polling
-	Workspace Workspace
-	Hooks     Hooks
-	Agent     Agent
-	Claude    Claude
-	Sandbox   Sandbox
-	Verify    Verify
-	Publish   Publish
-	Policy    Policy
-	Budget    Budget
-	Worker    Worker
-	Server    Server
+	// Conventions are the names of the rule packs that are switched on.
+	// What they add is already merged into Hooks, Sandbox, Verify and
+	// Policy below.
+	Conventions []string
+	Tracker     Tracker
+	Polling     Polling
+	Workspace   Workspace
+	Hooks       Hooks
+	Agent       Agent
+	Claude      Claude
+	Sandbox     Sandbox
+	Verify      Verify
+	Publish     Publish
+	Policy      Policy
+	Budget      Budget
+	Worker      Worker
+	Server      Server
 
 	// Warnings are non-fatal findings, such as ignored unknown keys.
 	Warnings []string
@@ -204,6 +210,7 @@ func Build(def *workflow.Definition, opt Options) (*Config, error) {
 	root := newSection("", def.Config, &errs)
 
 	b := &builder{opt: opt, errs: &errs, cfg: c}
+	b.conventions(root)
 	b.tracker(root.sub("tracker"))
 	b.polling(root.sub("polling"))
 	b.workspace(root.sub("workspace"))
@@ -233,6 +240,34 @@ type builder struct {
 	opt  Options
 	errs *[]error
 	cfg  *Config
+	// packs is what the rule packs add (SPEC 23).
+	packs conventions.Settings
+}
+
+// conventions reads the list of rule packs. Their settings are merged by
+// the sections they belong to, always in addition to what the file says:
+// a pack can add a protected path or a check, never take one away.
+func (b *builder) conventions(root *section) {
+	names := trimAll(root.strList("conventions", nil))
+	list, err := conventions.Resolve(names)
+	if err != nil {
+		b.fail("conventions", "%v", err)
+		return
+	}
+	b.cfg.Conventions = names
+	b.packs = conventions.Derive(list)
+}
+
+// both joins two shell scripts so that the second runs only when the
+// first succeeded.
+func both(first, second string) string {
+	switch {
+	case strings.TrimSpace(first) == "":
+		return second
+	case strings.TrimSpace(second) == "":
+		return first
+	}
+	return first + "\n" + second
 }
 
 func (b *builder) fail(key, format string, args ...any) {
@@ -464,10 +499,15 @@ func validBranch(s string) bool {
 func (b *builder) hooks(s *section) {
 	h := &b.cfg.Hooks
 	h.AfterCreate = s.str("after_create", "")
-	h.BeforeRun = s.str("before_run", "")
+	// The packs install the project's dependencies before every run.
+	h.BeforeRun = both(b.packs.Prepare, s.str("before_run", ""))
 	h.AfterRun = s.str("after_run", "")
 	h.BeforeRemove = s.str("before_remove", "")
-	h.TimeoutMS = b.positive("hooks.timeout_ms", s.integer("timeout_ms", 60000))
+	timeout := int64(60000)
+	if b.packs.Prepare != "" {
+		timeout = 900000 // installing dependencies takes longer than a minute
+	}
+	h.TimeoutMS = b.positive("hooks.timeout_ms", s.integer("timeout_ms", timeout))
 	b.lenient(s)
 }
 
@@ -537,6 +577,11 @@ func (b *builder) sandbox(s *section) {
 	sb.Proxy = n.str("proxy", "")
 	sb.AllowAgent = b.hosts("sandbox.network.allow_agent", n.strList("allow_agent", nil))
 	sb.AllowHooks = b.hosts("sandbox.network.allow_hooks", n.strList("allow_hooks", nil))
+	for _, h := range b.packs.Hosts {
+		if !slices.Contains(sb.AllowHooks, h) {
+			sb.AllowHooks = append(sb.AllowHooks, h)
+		}
+	}
 	sb.Env = s.strMap("env")
 	b.strict(n)
 	b.strict(s)
@@ -593,7 +638,12 @@ func (b *builder) hosts(key string, in []string) []string {
 
 func (b *builder) verify(s *section) {
 	v := &b.cfg.Verify
-	v.Command = s.str("command", "")
+	// The packs' checks run first; the file's own command, if any, after.
+	own := s.str("command", "")
+	if b.packs.Verify != "" && strings.TrimSpace(own) == "true" {
+		own = "" // the placeholder setup writes when there are no tests
+	}
+	v.Command = both(b.packs.Verify, own)
 	v.TimeoutMS = b.positive("verify.timeout_ms", s.integer("timeout_ms", 1800000))
 	v.Network = s.boolean("network", false)
 	v.OutputTailBytes = b.positive("verify.output_tail_bytes", s.integer("output_tail_bytes", 16384))
@@ -647,7 +697,7 @@ func (b *builder) publish(s *section) {
 
 func (b *builder) policy(s *section) {
 	p := &b.cfg.Policy
-	p.DenyPaths = trimAll(s.strList("deny_paths", nil))
+	p.DenyPaths = append(trimAll(s.strList("deny_paths", nil)), b.packs.Protect...)
 	p.FlagPaths = trimAll(s.strList("flag_paths", nil))
 	p.MaxChangedFiles = b.positive("policy.max_changed_files", s.integer("max_changed_files", 200))
 	p.MaxDiffBytes = b.positive("policy.max_diff_bytes", s.integer("max_diff_bytes", 2097152))

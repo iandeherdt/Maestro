@@ -215,6 +215,58 @@ the agent still works in Docker, so Docker has to be running.
 Not built yet: `symphony unblock` and `symphony doctor`. To give a blocked ticket another
 chance, drag its card back to Todo (or put `status:todo` back on it).
 
+## Conventions that tools enforce
+
+A prompt that says "follow our conventions" is a wish. A rule pack makes the conventions of a
+project hold: every rule in a pack names the tool that checks it, and the checks run where the
+agent cannot skip them.
+
+```sh
+symphony conventions                 # the packs: dotnet, typescript
+symphony conventions show dotnet     # every rule, and the tool that enforces it
+```
+
+| Pack | For | Rules, in short |
+|---|---|---|
+| `dotnet` | C# with one solution in the root | `dotnet format`, warnings as errors with the .NET analyzers and SonarAnalyzer, security rules, limits on file and method size, tests, 80% coverage per test project, no vulnerable packages |
+| `typescript` | TypeScript with React, Next.js or TanStack, npm or pnpm | Prettier, ESLint without warnings (typescript-eslint strict, React, hooks, accessibility, SonarJS, security, the framework's own rules), limits on size and complexity, strict type check, tests with vitest, 80% coverage of all source files, no vulnerable packages |
+
+A rule is enforced in three places:
+
+1. **Before the push.** The service runs the pack's checks itself. What fails goes back to the
+   agent, which fixes it and tries again.
+2. **In CI.** The pull request runs the same script, plus the package audit. Make that check
+   required on the main branch and nothing that breaks a rule can be merged, whoever wrote it.
+3. **The rules themselves are locked.** The service refuses any change by the agent to the rule
+   files, the scripts and the CI workflows. Without that, the cheapest way to pass a rule is to
+   weaken it. You change a rule by hand.
+
+Commit hooks are not used for this: the agent commits inside its sandbox and could skip them.
+
+To add a pack to a project:
+
+```sh
+git clone <the project's address> && cd <the project>
+symphony conventions apply typescript
+```
+
+It writes the files and then lists what is left, step by step: install the tools, check that the
+project passes, commit and push yourself, make the CI check required on GitHub, and switch the
+pack on for the service:
+
+```sh
+symphony conventions enable typescript    # on every machine that runs agents for the project
+symphony image                            # once more, when the pack needs tools in the sandbox
+```
+
+The rules end up in the repository as `conventions/<pack>/RULES.md`, so the agent can read what
+is expected and run the same checks while it works. Thresholds such as the coverage minimum are
+at the top of `conventions/<pack>/verify.sh`.
+
+Limits for now: an agent cannot add a new package by itself, because its sandbox does not reach
+package registries. Add the dependency yourself, or the ticket fails its checks. Monorepos are
+not covered, and the TypeScript pack measures coverage with vitest only.
+
 ## Configure
 
 One file, `WORKFLOW.md`, holds the settings and the instructions for the agent. It lives on the
@@ -263,7 +315,8 @@ changed ones:
 
 | Setting | Default | What it does |
 |---|---|---|
-| `verify.command` | none | What the service runs to decide whether the work is acceptable |
+| `conventions` | none | Rule packs that are switched on, for example `[typescript]`. Set it with `symphony conventions enable` |
+| `verify.command` | none | What the service runs to decide whether the work is acceptable. With a rule pack, the pack's checks run first and this may be left out |
 | `publish.required_checks` | the repository's checks | `none` hands a pull request to you without waiting for CI. A list of names waits for exactly those. |
 | `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
@@ -298,6 +351,7 @@ Last updated 2026-11-21.
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
+| Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `symphony image` yet. |
 | Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `symphony unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |

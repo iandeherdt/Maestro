@@ -24,6 +24,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/budget"
 	"github.com/iandeherdt/Maestro/internal/claude"
 	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/gate"
 	"github.com/iandeherdt/Maestro/internal/ghapp"
@@ -236,7 +237,11 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return report(stderr, err)
 	}
-	b := dockerbox.Build{Out: stdout, Version: version}
+	packs, err := conventions.Resolve(in.cfg.Conventions)
+	if err != nil {
+		return report(stderr, err)
+	}
+	b := dockerbox.Build{Out: stdout, Version: version, Extra: conventions.Derive(packs).Image}
 	if !strings.HasPrefix(b.Version, "v") {
 		b.Version = "v" + b.Version
 	}
@@ -246,7 +251,13 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stdout, "Building the sandbox image %s. The first time takes a few minutes: it downloads\n", in.cfg.Sandbox.Image)
-	fmt.Fprintf(stdout, "Node.js, git and Claude Code %s. Nothing is installed on this machine outside Docker.\n\n", dockerbox.ClaudeVersion)
+	fmt.Fprintf(stdout, "Node.js, git and Claude Code %s. Nothing is installed on this machine outside Docker.\n", dockerbox.ClaudeVersion)
+	for _, p := range packs {
+		if len(p.Image) > 0 {
+			fmt.Fprintf(stdout, "For the conventions pack %s it also gets %s.\n", p.Name, p.ImageNote)
+		}
+	}
+	fmt.Fprintln(stdout)
 	if err := in.box.BuildImage(ctx, b); err != nil {
 		return report(stderr, err)
 	}

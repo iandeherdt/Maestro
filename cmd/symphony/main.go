@@ -40,6 +40,7 @@ const usage = `usage:
   symphony resume                         continue after a pause
   symphony service install                run in the background, start at login
   symphony service uninstall              stop running in the background
+  symphony conventions                    rule packs per kind of project, enforced by tools
   symphony version                        print the version
 
 The usual order the first time: setup, image, login, run.`
@@ -64,6 +65,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runBackground(args[1:], os.Stdin, stdout, stderr)
 		case "login":
 			return runLogin(args[1:], os.Stdin, stdout, stderr)
+		case "conventions":
+			return runConventions(args[1:], stdout, stderr)
 		}
 	}
 	if len(args) > 0 && args[0] == "setup" {

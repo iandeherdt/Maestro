@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -438,5 +439,60 @@ func TestPodmanBackend(t *testing.T) {
 	c := mustBuild(t, strings.Replace(with("backend: systemd", "backend: podman", ""), "  network:\n    proxy: 127.0.0.1:3128\n", "", 1))
 	if c.Sandbox.Backend != "podman" || c.Sandbox.Proxy != "" {
 		t.Errorf("%+v", c.Sandbox)
+	}
+}
+
+// A rule pack adds its checks, its hosts and its protected paths to what
+// the file says. It never replaces or removes any of them (SPEC 23).
+func TestConventionsAddToTheSettings(t *testing.T) {
+	c := mustBuild(t, minimal)
+	if len(c.Conventions) != 0 || c.Verify.Command != "make test" || c.Hooks.BeforeRun != "" || c.Hooks.TimeoutMS != 60000 {
+		t.Fatalf("without packs: %+v %+v", c.Verify, c.Hooks)
+	}
+
+	c = mustBuild(t, with("", "", "conventions: [dotnet, typescript]\npolicy:\n  deny_paths: [\"infra/**\"]\nhooks:\n  before_run: echo mine\n"))
+	if !slices.Equal(c.Conventions, []string{"dotnet", "typescript"}) {
+		t.Fatalf("conventions %v", c.Conventions)
+	}
+	v := c.Verify.Command
+	if !strings.Contains(v, "sh conventions/dotnet/verify.sh || exit $?") ||
+		strings.Index(v, "conventions/dotnet/verify.sh") > strings.Index(v, "conventions/typescript/verify.sh") ||
+		!strings.HasSuffix(v, "\nmake test") {
+		t.Errorf("verify:\n%s", v)
+	}
+	if h := c.Hooks.BeforeRun; !strings.Contains(h, "sh conventions/typescript/prepare.sh || exit $?") || !strings.HasSuffix(h, "\necho mine") {
+		t.Errorf("before_run:\n%s", h)
+	}
+	if c.Hooks.TimeoutMS != 900000 {
+		t.Errorf("hook timeout %d", c.Hooks.TimeoutMS)
+	}
+	for _, want := range []string{"infra/**", "conventions/**", "Directory.Build.props", "eslint.config.*"} {
+		if !slices.Contains(c.Policy.DenyPaths, want) {
+			t.Errorf("deny_paths lacks %s: %v", want, c.Policy.DenyPaths)
+		}
+	}
+	if !slices.Contains(c.Sandbox.AllowHooks, "api.nuget.org") || !slices.Contains(c.Sandbox.AllowHooks, "registry.npmjs.org") {
+		t.Errorf("allow_hooks %v", c.Sandbox.AllowHooks)
+	}
+
+	// The placeholder setup writes for "no tests" gives way to the pack,
+	// and a pack is enough: no command of one's own is needed.
+	c = mustBuild(t, with("command: make test", "command: \"true\"", "conventions: [typescript]\n"))
+	if strings.Contains(c.Verify.Command, "true") || !strings.Contains(c.Verify.Command, "conventions/typescript/verify.sh") {
+		t.Errorf("verify:\n%s", c.Verify.Command)
+	}
+	// An explicit hook timeout is kept, and a host is not listed twice.
+	c = mustBuild(t, with("    proxy: 127.0.0.1:3128", "    proxy: 127.0.0.1:3128\n    allow_hooks: [registry.npmjs.org]",
+		"conventions: [typescript]\nhooks:\n  timeout_ms: 5000\n"))
+	if c.Hooks.TimeoutMS != 5000 || len(c.Sandbox.AllowHooks) != 1 {
+		t.Errorf("timeout %d, hosts %v", c.Hooks.TimeoutMS, c.Sandbox.AllowHooks)
+	}
+
+	_, err := build(t, with("", "", "conventions: [cobol]\n"), nil)
+	if err == nil || !strings.Contains(err.Error(), `conventions: there is no conventions pack named "cobol"`) {
+		t.Errorf("an unknown pack: %v", err)
+	}
+	if _, err := build(t, with("", "", "conventions: dotnet\n"), nil); err == nil {
+		t.Error("a pack name that is not a list was accepted")
 	}
 }

@@ -1,0 +1,98 @@
+{
+  "name": "typescript",
+  "title": "TypeScript (React, Next.js, TanStack)",
+  "applies": "A repository with one package.json, a tsconfig.json and a lockfile of npm or pnpm in its root. Tests run with vitest.",
+  "rules": [
+    {
+      "id": "format",
+      "rule": "Code is formatted by Prettier.",
+      "enforced_by": ["prettier --check"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "lint",
+      "rule": "No lint errors and no warnings: the strict, type-aware rules of typescript-eslint, the rules of React, of React hooks and of accessibility (jsx-a11y), and the rules of SonarJS. No `any`, no `@ts-ignore`, no unused lint exceptions.",
+      "enforced_by": ["eslint --max-warnings 0", "typescript-eslint strictTypeChecked", "eslint-plugin-react", "eslint-plugin-react-hooks", "eslint-plugin-jsx-a11y", "eslint-plugin-sonarjs"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "frameworks",
+      "rule": "A framework that the project uses brings its own rules: Next.js (including Core Web Vitals), TanStack Query and TanStack Router. Using the framework without its lint plugin fails the lint.",
+      "enforced_by": ["@next/eslint-plugin-next", "@tanstack/eslint-plugin-query", "@tanstack/eslint-plugin-router"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "security",
+      "rule": "No insecure code patterns, such as eval, unsafe regular expressions or child processes built from input.",
+      "enforced_by": ["eslint-plugin-security", "eslint-plugin-sonarjs"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "size",
+      "rule": "A file has at most 400 lines, a function at most 80 lines, at most 5 parameters and 4 levels of nesting, and a complexity of at most 15.",
+      "enforced_by": ["eslint max-lines, max-lines-per-function, max-params, max-depth, complexity"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "types",
+      "rule": "The project type-checks in strict mode, whatever tsconfig.json says, and an indexed access may be undefined.",
+      "enforced_by": ["tsc --noEmit --strict --noUncheckedIndexedAccess"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "tests",
+      "rule": "All tests pass, and there is at least one.",
+      "enforced_by": ["vitest run"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "coverage",
+      "rule": "The tests cover at least 80% of the lines of all TypeScript source files, including files that no test imports.",
+      "enforced_by": ["vitest coverage (v8) with a threshold"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "packages",
+      "rule": "The installed packages are exactly those of the lockfile, and none has a known vulnerability of high or critical severity.",
+      "enforced_by": ["npm ci or pnpm install --frozen-lockfile", "npm audit or pnpm audit"],
+      "where": ["ci"]
+    },
+    {
+      "id": "secrets",
+      "rule": "No credentials in the change.",
+      "enforced_by": ["the secret scan of the Symphony service"],
+      "where": ["service"]
+    },
+    {
+      "id": "rules-stay",
+      "rule": "The agent cannot change these rules, the scripts that check them, or the CI workflows.",
+      "enforced_by": ["the diff policy of the Symphony service (protected paths)"],
+      "where": ["service"]
+    }
+  ],
+  "protect": [
+    "conventions/**",
+    "eslint.config.*",
+    ".eslintrc*",
+    ".eslintignore",
+    ".prettierrc*",
+    "prettier.config.*",
+    ".prettierignore",
+    ".npmrc",
+    "pnpm-workspace.yaml"
+  ],
+  "hosts": ["registry.npmjs.org"],
+  "prepare": "sh conventions/typescript/prepare.sh",
+  "verify": "sh conventions/typescript/verify.sh",
+  "check": "conventions-typescript",
+  "gitignore": ["node_modules/", "coverage/", "dist/", ".next/", "*.tsbuildinfo"],
+  "image": ["RUN npm install --global --no-fund --no-audit pnpm@10 && npm cache clean --force"],
+  "image_note": "pnpm",
+  "after_apply": [
+    "npm install --save-dev --save-exact eslint@9 @eslint/js@9 typescript@6.0 typescript-eslint eslint-plugin-react eslint-plugin-react-hooks eslint-plugin-jsx-a11y eslint-plugin-sonarjs eslint-plugin-security globals prettier vitest @vitest/coverage-v8",
+    "If the project uses Next.js, also: npm install --save-dev --save-exact @next/eslint-plugin-next",
+    "If it uses TanStack Query or Router, also: npm install --save-dev --save-exact @tanstack/eslint-plugin-query @tanstack/eslint-plugin-router",
+    "With pnpm, use `pnpm add --save-dev --save-exact` and the same package names.",
+    "npx prettier --write .    (once, so that existing files pass the format rule)"
+  ]
+}

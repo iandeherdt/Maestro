@@ -70,9 +70,19 @@ type Build struct {
 	Binary  string
 	Version string
 	Out     io.Writer
+	// Extra are Dockerfile lines that add the tools of the rule packs.
+	// They run as root, before the image switches to the agent's user.
+	Extra []string
 }
 
 var versionRE = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+func extra(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
 
 // BuildImage builds the sandbox image under the configured name.
 func (b *Box) BuildImage(ctx context.Context, o Build) error {
@@ -96,11 +106,11 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 			return err
 		}
 		if text == "" {
-			text = dockerfileHead + dockerfileCopy
+			text = dockerfileHead + extra(o.Extra) + dockerfileCopy
 		}
 	case text != "":
 	case versionRE.MatchString(o.Version):
-		text = dockerfileHead + dockerfileDownload
+		text = dockerfileHead + extra(o.Extra) + dockerfileDownload
 		args = append(args, "--build-arg", "SYMPHONY_VERSION="+o.Version)
 	default:
 		return fmt.Errorf("the image needs a released version of symphony; this build is %q", o.Version)
