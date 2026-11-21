@@ -1852,6 +1852,8 @@ Steps:
 5. Workflow file: written from the earlier answers and the verify command, shown in full before
    it is written, and validated with the code the service uses at startup. An existing file is
    validated and kept, never overwritten.
+   The wizard asks for the test command in plain words. An empty answer writes `true` and says
+   that the agent's work will then be published without being tested.
 6. Service: the users, directories and the systemd or launchd unit are installed after the
    wizard has shown what it will write. (not built)
 7. Self-test: `symphony doctor`. (not built)
