@@ -211,7 +211,7 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 		end := min(start+h.pageSize, len(nodes))
 		info := map[string]any{"hasNextPage": end < len(nodes), "endCursor": strconv.Itoa(end)}
 		answer(wrap(map[string]any{"items": map[string]any{"pageInfo": info, "nodes": nodes[start:end]}}))
-	case strings.Contains(in.Query, "field(name:"):
+	case strings.Contains(in.Query, "fields(first:"):
 		h.requests = append(h.requests, "BOARD")
 		if !onBoard {
 			answer(wrap(nil))
@@ -224,19 +224,16 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 		for _, name := range b.automation {
 			flows = append(flows, map[string]any{"name": name, "enabled": true})
 		}
-		var field any
-		if str("status") == "Status" {
-			field = map[string]any{"__typename": "ProjectV2SingleSelectField", "id": "F_status", "options": opts}
-		}
-		var workerField any
+		fields := []any{map[string]any{"__typename": "ProjectV2Field", "id": "F_title", "name": "Title"},
+			map[string]any{"__typename": "ProjectV2SingleSelectField", "id": "F_status", "name": "Status", "options": opts}}
 		if !b.noWorkers {
 			var names []any
 			for _, name := range b.workers {
 				names = append(names, map[string]string{"id": optionID(name), "name": name})
 			}
-			workerField = map[string]any{"__typename": "ProjectV2SingleSelectField", "id": "F_worker", "options": names}
+			fields = append(fields, map[string]any{"__typename": "ProjectV2SingleSelectField", "id": "F_worker", "name": "Worker", "options": names})
 		}
-		answer(wrap(map[string]any{"id": "PVT_board", "closed": b.closed, "field": field, "workerField": workerField,
+		answer(wrap(map[string]any{"id": "PVT_board", "closed": b.closed, "fields": map[string]any{"nodes": fields},
 			"workflows": map[string]any{"nodes": flows}}))
 	default:
 		w.WriteHeader(400)
@@ -475,7 +472,7 @@ func TestBoardProblemsAreExplained(t *testing.T) {
 		"wrong number": {func(_ *hub, c *config.Config) {
 			c.Tracker.Provider["project"] = map[string]any{"owner": boardOrg, "number": 8}
 		}, tracker.Status, "was not found"},
-		"not found error": {func(h *hub, _ *config.Config) { h.board.errors["field(name:"] = "NOT_FOUND" }, tracker.Status, "Projects, read and write"},
+		"not found error": {func(h *hub, _ *config.Config) { h.board.errors["fields(first:"] = "NOT_FOUND" }, tracker.Status, "Projects, read and write"},
 		"closed":          {func(h *hub, _ *config.Config) { h.board.closed = true }, tracker.Status, "is closed"},
 		"no status field": {func(_ *hub, c *config.Config) {
 			c.Tracker.Provider["project"] = map[string]any{"owner": boardOrg, "number": 7, "status_field": "Stage"}

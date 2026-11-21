@@ -134,19 +134,20 @@ fragment cardFields on ProjectV2Item {
   worker: fieldValueByName(name: $worker) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
 }`
 
+// The fields are listed and picked by name: asking GitHub for a field by a
+// name the board does not have fails the whole request.
 const boardQuery = `
-query($owner: String!, $number: Int!, $status: String!, $worker: String!) {
+query($owner: String!, $number: Int!) {
   repositoryOwner(login: $owner) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         id closed
-        field(name: $status) {
-          __typename
-          ... on ProjectV2SingleSelectField { id options { id name } }
-        }
-        workerField: field(name: $worker) {
-          __typename
-          ... on ProjectV2SingleSelectField { id options { id name } }
+        fields(first: 100) {
+          nodes {
+            __typename
+            ... on ProjectV2FieldCommon { id name }
+            ... on ProjectV2SingleSelectField { options { id name } }
+          }
         }
         workflows(first: 30) { nodes { name enabled } }
       }
@@ -221,6 +222,7 @@ type gqlIssue struct {
 type gqlField struct {
 	Typename string `json:"__typename"`
 	ID       string `json:"id"`
+	Name     string `json:"name"`
 	Options  []struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -295,10 +297,13 @@ func (a *Adapter) meta(ctx context.Context, fresh bool) (*boardMeta, error) {
 	var out struct {
 		RepositoryOwner *struct {
 			ProjectV2 *struct {
-				ID          string    `json:"id"`
-				Closed      bool      `json:"closed"`
-				Field       *gqlField `json:"field"`
-				WorkerField *gqlField `json:"workerField"`
+				ID     string `json:"id"`
+				Closed bool   `json:"closed"`
+				Fields struct {
+					Nodes []gqlField `json:"nodes"`
+				} `json:"fields"`
+				Field       *gqlField `json:"-"`
+				WorkerField *gqlField `json:"-"`
 				Workflows   struct {
 					Nodes []struct {
 						Name    string `json:"name"`
@@ -316,6 +321,15 @@ func (a *Adapter) meta(ctx context.Context, fresh bool) (*boardMeta, error) {
 		return nil, err
 	}
 	p := out.RepositoryOwner.ProjectV2
+	for i := range p.Fields.Nodes {
+		f := &p.Fields.Nodes[i]
+		switch name := strings.TrimSpace(f.Name); {
+		case p.Field == nil && strings.EqualFold(name, b.statusField):
+			p.Field = f
+		case p.WorkerField == nil && strings.EqualFold(name, b.workerField):
+			p.WorkerField = f
+		}
+	}
 	if p.Closed {
 		return nil, terr(tracker.Status, "%s is closed", a.boardName())
 	}
