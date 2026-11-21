@@ -11,8 +11,9 @@ pull requests for a human to review.
 
 Early. What exists: the workflow file loader, configuration validation, the scheduling core
 (polling, claims, retries, reconciliation, budgets) tested against a fake board and a fake agent,
-prompt construction with a strict template engine, and the workspace manager, which talks to
-the sandbox launcher through a narrow request format.
+prompt construction with a strict template engine, the workspace manager, which talks to the
+sandbox launcher through a narrow request format, live reload of the workflow file, the service
+log format and the loopback status API.
 The service does not run anything yet: there is no sandbox, agent runner, board adapter or
 publisher.
 

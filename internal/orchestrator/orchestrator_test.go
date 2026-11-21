@@ -664,7 +664,7 @@ func TestPreflightFailureSkipsDispatchOnly(t *testing.T) {
 	e.tick()
 	e.tr.Put(todo(2))
 	e.tr.Move("id-1", "Cancelled")
-	e.o.d.Preflight = func() error { return errors.New("workflow_parse_error") }
+	e.o.d.Preflight = func() (*config.Config, error) { return nil, errors.New("workflow_parse_error") }
 	e.tick()
 	e.wantStarts(1)
 	if !e.w.starts[0].terminated {
@@ -721,4 +721,65 @@ func TestStaleReportDoesNotAffectNewerAttempt(t *testing.T) {
 	if len(s.Running) != 1 || s.Running[0].SessionID != "" || e.b.Failures("id-1") != 0 {
 		t.Fatalf("stale report was applied: %+v", s.Running)
 	}
+}
+
+func TestReloadedConfigAppliesFromTheSameTick(t *testing.T) {
+	e := newEnv(t, todo(1), todo(2))
+	e.cfg.Agent.MaxConcurrentAgents = 1
+	e.tick()
+	e.wantStarts(1)
+	next := testConfig()
+	next.Tracker.TerminalStates = append(next.Tracker.TerminalStates, "In Progress")
+	next.Tracker.ActiveStates = []string{"Todo"}
+	calls := 0
+	e.o.d.Preflight = func() (*config.Config, error) {
+		calls++
+		if calls == 1 {
+			return next, nil
+		}
+		return nil, nil
+	}
+	e.tick()
+	// Reconciliation already saw the new terminal state.
+	if !e.w.starts[0].terminated {
+		t.Fatal("reloaded configuration not used by reconciliation")
+	}
+	e.wantStarts(2) // and dispatch used it too: GH-2 started in the freed slot
+	if e.w.last().attempt.Issue.ID != "id-2" {
+		t.Fatal("unexpected dispatch")
+	}
+}
+
+func TestLatestAndRequestTick(t *testing.T) {
+	e := newEnv(t, todo(1))
+	if s := e.o.Latest(); len(s.Running) != 0 || s.Worker != "linux" {
+		t.Fatalf("initial snapshot = %+v", s)
+	}
+	e.tick()
+	if s := e.o.Latest(); len(s.Running) != 1 || s.Today.Runs != 1 {
+		t.Fatalf("snapshot after tick = %+v", s)
+	}
+	e.w.last().sink.Event(Event{Kind: "assistant", SessionID: "s-1"})
+	e.o.Drain(e.ctx)
+	if s := e.o.Latest(); s.Running[0].SessionID != "s-1" {
+		t.Fatal("snapshot not refreshed after a worker report")
+	}
+
+	// RequestTick wakes the run loop long before the poll interval.
+	e.o.d.Clock = systemClock{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { e.o.Run(ctx); close(done) }()
+	time.Sleep(50 * time.Millisecond)
+	e.tr.Put(todo(2))
+	e.o.RequestTick()
+	deadline := time.Now().Add(5 * time.Second)
+	for e.tr.Get("id-2").State != "In Progress" {
+		if time.Now().After(deadline) {
+			t.Fatal("requested tick did not run")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
 }

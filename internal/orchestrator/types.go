@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/iandeherdt/Symphony-beads/internal/budget"
 	"github.com/iandeherdt/Symphony-beads/internal/issue"
 )
 
@@ -178,10 +179,14 @@ type RunningView struct {
 	LastEvent, LastMessage     string
 	LastEventAt                time.Time
 	Usage                      Usage
+	FailureAttempts            int64
 }
 
 // Snapshot is a read-only copy of the scheduling state.
 type Snapshot struct {
+	GeneratedAt       time.Time
+	Worker            string
+	Today             budget.Day
 	Running           []RunningView
 	Retrying          []RetryEntry
 	AwaitingChecks    []PublishRecord

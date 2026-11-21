@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iandeherdt/Symphony-beads/internal/budget"
@@ -41,9 +42,11 @@ type Deps struct {
 	// Prober is optional. Without it an in-progress issue found after a
 	// restart is always dispatched as a retry.
 	Prober Prober
-	// Preflight is the optional per-tick validation (SPEC 6.3). An error
-	// skips dispatch for that tick; reconciliation still runs.
-	Preflight func() error
+	// Preflight is the optional per-tick validation (SPEC 6.2, 6.3). It
+	// returns a configuration to apply when the workflow file changed, or
+	// nil. An error skips dispatch for that tick; reconciliation still
+	// runs, with the last good configuration.
+	Preflight func() (*config.Config, error)
 	Clock     Clock
 	Log       *slog.Logger
 }
@@ -87,6 +90,9 @@ type Orchestrator struct {
 	mu    sync.Mutex
 	queue []func(context.Context)
 	wake  chan struct{}
+
+	forceTick bool
+	latest    atomic.Pointer[Snapshot]
 }
 
 func New(cfg *config.Config, d Deps) *Orchestrator {
@@ -106,7 +112,24 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		wake:      make(chan struct{}, 1),
 	}
 	o.SetConfig(cfg)
+	o.publish()
 	return o
+}
+
+// publish stores a snapshot for readers on other goroutines.
+func (o *Orchestrator) publish() {
+	s := o.Snapshot()
+	o.latest.Store(&s)
+}
+
+// Latest returns the most recently published snapshot. It is safe to call
+// from any goroutine.
+func (o *Orchestrator) Latest() Snapshot { return *o.latest.Load() }
+
+// RequestTick asks Run for a poll tick as soon as possible. It is safe to
+// call from any goroutine.
+func (o *Orchestrator) RequestTick() {
+	o.post(func(context.Context) { o.forceTick = true })
 }
 
 // SetConfig applies a (re)loaded configuration. Call it from the goroutine
@@ -169,6 +192,7 @@ func (o *Orchestrator) Drain(ctx context.Context) {
 		for _, fn := range q {
 			fn(ctx)
 		}
+		o.publish()
 	}
 }
 
@@ -195,7 +219,8 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	for {
 		o.Drain(ctx)
 		now := o.now()
-		if !now.Before(nextTick) {
+		if o.forceTick || !now.Before(nextTick) {
+			o.forceTick = false
 			o.Tick(ctx)
 			nextTick = o.now().Add(time.Duration(o.cfg.Polling.IntervalMS) * time.Millisecond)
 		}
@@ -229,17 +254,28 @@ func (o *Orchestrator) Run(ctx context.Context) {
 
 // Tick runs one poll-and-dispatch cycle (SPEC 19.2).
 func (o *Orchestrator) Tick(ctx context.Context) {
+	defer o.publish()
+
+	// A changed workflow file is applied first, so that reconciliation
+	// already uses it. An invalid one leaves the last good configuration.
+	o.configError = ""
+	if o.d.Preflight != nil {
+		cfg, err := o.d.Preflight()
+		if cfg != nil {
+			o.SetConfig(cfg)
+		}
+		if err != nil {
+			o.configError = err.Error()
+			o.d.Log.Error("dispatch validation failed, skipping dispatch", "error", err)
+		}
+	}
+
 	o.reconcile(ctx)
 	// Checks and hand-off watch (SPEC 15.6, 15.8) attach here once the
 	// publisher exists.
 
-	o.configError = ""
-	if o.d.Preflight != nil {
-		if err := o.d.Preflight(); err != nil {
-			o.configError = err.Error()
-			o.d.Log.Error("dispatch validation failed, skipping dispatch", "error", err)
-			return
-		}
+	if o.configError != "" {
+		return
 	}
 	if reason := o.gated(); reason != "" {
 		o.d.Log.Debug("dispatch skipped", "reason", reason)
@@ -485,6 +521,9 @@ func (o *Orchestrator) FireDueRetries(ctx context.Context) {
 	})
 	for _, id := range due {
 		o.onRetryTimer(ctx, id)
+	}
+	if len(due) > 0 {
+		o.publish()
 	}
 }
 
@@ -784,7 +823,8 @@ func (o *Orchestrator) cleanup(ctx context.Context, is issue.Issue) {
 
 // Snapshot copies the scheduling state for status output.
 func (o *Orchestrator) Snapshot() Snapshot {
-	s := Snapshot{Totals: o.totals, ConfigError: o.configError,
+	s := Snapshot{Totals: o.totals, ConfigError: o.configError, GeneratedAt: o.now(),
+		Worker: o.cfg.Worker.Name, Today: o.d.Budget.Today(o.now()),
 		QuotaBlockedUntil: o.d.Budget.QuotaBlockedUntil()}
 	s.Paused, s.PauseReason = o.d.Budget.Paused()
 	for id, e := range o.running {
@@ -793,6 +833,7 @@ func (o *Orchestrator) Snapshot() Snapshot {
 			SessionID: e.sessionID, PID: e.pid, Phase: e.phase, Attempt: e.attempt,
 			TurnCount: e.turnCount, StartedAt: e.startedAt, LastEvent: e.lastEvent,
 			LastMessage: e.lastMessage, LastEventAt: e.lastEventAt, Usage: e.usage,
+			FailureAttempts: o.d.Budget.Failures(id),
 		})
 	}
 	sort.Slice(s.Running, func(a, b int) bool { return s.Running[a].Identifier < s.Running[b].Identifier })
