@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 )
 
 // Round is one thing the service posted on an idea: questions or a plan.

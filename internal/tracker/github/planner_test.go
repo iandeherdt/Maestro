@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 )
 
 func TestPlannerCreatesRoutesAndOrdersTasks(t *testing.T) {

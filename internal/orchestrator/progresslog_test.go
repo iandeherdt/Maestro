@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker/trackertest"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/tracker/trackertest"
 )
 
 func TestStatusCommentsAreAlsoLogged(t *testing.T) {

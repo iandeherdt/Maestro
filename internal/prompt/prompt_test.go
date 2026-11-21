@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/issue"
 )
 
 const fixedToken = tokenPrefix + "000102030405060708090a0b0c0d0e0f"

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
-	"github.com/iandeherdt/Symphony-beads/internal/plan"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/plan"
 )
 
 type fakeBrief struct {

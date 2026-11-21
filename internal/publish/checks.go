@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
 )
 
 // maxCheckPages bounds how many pages of check runs are read for one

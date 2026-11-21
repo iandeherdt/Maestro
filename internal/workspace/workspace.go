@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 // Error categories.

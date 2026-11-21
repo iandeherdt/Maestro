@@ -18,11 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/budget"
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/plan"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/budget"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/plan"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 )
 
 const (

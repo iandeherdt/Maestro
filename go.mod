@@ -1,4 +1,4 @@
-module github.com/iandeherdt/Symphony-beads
+module github.com/iandeherdt/Maestro
 
 go 1.24.7
 

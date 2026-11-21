@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/issue"
 )
 
 // Error categories (SPEC 12.4).

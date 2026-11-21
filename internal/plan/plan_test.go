@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker/trackertest"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/tracker/trackertest"
 )
 
 var (

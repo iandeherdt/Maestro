@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/dockerbox"
-	"github.com/iandeherdt/Symphony-beads/internal/setup"
+	"github.com/iandeherdt/Maestro/internal/dockerbox"
+	"github.com/iandeherdt/Maestro/internal/setup"
 )
 
 // The image of this test has a stand-in for Claude Code: it is "logged in"

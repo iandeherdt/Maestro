@@ -22,7 +22,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/iandeherdt/Symphony-beads/internal/policy"
+	"github.com/iandeherdt/Maestro/internal/policy"
 )
 
 // Rejected is returned when the hand-off itself is not acceptable. It

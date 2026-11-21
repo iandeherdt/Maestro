@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iandeherdt/Symphony-beads/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/ghapp"
 )
 
 const (

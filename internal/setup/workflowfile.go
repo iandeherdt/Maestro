@@ -12,8 +12,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 const workflowFileName = "WORKFLOW.md"

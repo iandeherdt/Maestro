@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/issue"
 )
 
 // The planning stage (SPEC 22) uses its own instructions. The workflow

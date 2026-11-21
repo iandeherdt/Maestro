@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 )
 
 // This file implements tracker.Planner (SPEC 22): comments that talk to

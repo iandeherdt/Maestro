@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/mirror"
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
-	"github.com/iandeherdt/Symphony-beads/internal/policy"
-	"github.com/iandeherdt/Symphony-beads/internal/worker"
-	"github.com/iandeherdt/Symphony-beads/internal/workspace"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/mirror"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/policy"
+	"github.com/iandeherdt/Maestro/internal/worker"
+	"github.com/iandeherdt/Maestro/internal/workspace"
 )
 
 // Rejection categories.

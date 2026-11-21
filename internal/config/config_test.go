@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
 // minimal is the smallest valid workflow front matter.

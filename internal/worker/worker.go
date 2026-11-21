@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
-	"github.com/iandeherdt/Symphony-beads/internal/plan"
-	"github.com/iandeherdt/Symphony-beads/internal/prompt"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker"
-	"github.com/iandeherdt/Symphony-beads/internal/workspace"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/plan"
+	"github.com/iandeherdt/Maestro/internal/prompt"
+	"github.com/iandeherdt/Maestro/internal/tracker"
+	"github.com/iandeherdt/Maestro/internal/workspace"
 )
 
 // Failure categories decided here. Agent categories come from the runner.

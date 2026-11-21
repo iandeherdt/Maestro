@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"runtime"
 
-	"github.com/iandeherdt/Symphony-beads/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/ghapp"
 )
 
 type label struct{ name, color, description string }

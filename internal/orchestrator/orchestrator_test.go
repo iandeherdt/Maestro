@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iandeherdt/Symphony-beads/internal/budget"
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/tracker/trackertest"
+	"github.com/iandeherdt/Maestro/internal/budget"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/tracker/trackertest"
 )
 
 type fakeClock struct{ t time.Time }

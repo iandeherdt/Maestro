@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/iandeherdt/Symphony-beads/internal/config"
-	"github.com/iandeherdt/Symphony-beads/internal/policy"
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/policy"
 )
 
 var ctx = context.Background()

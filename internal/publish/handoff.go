@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iandeherdt/Symphony-beads/internal/issue"
-	"github.com/iandeherdt/Symphony-beads/internal/mirror"
-	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/mirror"
+	"github.com/iandeherdt/Maestro/internal/orchestrator"
 )
 
 // maxReviewPages bounds how many pages of reviews are read for one pull
