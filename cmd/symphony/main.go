@@ -24,13 +24,21 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// version is set at build time for releases.
+var version = "dev"
+
 const usage = `usage:
   symphony setup [--dir DIR] [--port N]   guided installation, safe to run again
   symphony check [path-to-WORKFLOW.md]    validate a workflow file
+  symphony version                        print the version
 
 The service itself is not implemented yet.`
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		fmt.Fprintln(stdout, "symphony", version)
+		return 0
+	}
 	if len(args) > 0 && args[0] == "setup" {
 		return runSetup(args[1:], os.Stdin, stdout, stderr)
 	}
