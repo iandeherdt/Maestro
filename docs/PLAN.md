@@ -39,6 +39,14 @@ the result itself, and opens a pull request for the owner to review and merge.
 7. GitHub: repositories and the Project board stay on the owner's personal account. The service
    uses a GitHub App for the repository and a classic token with only the `project` scope for
    the board (SPEC 12.5, user-owned Project).
+8. Claude Code runner: two runners behind one interface, selected by configuration. The pilot
+   uses headless mode (`claude -p`), which is documented and reports structured events. Since
+   2026-06-15 Anthropic bills headless use on a subscription from a separate monthly credit
+   equal to the plan price (press reports, not confirmed in Anthropic's own documentation), with
+   extra usage switched off so that work pauses when the credit is spent. A second runner that
+   drives the interactive CLI in a terminal multiplexer is added in phase 4 after a test on a
+   real machine. It is not a documented automation path and Anthropic may change how such
+   sessions are treated, so it is the owner's choice per workflow, not the default.
 
 ## Phases
 
