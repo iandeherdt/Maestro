@@ -72,6 +72,8 @@ where an assumption turned out wrong. The main corrections:
 
 - The service authenticates to GitHub as a GitHub App, not with a personal token.
 - A GitHub Project owned by a personal account cannot be reached with least-privilege tokens.
+  A test confirmed it for private repositories: a `project`-scope token sees the cards and not
+  the issues behind them. Label mode works and was run against a real repository.
 - Claude Code denies permission prompts automatically in print mode, so runs cannot stall.
 - The Claude Code version is pinned, because a future default (`--bare`) would ignore the
   subscription login.
