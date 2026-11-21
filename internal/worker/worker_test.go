@@ -497,3 +497,36 @@ func TestEndToEndWithScheduler(t *testing.T) {
 		t.Fatalf("usage not accounted: %+v", s.Totals)
 	}
 }
+
+func TestLostSessionRestartsOnceWithTheFullPrompt(t *testing.T) {
+	lost := &AgentError{Category: SessionUnknown, Msg: "gone"}
+	r := newRig(t,
+		script{text: "SYMPHONY_STATUS: continue"},
+		script{err: lost},
+		script{text: "SYMPHONY_STATUS: done", verifyOK: true})
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published {
+		t.Fatalf("outcome = %+v", out)
+	}
+	p := r.f.prompts
+	if len(p) != 3 || p[1].ResumeSessionID != "sess-1" || p[2].ResumeSessionID != "" ||
+		!strings.Contains(p[2].Prompt, "Implement GH-1.") || strings.Contains(p[1].Prompt, "Implement GH-1.") {
+		t.Fatalf("prompts = %+v", p)
+	}
+	found := false
+	for _, e := range r.sink.events {
+		found = found || e.Kind == "session_reset"
+	}
+	if !found {
+		t.Fatal("no session_reset event")
+	}
+
+	// A second loss in the same attempt, and a loss on a first turn, fail.
+	r = newRig(t, script{text: "SYMPHONY_STATUS: continue"}, script{err: lost}, script{err: lost})
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || out.Category != SessionUnknown || len(r.f.prompts) != 3 {
+		t.Fatalf("outcome = %+v after %d turns", out, len(r.f.prompts))
+	}
+	r = newRig(t, script{err: lost})
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || len(r.f.prompts) != 1 {
+		t.Fatalf("outcome = %+v after %d turns", out, len(r.f.prompts))
+	}
+}

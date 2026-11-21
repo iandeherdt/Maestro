@@ -184,7 +184,7 @@ Last updated 2026-11-21.
 | Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), not yet tried against github.com |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Running the service: `symphony run`, `status`, `pause`, `doctor` | Not started |
-| Claude Code runner | Not started. Needs one real run on a machine with the CLI logged in. |
+| Claude Code runner | Written from the CLI documentation and tested against a scripted agent. Needs one real run on a machine with the CLI logged in. |
 | Linux sandbox | Not started. Needs the server. |
 | Mac worker | Not started. Needs the Mac. |
 | Linear board | Not started |

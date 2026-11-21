@@ -8,6 +8,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"io"
 )
 
 // Step selects what the launcher runs. The launcher, not the caller,
@@ -83,6 +84,13 @@ type Result struct {
 // through Result.ExitStatus. When ctx ends the whole unit must be killed.
 type Launcher interface {
 	Run(ctx context.Context, req Request, stdin []byte) (Result, error)
+}
+
+// Streamer runs one step like Launcher.Run, but delivers standard output to
+// stdout while the step runs. Result.Stdout is empty. Writes to stdout may
+// block; when one fails the step is killed.
+type Streamer interface {
+	Stream(ctx context.Context, req Request, stdin []byte, stdout io.Writer) (Result, error)
 }
 
 // LaunchFailed is the error category for a step that could not be started.

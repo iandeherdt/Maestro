@@ -982,12 +982,17 @@ and whether project skills and commands still load under `--setting-sources user
 ### 10.2 Session Startup
 
 - The first stream event is `system` with subtype `init`. The runner emits `session_started`
-  with its `session_id`, which MUST equal the ID the service chose.
+  with its `session_id`. On a first turn it MUST equal the ID the service chose, otherwise the
+  turn fails with `turn_failed`. On a continuation turn the CLI may continue under a new ID (to
+  verify by a real run); the runner then uses the reported ID for the next turn.
+- A session ID is passed in the argument vector only if it has the shape of a UUID.
 - If no event arrives within `claude.read_timeout_ms`, fail with `response_timeout`.
 - Continuation turns pass `--resume <session_id>` and send only continuation guidance
   (Section 13.2), not the original prompt.
-- If a resume fails because the session is unknown, the runner starts a fresh session with the
-  full prompt once, and records `session_reset`.
+- If a resume fails because the session is unknown, the runner reports `session_unknown`. The
+  worker then starts a fresh session with the full prompt, once per attempt, and records
+  `session_reset`. A second loss fails the attempt. The wording the CLI uses for an unknown
+  session ("No conversation found") is not documented and is to verify by a real run.
 
 ### 10.3 Streaming Turn Processing
 
@@ -1066,6 +1071,7 @@ Normalized categories:
 - `no_changes`
 - `agent_declared_blocked`
 - `sandbox_launch_failed`
+- `session_unknown`: Section 10.2.
 
 Detection:
 
@@ -1074,9 +1080,15 @@ Detection:
   `error: authentication_failed`, or a result whose text starts with "Not logged in" or
   "Login expired".
 - `agent_quota_exhausted`: an `api_retry` event with `error: rate_limit` or `billing_error`
-  followed by a failed result, or result text matching "hit your ... limit". The reset time is
-  available only as text ("resets 3:45pm"). It is parsed when present and otherwise
-  `budget.quota_backoff_ms` applies.
+  followed by a failed result, or result text matching "hit your ... limit". For a result that
+  is not marked as failed, the text counts only when it starts with "You've hit your", so that an
+  agent's own summary mentioning a limit is not read as one. The reset time is available only as
+  text ("resets 3:45pm"). It is read as the next time the service's local clock shows that time,
+  and otherwise `budget.quota_backoff_ms` applies.
+- `agent_not_found`: exit status 126 or 127 before any stream event.
+- The result text is written by the agent's process and is untrusted. Text imitating a login or
+  limit message can at most pause dispatch or delay a retry; it never skips a gate, and the
+  daily run limit bounds repetition.
 - The exit status and result subtype for these two cases are not documented. Until a real run
   shows them, text matching is the fallback and an unrecognized failure is `turn_failed`.
 
@@ -1132,6 +1144,8 @@ The control zone cannot start processes as another user by itself. A small launc
   unit properties itself from `step` and `network_profile`. The caller cannot pass unit properties,
   paths or a user name.
 - It then executes the backend-specific command and relays standard streams and exit status.
+  For the `agent` step, standard output is relayed while the step runs, so that the runner can
+  apply its timeouts and report progress.
 - The launcher is the only root-executed code in the system. It MUST stay small enough to audit in
   one sitting and MUST have no dependency beyond the standard library.
 

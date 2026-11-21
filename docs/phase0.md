@@ -72,4 +72,7 @@ organization that owns the repositories and the Project.
 - systemd unit properties and `IPAddressDeny` on the RHEL 9 compatible guest (SPEC 11.3).
 - macOS guest: Xcode, Unity (performance, graphics, licence activation), command channel (Appendix B).
 - One real `claude -p` run in the sandbox to capture a sample stream, confirm `--max-turns`, and
-  record the hosts requested through the proxy.
+  record the hosts requested through the proxy. The same run should show: whether a resumed
+  session keeps its ID, what the CLI prints for an unknown session, whether the result's `usage`
+  covers one invocation or the whole session, and the exit status and result subtype for a
+  missing login and for a usage limit. The runner's handling of each is in SPEC 10.2 and 10.7.
