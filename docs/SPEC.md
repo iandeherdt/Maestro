@@ -1347,10 +1347,12 @@ Approval provenance:
   a state the service itself writes. The first active state is the approval state and can never
   be one of those, which is checked at startup. Results are cached per issue until its
   `updated_at` changes.
-- Project status: changing a Project field requires write access to the Project. The adapter
-  profile documents that the actor of a status change is not verified (to verify: whether the API
-  exposes it), so the Project MUST be writable only by allowlisted accounts, and `doctor` checks
-  the collaborator list where the API allows.
+- Project status: changing a Project field requires write access to the Project. The GraphQL
+  field value of the status carries a `creator` and an `updatedAt` (confirmed on a real Project,
+  where a card placed by the Project's own workflow reports `github-project-automation`). In
+  `project` mode the adapter MUST require that the creator of the approval status is in
+  `allowed_authors`. A status set by a Project workflow is therefore not approval. The Project
+  SHOULD still be writable only by allowlisted accounts.
 
 Public repository rules:
 
@@ -1367,7 +1369,12 @@ Credentials:
   - Organization-owned Project (RECOMMENDED): the App carries the organization permission
     Projects read and write. No personal token is involved.
   - User-owned Project: `project.token` is a classic personal token with only the `project` scope.
-    It can read and change the owner's Projects and nothing else.
+    It can read and change the owner's Projects and nothing else. That includes the issue behind
+    a card: for an issue in a private repository the card's content is returned as null
+    (confirmed by a test). `project` mode with a user-owned Project therefore works only for
+    public repositories. For private repositories the choices are an organization-owned
+    Project, or `state_source: labels`. A classic token with the `repo` scope would also work
+    and MUST NOT be used: it can read and write every repository of the account.
   - `state_source: labels` needs no Project access at all.
 
 Requests: REST with pagination of 100, conditional requests (ETag) for polling, and respect for
@@ -1856,7 +1863,8 @@ Stated so the operator can accept or reject them:
 - R5 The verify command executes agent-modified scripts. It runs in the sandbox with no network,
   so the effect is limited to a false pass, which CI on the protected branch definition is there
   to catch.
-- R6 Project status changes are not attributable on GitHub (Section 12.5).
+- R6 Project status changes are attributed through the `creator` of the field value (Section
+  12.5). This rests on one observation and is checked again when `project` mode is built.
 
 ### 18.6 Supply Chain of the Service Itself
 
