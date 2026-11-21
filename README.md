@@ -9,8 +9,8 @@ subscription, where the agent must not be able to do damage even if a ticket, a 
 dependency tries to trick it.
 
 > **Status: early.** The service has taken a real ticket to a merged pull request on a Mac, with
-> labels. The board described below is new and has only been tested against a stand-in for
-> GitHub. See [Project status](#project-status) for exactly what exists.
+> labels. The board and the planning stage described below have had one real run on a Mac: setup,
+> a card picked up from the board, and a plan posted by the agent. See [Project status](#project-status) for exactly what exists.
 
 ## How it works
 
@@ -131,8 +131,10 @@ get. It is not written to your files or your keychain, and no API key is involve
 
 While `symphony run` is running, it looks at the board every 30 seconds.
 
-GitHub opens a new board as a table. To see columns, open the board, click the small arrow next
-to "View 1" and choose **Board** under Layout. You do that once.
+If the board opens as a table, click the small arrow next to the name of the view and choose
+**Board** under Layout. You do that once. The board has nine columns, so some are off the right
+edge of the screen: scroll sideways to see them. A card that seems to have vanished has usually
+moved to a column further right, such as Human Review.
 
 To give the service a ticket:
 
@@ -282,20 +284,20 @@ Last updated 2026-11-21.
 | Attempt loop: turns, verify, publish, hand-off | Done, tested against fakes |
 | Workspace manager | Done, tested against a fake sandbox |
 | Tickets approved with labels | Done, run once against a real repository |
-| Tickets approved on a board (GitHub Project of an organization) | Written and tested against a stand-in for GitHub, and the queries are checked against GitHub's published schema. Not yet run against github.com. |
+| Tickets approved on a board (GitHub Project of an organization) | Done. Run once against github.com on a Mac: a card was picked up from the board and moved by the service. |
 | Export and verify steps, mirror sync | Done, tested against a fake sandbox and local Git |
 | Egress proxy (allowlist of hosts the agent may reach) | Done, tested locally |
 | Diff policy and secret scan | Done |
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
-| Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. On an organization, creating the App and installing it worked against github.com; setting up the columns of the board has not been confirmed there yet. |
+| Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. Also run once on an organization, with the board. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |
-| Planning stage (idea, questions, plan, tasks) | Written and tested against stand-ins for GitHub and for the agent. Not yet run with the real Claude Code or against github.com. Needs the board. |
+| Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com, as far as the plan being posted for approval. Creating the tasks of an approved plan has only been tested against a stand-in. Needs the board. |
 | Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `symphony unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
