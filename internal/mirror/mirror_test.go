@@ -572,3 +572,60 @@ func TestAskpassHelperHoldsNoSecret(t *testing.T) {
 		t.Error("unexpected helper content")
 	}
 }
+
+func TestSync(t *testing.T) {
+	l := newLab(t)
+	remote := l.remote()
+	seed := filepath.Join(l.root, "seed")
+	fresh := &Mirror{Dir: filepath.Join(l.root, "state", "mirror.git"), OwnerUID: -1, AllowFileRemote: true}
+	if err := fresh.Sync(ctx, remote, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.run(fresh.Dir, "rev-parse", "refs/heads/main"); got != l.base {
+		t.Fatalf("main at %s", got)
+	}
+	cfg, _ := os.ReadFile(filepath.Join(fresh.Dir, "config"))
+	if strings.Contains(string(cfg), "tok") || strings.Contains(string(cfg), "remote") {
+		t.Fatalf("the mirror's configuration holds the remote or the token:\n%s", cfg)
+	}
+
+	// New commits, a new branch, a tag and a deleted branch on the remote.
+	l.work = seed
+	l.write("more.txt", "more\n")
+	next := l.commit("more")
+	l.run(seed, "push", "-q", remote, "HEAD:refs/heads/main", "HEAD:refs/heads/feature", "HEAD:refs/tags/v1")
+	if err := fresh.Sync(ctx, remote, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.run(fresh.Dir, "rev-parse", "refs/heads/main", "refs/heads/feature"); got != next+"\n"+next {
+		t.Fatalf("after sync: %s", got)
+	}
+	if out := l.run(fresh.Dir, "tag", "--list"); out != "" {
+		t.Fatalf("tags were fetched: %s", out)
+	}
+	// The service's own refs survive a sync, and a branch deleted on the remote goes.
+	l.run(fresh.Dir, "update-ref", PushedRef("k"), next)
+	l.run(remote, "update-ref", "-d", "refs/heads/feature")
+	if err := fresh.Sync(ctx, remote, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.run(fresh.Dir, "for-each-ref", "--format=%(refname)"); got != "refs/heads/main\n"+PushedRef("k") {
+		t.Fatalf("refs after pruning:\n%s", got)
+	}
+	left, _ := filepath.Glob(filepath.Join(fresh.Dir, "sync-*"))
+	if len(left) != 0 {
+		t.Fatalf("helper directories left behind: %v", left)
+	}
+
+	// Remotes that are refused.
+	fresh.AllowFileRemote = false
+	for _, bad := range []string{remote, "https://user:pw@example.com/a/b.git", "http://example.com/a/b.git", "ssh://example.com/a/b.git", "ext::sh -c id"} {
+		if err := fresh.Sync(ctx, bad, "tok"); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	fresh.AllowFileRemote = true
+	if err := fresh.Sync(ctx, filepath.Join(l.root, "nowhere.git"), "tok"); err == nil {
+		t.Error("a missing remote did not fail")
+	}
+}
