@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -24,6 +25,8 @@ const noTests = "true"
 // it with the same code the service uses at startup.
 type WorkflowFile struct {
 	GOOS string
+	// LookPath finds a program. Default exec.LookPath.
+	LookPath func(string) (string, error)
 }
 
 func (*WorkflowFile) Title() string { return "Write the workflow file" }
@@ -102,7 +105,15 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	if err != nil {
 		return err
 	}
-	text := render(goos, st, m[1], verify, ci)
+	look := w.LookPath
+	if look == nil {
+		look = exec.LookPath
+	}
+	engine := Engine(goos, look)
+	if engine == "" {
+		engine = "docker"
+	}
+	text := render(engine, st, m[1], verify, ci)
 	ui.Say("  This file will be written to %s:", path)
 	ui.Say("")
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
@@ -136,10 +147,10 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 // verify command, which goes into a YAML block where no character is
 // special.
 //
-// The Docker sandbox is the one that exists, on both systems. Its
+// The container sandbox is the one that exists, with docker or podman. Its
 // workspaces are Docker volumes, so the directories here only hold the
 // service's own files and belong to the user who runs it.
-func render(_ string, st *State, owner, verify string, ci bool) string {
+func render(engine string, st *State, owner, verify string, ci bool) string {
 	root := strconv.Quote(filepath.Join(st.Dir(), "workspaces"))
 	stateDir := strconv.Quote(filepath.Join(st.Dir(), "state"))
 	var b strings.Builder
@@ -150,7 +161,7 @@ func render(_ string, st *State, owner, verify string, ci bool) string {
 	b.WriteString("    bot_login: \"" + st.AppSlug + "[bot]\"\n")
 	b.WriteString("  allowed_authors: [" + owner + "]\n")
 	b.WriteString("workspace:\n  root: " + root + "\n  repo: " + st.Repo + "\n")
-	b.WriteString("sandbox:\n  backend: docker\n")
+	b.WriteString("sandbox:\n  backend: " + engine + "\n")
 	b.WriteString("verify:\n  command: |\n    " + verify + "\n")
 	if !ci {
 		b.WriteString("publish:\n  required_checks: none\n")

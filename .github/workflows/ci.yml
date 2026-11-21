@@ -28,5 +28,11 @@ jobs:
         env:
           SYMPHONY_TEST_INTERNET: "1"
         run: go test -race -timeout 20m ./...
+      - name: Test with rootless Podman
+        # The same container tests against Podman as an ordinary user,
+        # which is how the service runs on RHEL.
+        env:
+          SYMPHONY_TEST_ENGINE: podman
+        run: go test -count=1 -timeout 20m ./internal/dockerbox ./cmd/symphony
       - name: Install script
         run: scripts/test-install.sh

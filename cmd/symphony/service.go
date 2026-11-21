@@ -95,8 +95,8 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		return nil, explain("%v\nThe settings file is %s. Run `symphony setup` if you have not yet.", err, in.path)
 	}
 	in.source, in.cfg = src, src.Current().Config
-	if in.cfg.Sandbox.Backend != "docker" {
-		return nil, explain("%s says `sandbox.backend: %s`, which is not built yet. The Docker sandbox is.\n"+
+	if b := in.cfg.Sandbox.Backend; b != "docker" && b != "podman" {
+		return nil, explain("%s says `sandbox.backend: %s`, which is not built yet. The container sandbox (docker or podman) is.\n"+
 			"If setup wrote this file, the easiest fix is to let it write a new one:\n"+
 			"  mv %q %q\n  symphony setup\n"+
 			"Setup skips the steps that are done and only asks the last questions again.",
@@ -135,6 +135,7 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	in.handoffDir = filepath.Join(in.cfg.Workspace.Root, ".handoff")
 	bot := st.AppSlug + "[bot]"
 	in.box = &dockerbox.Box{
+		Podman: in.cfg.Sandbox.Backend == "podman",
 		Worker: in.cfg.Worker.Name, Image: in.cfg.Sandbox.Image,
 		MirrorDir: in.mirrorDir, HandoffDir: in.handoffDir,
 		Memory: strings.ToLower(in.cfg.Sandbox.MemoryMax), CPUs: cpus(in.cfg.Sandbox.CPUQuota), PIDs: in.cfg.Sandbox.TasksMax,
@@ -152,13 +153,22 @@ func cpus(quota string) string {
 	return fmt.Sprintf("%d.%02d", n/100, n%100)
 }
 
-// docker checks that the docker client is installed and its daemon answers.
+// docker checks that the container command is installed and answers.
 func (in *install) docker(ctx context.Context) error {
+	c, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if in.box.Podman {
+		if _, err := exec.LookPath("podman"); err != nil {
+			return explain("the `podman` command was not found. Install it (on RHEL: sudo dnf install podman) and try again.")
+		}
+		if err := exec.CommandContext(c, "podman", "info").Run(); err != nil {
+			return explain("Podman is installed but `podman info` fails for this user. Run it yourself to see why.")
+		}
+		return nil
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return explain("the `docker` command was not found. Install Docker Desktop (Mac) or Docker Engine (Linux) and try again.")
 	}
-	c, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
 	if err := exec.CommandContext(c, "docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
 		return explain("Docker is installed but not running. Start Docker Desktop, wait until it says it is running, and try again.")
 	}

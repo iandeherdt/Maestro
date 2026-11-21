@@ -171,7 +171,7 @@ var (
 	imageRE       = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,127}(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$`)
 	branchRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 	permModes     = set("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
-	backends      = set("systemd", "docker", "macos-vm", "macos-user")
+	backends      = set("systemd", "docker", "podman", "macos-vm", "macos-user")
 	trackerKinds  = set("github", "linear")
 	knownTopLevel = []string{"tracker", "polling", "workspace", "hooks", "agent", "claude",
 		"sandbox", "verify", "publish", "policy", "budget", "worker", "server"}
@@ -524,7 +524,7 @@ func (b *builder) sandbox(s *section) {
 		b.fail("sandbox.image", "must be an image name such as symphony-sandbox:latest")
 	}
 	// The docker backend runs its own proxy next to the containers.
-	if sb.Proxy == "" && sb.Backend == "docker" {
+	if sb.Proxy == "" && (sb.Backend == "docker" || sb.Backend == "podman") {
 	} else if sb.Proxy == "" {
 		b.fail("sandbox.network.proxy", "is required")
 	} else if host, port, err := net.SplitHostPort(sb.Proxy); err != nil || host == "" || !validPort(port) {

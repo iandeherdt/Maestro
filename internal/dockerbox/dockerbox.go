@@ -57,6 +57,9 @@ const (
 type Box struct {
 	// Docker is the client binary. Default "docker".
 	Docker string
+	// Podman says that the client is podman, which takes the same commands
+	// with a few differences that are handled where they matter.
+	Podman bool
 	// Worker names this installation. It is part of every container,
 	// volume and network name, so two workers never share anything.
 	Worker string
@@ -83,10 +86,36 @@ var (
 )
 
 func (b *Box) docker() string {
-	if b.Docker != "" {
+	switch {
+	case b.Docker != "":
 		return b.Docker
+	case b.Podman:
+		return "podman"
 	}
 	return "docker"
+}
+
+// engineFlags are run and create flags only one of the clients needs.
+func (b *Box) engineFlags() []string {
+	if b.Podman {
+		// Podman copies the proxy variables of whoever starts it into
+		// the container unless told not to.
+		return []string{"--http-proxy=false"}
+	}
+	return nil
+}
+
+// bind is a bind mount of a host directory. With podman the directory is
+// relabelled, or SELinux (RHEL's default) keeps the container out of it.
+func (b *Box) bind(src, dst string, readonly bool) string {
+	m := "type=bind,src=" + src + ",dst=" + dst
+	if readonly {
+		m += ",readonly"
+	}
+	if b.Podman {
+		m += ",relabel=shared"
+	}
+	return m
 }
 
 func (b *Box) prefix() string { return "symphony-" + b.Worker }
@@ -201,6 +230,7 @@ func (b *Box) runArgs(name string, s spec) []string {
 		"--mount", "type=volume,src=" + b.Volume(s.key) + ",dst=" + workDir,
 		"--workdir", s.workdir,
 	}
+	args = append(args, b.engineFlags()...)
 	if b.Memory != "" {
 		args = append(args, "--memory", b.Memory, "--memory-swap", b.Memory)
 	}
@@ -216,13 +246,13 @@ func (b *Box) runArgs(name string, s spec) []string {
 		args = append(args, "--network", b.Network(s.network))
 	}
 	if s.mirror {
-		args = append(args, "--mount", "type=bind,src="+b.MirrorDir+",dst="+mirrorDir+",readonly")
+		args = append(args, "--mount", b.bind(b.MirrorDir, mirrorDir, true))
 	}
 	if s.claude {
 		args = append(args, "--mount", "type=volume,src="+b.ClaudeVolume()+",dst="+claudeDir)
 	}
 	if s.handoff != "" {
-		args = append(args, "--mount", "type=bind,src="+s.handoff+",dst="+handoffDir)
+		args = append(args, "--mount", b.bind(s.handoff, handoffDir, false))
 	}
 	keys := make([]string, 0, len(s.env))
 	for k := range s.env {

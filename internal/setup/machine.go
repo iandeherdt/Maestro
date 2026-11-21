@@ -64,14 +64,15 @@ func (m *Machine) problems(ctx context.Context) []string {
 			out = append(out, fmt.Sprintf("Git %d.%d is too old, 2.31 or newer is needed.", major, minor))
 		}
 	}
-	if _, err := m.LookPath("docker"); err != nil {
-		if m.GOOS == "darwin" {
-			out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it")
-		} else {
-			out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Engine as described at https://docs.docker.com/engine/install/")
+	switch engine := Engine(m.GOOS, m.LookPath); {
+	case engine == "" && m.GOOS == "darwin":
+		out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it")
+	case engine == "":
+		out = append(out, "Neither Podman nor Docker is installed. The agent runs in a container. On RHEL and Fedora: sudo dnf install podman. Elsewhere, install Docker Engine as described at https://docs.docker.com/engine/install/")
+	default:
+		if _, err := m.Output(ctx, engine, "--version"); err != nil {
+			out = append(out, engine+" is installed but does not run: "+err.Error())
 		}
-	} else if _, err := m.Output(ctx, "docker", "--version"); err != nil {
-		out = append(out, "Docker is installed but does not run: "+err.Error())
 	}
 	switch m.GOOS {
 	case "linux", "darwin":
@@ -84,7 +85,7 @@ func (m *Machine) problems(ctx context.Context) []string {
 func (m *Machine) Check(ctx context.Context, _ *State) (Status, error) {
 	p := m.problems(ctx)
 	if len(p) == 0 {
-		return Status{Done: true, Detail: "Git and Docker are installed."}, nil
+		return Status{Done: true, Detail: "Git and a container engine (Docker or Podman) are installed."}, nil
 	}
 	return Status{Detail: fmt.Sprintf("%d thing(s) to fix: %s", len(p), strings.Join(short(p), "; "))}, nil
 }
@@ -119,4 +120,20 @@ func short(problems []string) []string {
 		out[i] = strings.TrimSuffix(p, ".")
 	}
 	return out
+}
+
+// Engine picks the container command for this machine: Docker on a Mac;
+// on Linux Podman when it is there, because it needs no root daemon, and
+// Docker otherwise. It returns "" when there is none.
+func Engine(goos string, lookPath func(string) (string, error)) string {
+	order := []string{"docker"}
+	if goos == "linux" {
+		order = []string{"podman", "docker"}
+	}
+	for _, e := range order {
+		if _, err := lookPath(e); err == nil {
+			return e
+		}
+	}
+	return ""
 }

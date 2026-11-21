@@ -25,7 +25,7 @@ const ClaudeVersion = "2.1.330"
 const proxyConfigDir = "/etc/symphony-proxy"
 
 // dockerfileHead builds everything except the service's own binary.
-const dockerfileHead = `FROM node:22-bookworm-slim
+const dockerfileHead = `FROM docker.io/library/node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
@@ -193,15 +193,15 @@ func (b *Box) Up(ctx context.Context, allowDir string) error {
 				return fail("%v", err)
 			}
 		}
-		if _, err := b.cli(ctx, "create", "--name", name,
+		if _, err := b.cli(ctx, append(append([]string{"create", "--name", name}, b.engineFlags()...),
 			"--label", "symphony.worker="+b.Worker, "--label", "symphony.step=proxy",
 			"--user", AgentUID+":"+AgentUID, "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 			"--read-only", "--memory", "256m", "--pids-limit", "256", "--init",
 			"--network", "bridge",
-			"--mount", "type=bind,src="+allowDir+",dst="+proxyConfigDir+",readonly",
+			"--mount", b.bind(allowDir, proxyConfigDir, true),
 			"--entrypoint", "", b.Image,
 			"symphony", "proxy", "--listen", ":"+ProxyPort, "--profile", profile,
-			"--allow-file", proxyConfigDir+"/"+profile+".json"); err != nil {
+			"--allow-file", proxyConfigDir+"/"+profile+".json")...); err != nil {
 			return fail("%v", err)
 		}
 		if _, err := b.cli(ctx, "network", "connect", net, name); err != nil {
@@ -271,6 +271,7 @@ func (b *Box) claudeArgs(name string, terminal bool, argv ...string) []string {
 		"--mount", "type=volume,src=" + b.ClaudeVolume() + ",dst=" + claudeDir,
 		"--workdir", "/home/agent",
 	}
+	args = append(args, b.engineFlags()...)
 	env := b.baseEnv(sandbox.NetAgent)
 	env["CLAUDE_CONFIG_DIR"] = claudeDir
 	if terminal {
