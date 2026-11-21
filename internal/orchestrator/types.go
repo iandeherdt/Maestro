@@ -230,3 +230,34 @@ type Checker interface {
 	// the pull request is already ready.
 	MarkReady(ctx context.Context, rec PublishRecord) error
 }
+
+// ReviewState is where the pull request of a handed-off ticket stands.
+type ReviewState int
+
+const (
+	// ReviewNone: the service has no pull request for the ticket.
+	ReviewNone ReviewState = iota
+	// ReviewOpen: waiting for a person.
+	ReviewOpen
+	// ReviewMerged: a person merged it.
+	ReviewMerged
+	// ReviewClosed: closed without a merge.
+	ReviewClosed
+	// ReviewChangesRequested: the latest review of the current commit by
+	// an allowlisted reviewer asks for changes.
+	ReviewChangesRequested
+)
+
+// ReviewStatus is the answer of Reviews.Review.
+type ReviewStatus struct {
+	State    ReviewState
+	PRNumber int
+}
+
+// Reviews follows pull requests after hand-off (SPEC 15.8).
+type Reviews interface {
+	Review(ctx context.Context, is issue.Issue) (ReviewStatus, error)
+	// DeleteBranch removes the ticket's branch on the remote after a
+	// merge. A branch that is already gone is not an error.
+	DeleteBranch(ctx context.Context, is issue.Issue) error
+}

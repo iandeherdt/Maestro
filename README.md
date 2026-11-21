@@ -183,6 +183,7 @@ Last updated 2026-11-21.
 | GitHub App tokens | Done, not yet tried against github.com |
 | Guided setup | Five of seven steps done (machine, App, installation, labels, workflow file), not yet tried against github.com |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
+| Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Running the service: `symphony run`, `status`, `pause`, `doctor` | Not started |
 | Claude Code runner | Written from the CLI documentation and tested against a scripted agent. Needs one real run on a machine with the CLI logged in. |
 | Linux sandbox | Not started. Needs the server. |

@@ -38,6 +38,7 @@ type Mirror interface {
 	Import(ctx context.Context, bundlePath, workspaceKey, baseSHA string) (mirror.Imported, error)
 	Diff(ctx context.Context, baseSHA, head string, lim mirror.Limits) (mirror.Diff, error)
 	Push(ctx context.Context, remoteURL, workspaceKey, branch, token string) error
+	ForgetPush(ctx context.Context, workspaceKey string) error
 }
 
 // Publisher implements the publish gate.
@@ -55,6 +56,10 @@ type Publisher struct {
 	// BotName and BotEmail are the commit identity the sandbox is set up
 	// with. Empty skips the identity flag.
 	BotName, BotEmail string
+	// BotLogin is the account the service's pull requests are opened by,
+	// such as "my-app[bot]". When set, the hand-off watch ignores pull
+	// requests opened by anyone else.
+	BotLogin string
 
 	// APIURL and GitURL default to github.com. HTTP defaults to a client
 	// with a timeout.

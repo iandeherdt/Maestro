@@ -1718,16 +1718,29 @@ NOT be a repository administrator.
 
 ### 15.8 Hand-off Watch
 
-Each tick, the orchestrator fetches issues in the hand-off state that it published (identified by
-an open or recently closed pull request on `<branch_name>`):
+Every `publish.checks_poll_interval_ms`, the orchestrator fetches the issues in the hand-off state
+that carry this worker's required labels and that it is not working on, and for each looks at the
+newest pull request on `<branch_name>`. A pull request counts only if its head branch is in the
+repository itself (not a fork that reuses the name) and it was opened by the bot identity.
 
-- Pull request merged: set the issue to the done state, delete the remote branch if the
-  repository does not do so automatically, clean the workspace.
-- Pull request closed without merge: update the status comment. No state change.
-- `publish.rework_on_changes_requested` and the latest review by an allowlisted reviewer requests
-  changes: set the issue to `Rework`.
+- Pull request merged: delete the remote branch (already gone is fine, a failure is logged and
+  does not stop the rest), set the issue to the done state, clean the workspace, clear its failure
+  budget, update the status comment. If the state write fails, the next run retries.
+- Pull request closed without merge: update the status comment once. No state change.
+- `publish.rework_on_changes_requested` and the latest approving or change-requesting review by
+  an allowlisted commenter requests changes: set the issue to `Rework`, if `Rework` is an active
+  state. Only reviews of the pull request's current head commit count. A review of an earlier
+  commit was answered by the rework that followed it; acting on it again would send the issue
+  round in circles.
 - Issue moved to `Rework` by a human: nothing to do here. The next tick dispatches it as an active
   issue, with review feedback (Section 13.3).
+- No pull request, or an open one without such a review: nothing.
+
+The watch keeps no state between runs other than its throttle, so a restart needs no recovery.
+When the tracker closes an issue by itself on merge (a GitHub issue named by `Closes #n`), the
+issue never appears in the hand-off state as merged. Its workspace is then removed by the
+terminal-state cleanup, and its branch is left to the repository's own "delete head branches"
+setting.
 
 ## 16. Logging, Status, and Observability
 

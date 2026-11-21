@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -593,5 +594,168 @@ func TestMarkReady(t *testing.T) {
 	c.gqlErr = true
 	if err := p.MarkReady(ctx, record); err == nil {
 		t.Error("a GraphQL error was read as success")
+	}
+}
+
+// gh is a stand-in for the endpoints the hand-off watch uses.
+type gh struct {
+	mu      sync.Mutex
+	pulls   []map[string]any
+	reviews []map[string]any
+	queries []string
+	deleted []string
+	delCode int
+	forgot  []string
+}
+
+func (g *gh) Import(context.Context, string, string, string) (mirror.Imported, error) {
+	return mirror.Imported{}, nil
+}
+func (g *gh) Diff(context.Context, string, string, mirror.Limits) (mirror.Diff, error) {
+	return mirror.Diff{}, nil
+}
+func (g *gh) Push(context.Context, string, string, string, string) error { return nil }
+func (g *gh) ForgetPush(_ context.Context, key string) error {
+	g.forgot = append(g.forgot, key)
+	return nil
+}
+
+func pullOn(n int, state, merged, login, repo string) map[string]any {
+	p := map[string]any{"number": n, "state": state, "user": map[string]any{"login": login},
+		"head": map[string]any{"ref": "symphony/GH-7", "sha": headSHA, "repo": map[string]any{"full_name": repo}}}
+	if merged != "" {
+		p["merged_at"] = merged
+	}
+	return p
+}
+
+func review(state, commit, login string) map[string]any {
+	return map[string]any{"state": state, "commit_id": commit, "user": map[string]any{"login": login}}
+}
+
+func newGH(t *testing.T) (*gh, *Publisher) {
+	g := &gh{delCode: 204}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(401)
+			return
+		}
+		switch r.Method + " " + r.URL.Path {
+		case "GET /repos/ian/app/pulls":
+			g.queries = append(g.queries, r.URL.RawQuery)
+			json.NewEncoder(w).Encode(g.pulls)
+		case "GET /repos/ian/app/pulls/31/reviews":
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			start := min((page-1)*100, len(g.reviews))
+			json.NewEncoder(w).Encode(g.reviews[start:min(start+100, len(g.reviews))])
+		case "DELETE /repos/ian/app/git/refs/heads/symphony/GH-7":
+			g.deleted = append(g.deleted, r.URL.Path)
+			w.WriteHeader(g.delCode)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	cfg := &config.Config{Workspace: config.Workspace{Repo: "ian/app", BaseBranch: "main"},
+		Publish: config.Publish{BranchPrefix: "symphony/", ReworkOnChangesRequested: true},
+		Tracker: config.Tracker{AllowedCommenters: []string{"Ian"}}}
+	p := &Publisher{Config: func() *config.Config { return cfg }, APIURL: srv.URL, Mirror: g, BotLogin: "sym[bot]",
+		Token: func(context.Context) (string, error) { return token, nil }}
+	return g, p
+}
+
+var ticket = issue.Issue{ID: "I_7", Identifier: "GH-7"}
+
+func TestReviewStates(t *testing.T) {
+	const bot, repo = "sym[bot]", "ian/app"
+	old := "2222222222222222222222222222222222222222"
+	for name, tc := range map[string]struct {
+		pulls   []map[string]any
+		reviews []map[string]any
+		want    orchestrator.ReviewState
+		number  int
+	}{
+		"no pull request":             {nil, nil, orchestrator.ReviewNone, 0},
+		"open":                        {[]map[string]any{pullOn(31, "open", "", bot, repo)}, nil, orchestrator.ReviewOpen, 31},
+		"merged":                      {[]map[string]any{pullOn(31, "closed", "2026-11-21T10:00:00Z", bot, repo)}, nil, orchestrator.ReviewMerged, 31},
+		"closed":                      {[]map[string]any{pullOn(31, "closed", "", bot, repo)}, nil, orchestrator.ReviewClosed, 31},
+		"newest counts":               {[]map[string]any{pullOn(31, "open", "", bot, repo), pullOn(12, "closed", "2026-11-01T10:00:00Z", bot, repo)}, nil, orchestrator.ReviewOpen, 31},
+		"from a fork":                 {[]map[string]any{pullOn(40, "closed", "2026-11-21T10:00:00Z", bot, "mallory/app")}, nil, orchestrator.ReviewNone, 0},
+		"opened by someone else":      {[]map[string]any{pullOn(40, "closed", "2026-11-21T10:00:00Z", "mallory", repo)}, nil, orchestrator.ReviewNone, 0},
+		"skips to the service's own":  {[]map[string]any{pullOn(40, "closed", "2026-11-21T10:00:00Z", "mallory", repo), pullOn(31, "open", "", bot, repo)}, nil, orchestrator.ReviewOpen, 31},
+		"changes requested":           {[]map[string]any{pullOn(31, "open", "", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", headSHA, "ian")}, orchestrator.ReviewChangesRequested, 31},
+		"then approved":               {[]map[string]any{pullOn(31, "open", "", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", headSHA, "ian"), review("APPROVED", headSHA, "ian")}, orchestrator.ReviewOpen, 31},
+		"then only a comment":         {[]map[string]any{pullOn(31, "open", "", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", headSHA, "ian"), review("COMMENTED", headSHA, "ian")}, orchestrator.ReviewChangesRequested, 31},
+		"on an earlier commit":        {[]map[string]any{pullOn(31, "open", "", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", old, "ian")}, orchestrator.ReviewOpen, 31},
+		"by a stranger":               {[]map[string]any{pullOn(31, "open", "", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", headSHA, "mallory")}, orchestrator.ReviewOpen, 31},
+		"stranger after the reviewer": {[]map[string]any{pullOn(31, "open", "", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", headSHA, "ian"), review("APPROVED", headSHA, "mallory")}, orchestrator.ReviewChangesRequested, 31},
+		"merged, with old reviews":    {[]map[string]any{pullOn(31, "closed", "2026-11-21T10:00:00Z", bot, repo)}, []map[string]any{review("CHANGES_REQUESTED", headSHA, "ian")}, orchestrator.ReviewMerged, 31},
+	} {
+		g, p := newGH(t)
+		g.pulls, g.reviews = tc.pulls, tc.reviews
+		st, err := p.Review(ctx, ticket)
+		if err != nil || st.State != tc.want || st.PRNumber != tc.number {
+			t.Errorf("%s: %+v, error %v", name, st, err)
+		}
+		if q := g.queries[0]; !strings.Contains(q, "head=ian%3Asymphony%2FGH-7") || !strings.Contains(q, "state=all") {
+			t.Errorf("%s: query %s", name, q)
+		}
+	}
+}
+
+func TestReviewEdges(t *testing.T) {
+	g, p := newGH(t)
+	g.pulls = []map[string]any{pullOn(31, "open", "", "sym[bot]", "ian/app")}
+	// The verdict is on the second page.
+	for i := 0; i < 100; i++ {
+		g.reviews = append(g.reviews, review("COMMENTED", headSHA, "ian"))
+	}
+	g.reviews = append(g.reviews, review("CHANGES_REQUESTED", headSHA, "ian"))
+	if st, err := p.Review(ctx, ticket); err != nil || st.State != orchestrator.ReviewChangesRequested {
+		t.Fatalf("second page: %+v, %v", st, err)
+	}
+	// A listed pull request on another branch is not the ticket's.
+	g.pulls[0]["head"].(map[string]any)["ref"] = "symphony/GH-70"
+	if st, _ := p.Review(ctx, ticket); st.State != orchestrator.ReviewNone {
+		t.Fatalf("other branch: %+v", st)
+	}
+	g.pulls[0]["head"].(map[string]any)["ref"] = "symphony/GH-7"
+	// Switched off: reviews are not read.
+	p.Config().Publish.ReworkOnChangesRequested = false
+	if st, err := p.Review(ctx, ticket); err != nil || st.State != orchestrator.ReviewOpen {
+		t.Fatalf("switched off: %+v, %v", st, err)
+	}
+	// Without a bot login, any pull request from the repository's own branch counts.
+	p.BotLogin = ""
+	g.pulls = []map[string]any{pullOn(31, "closed", "2026-11-21T10:00:00Z", "ian", "ian/app")}
+	if st, _ := p.Review(ctx, ticket); st.State != orchestrator.ReviewMerged {
+		t.Fatalf("no bot login: %+v", st)
+	}
+	// An identifier that cannot name a branch, and a missing prefix.
+	if _, err := p.Review(ctx, issue.Issue{Identifier: "../x"}); err == nil {
+		t.Fatal("a bad identifier was accepted")
+	}
+	p.Config().Publish.BranchPrefix = ""
+	if _, err := p.Review(ctx, ticket); err == nil {
+		t.Fatal("an empty prefix was accepted")
+	}
+	if err := p.DeleteBranch(ctx, ticket); err == nil || len(g.deleted) != 0 {
+		t.Fatal("a branch outside the prefix was deleted")
+	}
+}
+
+func TestDeleteBranch(t *testing.T) {
+	for code, ok := range map[int]bool{204: true, 404: true, 422: true, 403: false, 500: false} {
+		g, p := newGH(t)
+		g.delCode = code
+		err := p.DeleteBranch(ctx, ticket)
+		if (err == nil) != ok || len(g.deleted) != 1 {
+			t.Errorf("status %d: error %v, %d requests", code, err, len(g.deleted))
+		}
+		if forgot := len(g.forgot) == 1 && g.forgot[0] == "GH-7"; forgot != ok {
+			t.Errorf("status %d: forgot %v", code, g.forgot)
+		}
 	}
 }
