@@ -150,7 +150,7 @@ Then watch the card move:
 | Todo | Approved, waiting for a free slot |
 | In Progress | An agent is working on it |
 | Human Review | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
-| Rework | You asked for changes. The agent continues on the same branch. (Your comments are not passed to it yet; for now, put what should change in the issue text.) |
+| Rework | You asked for changes. Write what should change in a comment on the issue, then move the card here. The agent continues on the same branch and is given your comments on the issue. (Review comments on the pull request itself are not passed on yet.) |
 | Blocked | The service gave up after repeated failures. The status comment on the issue says why. |
 | Done | The pull request was merged. |
 

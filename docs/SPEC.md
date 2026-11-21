@@ -1576,6 +1576,10 @@ A new attempt (new session, full prompt) carries `attempt`, `retry_kind` and `fe
   the last publish (`source: review`, with `path` and `line` when present), and tracker comments
   from `fetch_feedback` (`source: tracker`).
 
+Implemented: every attempt, first or later, is given the 20 most recent issue comments by
+`allowed_commenters` as `source: tracker`, after the gate feedback. Not implemented yet: review
+comments on the pull request.
+
 Feedback is never taken from anyone outside `allowed_commenters`, including bots, with the single
 exception of CI logs for required checks.
 

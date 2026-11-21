@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/iandeherdt/Symphony-beads/internal/prompt"
 	"github.com/iandeherdt/Symphony-beads/internal/sandbox"
 	"github.com/iandeherdt/Symphony-beads/internal/sandbox/sandboxtest"
+	"github.com/iandeherdt/Symphony-beads/internal/tracker"
 	"github.com/iandeherdt/Symphony-beads/internal/tracker/trackertest"
 	"github.com/iandeherdt/Symphony-beads/internal/workspace"
 )
@@ -528,5 +530,26 @@ func TestLostSessionRestartsOnceWithTheFullPrompt(t *testing.T) {
 	r = newRig(t, script{err: lost})
 	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || len(r.f.prompts) != 1 {
 		t.Fatalf("outcome = %+v after %d turns", out, len(r.f.prompts))
+	}
+}
+
+func TestOwnerCommentsReachTheAgentAndNobodyElses(t *testing.T) {
+	r := newRig(t, script{text: "done", verifyOK: true})
+	at := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
+	// The fake returns what the adapter would: allowlisted commenters only.
+	for i := 0; i < maxOwnerComments+2; i++ {
+		r.tr.Comments = append(r.tr.Comments, tracker.Feedback{Author: "ian", Body: fmt.Sprintf("note %d.", i), CreatedAt: at.Add(time.Duration(i) * time.Minute)})
+	}
+	out := r.run(orchestrator.Attempt{Feedback: []issue.Feedback{{Source: "ci", Body: "lint failed"}}})
+	if out.Kind != orchestrator.Published {
+		t.Fatalf("outcome %+v", out)
+	}
+	p := r.f.prompts[0].Prompt
+	if !strings.Contains(p, "source=tracker author=ian\nnote 21.") || !strings.Contains(p, "source=ci\nlint failed") {
+		t.Fatalf("prompt = %s", p)
+	}
+	// Only the most recent ones, oldest first, after the gate's feedback.
+	if strings.Contains(p, "note 1.") || strings.Index(p, "note 2.") > strings.Index(p, "note 21.") || strings.Index(p, "lint failed") > strings.Index(p, "note 2.") {
+		t.Errorf("order or cap of the comments is wrong:\n%s", p)
 	}
 }
