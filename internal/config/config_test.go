@@ -1,0 +1,404 @@
+package config
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/iandeherdt/Symphony-beads/internal/workflow"
+)
+
+// minimal is the smallest valid workflow front matter.
+const minimal = `
+tracker:
+  kind: github
+  allowed_authors: [owner]
+workspace:
+  root: /srv/agent/workspaces
+  repo: owner/repo
+sandbox:
+  backend: systemd
+  network:
+    proxy: 127.0.0.1:3128
+verify:
+  command: make test
+budget:
+  state_dir: /srv/symphony/state
+worker:
+  name: linux
+`
+
+func build(t *testing.T, front string, env map[string]string) (*Config, error) {
+	t.Helper()
+	def, err := workflow.Parse([]byte("---\n" + front + "\n---\nprompt"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	def.Path = "/etc/symphony/WORKFLOW.md"
+	return Build(def, Options{Env: func(k string) string { return env[k] }, HomeDir: "/home/op"})
+}
+
+func mustBuild(t *testing.T, front string) *Config {
+	t.Helper()
+	c, err := build(t, front, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return c
+}
+
+// with returns the minimal config with one line replaced or a block appended.
+func with(replaceOld, replaceNew, appendBlock string) string {
+	s := minimal
+	if replaceOld != "" {
+		if !strings.Contains(s, replaceOld) {
+			panic("fixture does not contain " + replaceOld)
+		}
+		s = strings.Replace(s, replaceOld, replaceNew, 1)
+	}
+	return s + appendBlock
+}
+
+// keys returns the configuration keys named by the errors in err.
+func keys(err error) map[string]string {
+	out := map[string]string{}
+	var walk func(error)
+	walk = func(e error) {
+		if e == nil {
+			return
+		}
+		if j, ok := e.(interface{ Unwrap() []error }); ok {
+			for _, c := range j.Unwrap() {
+				walk(c)
+			}
+			return
+		}
+		var we *workflow.Error
+		if errors.As(e, &we) {
+			out[we.Key] = we.Class
+		}
+	}
+	walk(err)
+	return out
+}
+
+func TestDefaults(t *testing.T) {
+	c := mustBuild(t, minimal)
+
+	eq := func(name string, got, want any) {
+		t.Helper()
+		if got != want {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	eq("polling.interval_ms", c.Polling.IntervalMS, int64(30000))
+	eq("hooks.timeout_ms", c.Hooks.TimeoutMS, int64(60000))
+	eq("agent.max_concurrent_agents", c.Agent.MaxConcurrentAgents, int64(1))
+	eq("agent.max_turns", c.Agent.MaxTurns, int64(8))
+	eq("agent.max_retry_backoff_ms", c.Agent.MaxRetryBackoffMS, int64(300000))
+	eq("claude.command", c.Claude.Command, "claude")
+	eq("claude.max_steps_per_turn", c.Claude.MaxStepsPerTurn, int64(150))
+	eq("claude.permission_mode", c.Claude.PermissionMode, "bypassPermissions")
+	eq("claude.turn_timeout_ms", c.Claude.TurnTimeoutMS, int64(3600000))
+	eq("claude.turn_total_timeout_ms", c.Claude.TurnTotalTimeoutMS, int64(5400000))
+	eq("claude.read_timeout_ms", c.Claude.ReadTimeoutMS, int64(30000))
+	eq("claude.stall_timeout_ms", c.Claude.StallTimeoutMS, int64(300000))
+	eq("claude.inner_sandbox", c.Claude.InnerSandbox, false)
+	eq("sandbox.memory_max", c.Sandbox.MemoryMax, "6G")
+	eq("sandbox.cpu_quota", c.Sandbox.CPUQuota, "300%")
+	eq("sandbox.tasks_max", c.Sandbox.TasksMax, int64(2048))
+	eq("verify.timeout_ms", c.Verify.TimeoutMS, int64(1800000))
+	eq("verify.network", c.Verify.Network, false)
+	eq("publish.branch_prefix", c.Publish.BranchPrefix, "symphony/")
+	eq("publish.draft_until_green", c.Publish.DraftUntilGreen, true)
+	eq("publish.required_checks from protection", c.Publish.RequiredChecksFromBranchProtection, true)
+	eq("publish.rework_on_changes_requested", c.Publish.ReworkOnChangesRequested, true)
+	eq("policy.max_changed_files", c.Policy.MaxChangedFiles, int64(200))
+	eq("policy.secret_scan", c.Policy.SecretScan, true)
+	eq("policy.allow_binary", c.Policy.AllowBinary, false)
+	eq("policy.allow_symlinks", c.Policy.AllowSymlinks, false)
+	eq("budget.max_failure_attempts", c.Budget.MaxFailureAttempts, int64(3))
+	eq("budget.max_runs_per_day", c.Budget.MaxRunsPerDay, int64(20))
+	eq("budget.quota_backoff_ms", c.Budget.QuotaBackoffMS, int64(3600000))
+	eq("tracker.handoff_state", c.Tracker.HandoffState, "Human Review")
+	eq("tracker.in_progress_state", c.Tracker.InProgressState, "In Progress")
+	eq("tracker.blocked_state", c.Tracker.BlockedState, "Blocked")
+	eq("tracker.done_state", c.Tracker.DoneState, "Done")
+	eq("worker.require_routing_label", c.Worker.RequireRoutingLabel, true)
+
+	if c.Budget.MaxTokensPerDay != nil {
+		t.Errorf("budget.max_tokens_per_day = %d, want nil", *c.Budget.MaxTokensPerDay)
+	}
+	if c.Budget.MaxAgentSecondsPerDay == nil || *c.Budget.MaxAgentSecondsPerDay != 28800 {
+		t.Errorf("budget.max_agent_seconds_per_day = %v, want 28800", c.Budget.MaxAgentSecondsPerDay)
+	}
+	if c.Server.Port != nil {
+		t.Errorf("server.port = %d, want nil", *c.Server.Port)
+	}
+	if got := strings.Join(c.Tracker.ActiveStates, ","); got != "Todo,In Progress,Rework" {
+		t.Errorf("active states = %q", got)
+	}
+	if got := strings.Join(c.Claude.DisallowedTools, ","); got != "WebFetch,WebSearch" {
+		t.Errorf("disallowed tools = %q", got)
+	}
+	if got := strings.Join(c.Tracker.AllowedCommenters, ","); got != "owner" {
+		t.Errorf("allowed_commenters = %q, want the allowed authors", got)
+	}
+	if len(c.Warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", c.Warnings)
+	}
+}
+
+func TestRoutingLabelAppended(t *testing.T) {
+	c := mustBuild(t, with("allowed_authors: [owner]",
+		"allowed_authors: [owner]\n  required_labels: [' Symphony ', symphony, 'RUN:linux']", ""))
+	if got := strings.Join(c.Tracker.RequiredLabels, ","); got != "symphony,run:linux" {
+		t.Errorf("required labels = %q, want symphony,run:linux", got)
+	}
+
+	c = mustBuild(t, with("name: linux", "name: linux\n  require_routing_label: false", ""))
+	if len(c.Tracker.RequiredLabels) != 0 {
+		t.Errorf("required labels = %v, want none", c.Tracker.RequiredLabels)
+	}
+}
+
+func TestBlankRequiredLabelIsKept(t *testing.T) {
+	// A blank configured label must match no issue, so it must not be dropped.
+	c := mustBuild(t, with("allowed_authors: [owner]", "allowed_authors: [owner]\n  required_labels: ['  ']", ""))
+	if len(c.Tracker.RequiredLabels) != 2 || c.Tracker.RequiredLabels[0] != "" {
+		t.Errorf("required labels = %q, want a blank entry kept", c.Tracker.RequiredLabels)
+	}
+}
+
+func TestPathResolution(t *testing.T) {
+	c, err := build(t, with("root: /srv/agent/workspaces", "root: $WS_ROOT", ""),
+		map[string]string{"WS_ROOT": "/data/ws/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Workspace.Root != "/data/ws" {
+		t.Errorf("root = %q, want /data/ws", c.Workspace.Root)
+	}
+
+	c = mustBuild(t, with("state_dir: /srv/symphony/state", "state_dir: ~/state", ""))
+	if c.Budget.StateDir != "/home/op/state" {
+		t.Errorf("state_dir = %q, want /home/op/state", c.Budget.StateDir)
+	}
+
+	_, err = build(t, with("root: /srv/agent/workspaces", "root: $WS_ROOT", ""), nil)
+	if _, ok := keys(err)["workspace.root"]; !ok {
+		t.Errorf("unset variable accepted: %v", err)
+	}
+	_, err = build(t, with("root: /srv/agent/workspaces", "root: relative/dir", ""), nil)
+	if _, ok := keys(err)["workspace.root"]; !ok {
+		t.Errorf("relative path accepted: %v", err)
+	}
+}
+
+func TestVarNotResolvedOutsideDocumentedFields(t *testing.T) {
+	// sandbox.env values are literals, so a host secret cannot be passed into
+	// the sandbox by configuration.
+	c, err := build(t, with("backend: systemd", "backend: systemd\n  env: {FOO: $SECRET}", ""),
+		map[string]string{"SECRET": "hunter2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sandbox.Env["FOO"] != "$SECRET" {
+		t.Errorf("sandbox.env.FOO = %q, want the literal $SECRET", c.Sandbox.Env["FOO"])
+	}
+	// claude.command is never expanded either, and a "$" makes it invalid.
+	_, err = build(t, minimal+"claude:\n  command: $CLAUDE_BIN\n", map[string]string{"CLAUDE_BIN": "/bin/sh"})
+	if _, ok := keys(err)["claude.command"]; !ok {
+		t.Errorf("claude.command with $ accepted: %v", err)
+	}
+}
+
+func TestUnknownKeys(t *testing.T) {
+	c := mustBuild(t, minimal+"future_extension:\n  a: 1\n")
+	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "future_extension") {
+		t.Errorf("warnings = %v, want one about future_extension", c.Warnings)
+	}
+	c = mustBuild(t, minimal+"agent:\n  max_turn: 3\n")
+	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "agent.max_turn") {
+		t.Errorf("warnings = %v, want one about agent.max_turn", c.Warnings)
+	}
+
+	// A typo in a control section must fail, not be ignored.
+	strict := map[string]string{
+		"sandbox.memory_maxx":         with("backend: systemd", "backend: systemd\n  memory_maxx: 1G", ""),
+		"sandbox.network.allow_agnet": with("proxy: 127.0.0.1:3128", "proxy: 127.0.0.1:3128\n    allow_agnet: [a.example]", ""),
+		"publish.branch_prefx":        minimal + "publish:\n  branch_prefx: x/\n",
+		"policy.secret_scann":         minimal + "policy:\n  secret_scann: false\n",
+	}
+	for key, front := range strict {
+		_, err := build(t, front, nil)
+		if cls := keys(err)[key]; cls != workflow.ClassInvalidConfig {
+			t.Errorf("%s: class = %q, want %q (err %v)", key, cls, workflow.ClassInvalidConfig, err)
+		}
+	}
+}
+
+func TestInvalid(t *testing.T) {
+	tests := []struct {
+		name    string
+		front   string
+		wantKey string
+	}{
+		{"missing tracker kind", with("kind: github\n", "", ""), "tracker.kind"},
+		{"unsupported tracker kind", with("kind: github", "kind: jira", ""), "tracker.kind"},
+		{"empty allowed authors", with("allowed_authors: [owner]", "allowed_authors: []", ""), "tracker.allowed_authors"},
+		{"blank allowed authors", with("allowed_authors: [owner]", "allowed_authors: ['  ']", ""), "tracker.allowed_authors"},
+		{"handoff state is active", with("kind: github", "kind: github\n  handoff_state: Todo", ""), "tracker.handoff_state"},
+		{"handoff state is terminal", with("kind: github", "kind: github\n  handoff_state: done", ""), "tracker.handoff_state"},
+		{"in-progress state not active", with("kind: github", "kind: github\n  in_progress_state: Doing", ""), "tracker.in_progress_state"},
+		{"blocked state is active", with("kind: github", "kind: github\n  blocked_state: ' rework '", ""), "tracker.blocked_state"},
+		{"done state not terminal", with("kind: github", "kind: github\n  done_state: Shipped", ""), "tracker.done_state"},
+		{"state both active and terminal", with("kind: github", "kind: github\n  active_states: [Todo, In Progress, Done]", ""), "tracker.active_states"},
+		{"poll interval too small", minimal + "polling:\n  interval_ms: 1000\n", "polling.interval_ms"},
+		{"missing workspace root", with("  root: /srv/agent/workspaces\n", "", ""), "workspace.root"},
+		{"missing repo", with("  repo: owner/repo\n", "", ""), "workspace.repo"},
+		{"bad repo", with("repo: owner/repo", "repo: https://github.com/owner/repo", ""), "workspace.repo"},
+		{"bad base branch", with("repo: owner/repo", "repo: owner/repo\n  base_branch: 'a..b'", ""), "workspace.base_branch"},
+		{"zero hook timeout", minimal + "hooks:\n  timeout_ms: 0\n", "hooks.timeout_ms"},
+		{"zero max turns", minimal + "agent:\n  max_turns: 0\n", "agent.max_turns"},
+		{"non-integer max turns", minimal + "agent:\n  max_turns: many\n", "agent.max_turns"},
+		{"shell in claude command", minimal + "claude:\n  command: 'claude; rm -rf /'\n", "claude.command"},
+		{"claude command with args", minimal + "claude:\n  command: claude --bare\n", "claude.command"},
+		{"bad permission mode", minimal + "claude:\n  permission_mode: yolo\n", "claude.permission_mode"},
+		{"missing sandbox backend", with("  backend: systemd\n", "", ""), "sandbox.backend"},
+		{"no sandbox backend 'none'", with("backend: systemd", "backend: none", ""), "sandbox.backend"},
+		{"missing proxy", with("    proxy: 127.0.0.1:3128\n", "    allow_agent: []\n", ""), "sandbox.network.proxy"},
+		{"proxy without port", with("proxy: 127.0.0.1:3128", "proxy: localhost", ""), "sandbox.network.proxy"},
+		{"ip address in allowlist", with("proxy: 127.0.0.1:3128", "proxy: 127.0.0.1:3128\n    allow_hooks: [10.0.0.5]", ""), "sandbox.network.allow_hooks"},
+		{"url in allowlist", with("proxy: 127.0.0.1:3128", "proxy: 127.0.0.1:3128\n    allow_agent: ['https://a.example/x']", ""), "sandbox.network.allow_agent"},
+		{"bad memory size", with("backend: systemd", "backend: systemd\n  memory_max: lots", ""), "sandbox.memory_max"},
+		{"missing verify command", with("command: make test", "command: '  '", ""), "verify.command"},
+		{"branch prefix without slash", minimal + "publish:\n  branch_prefix: symphony\n", "publish.branch_prefix"},
+		{"branch prefix matches base branch", with("repo: owner/repo", "repo: owner/repo\n  base_branch: main", "publish:\n  branch_prefix: main/\n"), "publish.branch_prefix"},
+		{"bad required checks string", minimal + "publish:\n  required_checks: none\n", "publish.required_checks"},
+		{"zero failure attempts", with("state_dir: /srv/symphony/state", "state_dir: /srv/symphony/state\n  max_failure_attempts: 0", ""), "budget.max_failure_attempts"},
+		{"missing state dir", with("  state_dir: /srv/symphony/state\n", "  max_runs_per_day: 5\n", ""), "budget.state_dir"},
+		{"state dir inside workspace root", with("state_dir: /srv/symphony/state", "state_dir: /srv/agent/workspaces/state", ""), "budget.state_dir"},
+		{"workspace root inside state dir", with("root: /srv/agent/workspaces", "root: /srv/symphony/state/ws", ""), "budget.state_dir"},
+		{"missing worker name", with("  name: linux\n", "  require_routing_label: true\n", ""), "worker.name"},
+		{"bad worker name", with("name: linux", "name: 'Linux Box'", ""), "worker.name"},
+		{"port out of range", minimal + "server:\n  port: 70000\n", "server.port"},
+		{"section not a mapping", minimal + "agent: 5\n", "agent"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := build(t, tc.front, nil)
+			if err == nil {
+				t.Fatalf("accepted, want an error on %s", tc.wantKey)
+			}
+			if cls, ok := keys(err)[tc.wantKey]; !ok || cls != workflow.ClassInvalidConfig {
+				t.Errorf("no %s error on key %q; got: %v", workflow.ClassInvalidConfig, tc.wantKey, err)
+			}
+		})
+	}
+}
+
+func TestCredentialLikeSandboxEnvRejected(t *testing.T) {
+	for _, name := range []string{"ANTHROPIC_API_KEY", "anthropic_auth_token", "CLAUDE_CODE_OAUTH_TOKEN",
+		"OPENAI_API_KEY", "GITHUB_TOKEN", "GH_TOKEN", "LINEAR_API_KEY"} {
+		_, err := build(t, with("backend: systemd", "backend: systemd\n  env: {"+name+": x}", ""), nil)
+		if _, ok := keys(err)["sandbox.env."+name]; !ok {
+			t.Errorf("%s accepted in sandbox.env: %v", name, err)
+		}
+	}
+	c := mustBuild(t, with("backend: systemd", "backend: systemd\n  env: {NODE_ENV: test, CLAUDE_CODE_USE_X: '1'}", ""))
+	if c.Sandbox.Env["NODE_ENV"] != "test" {
+		t.Errorf("harmless variable dropped: %v", c.Sandbox.Env)
+	}
+}
+
+func TestWorkflowPathMustNotBeInsideWorkspaceRoot(t *testing.T) {
+	def, err := workflow.Parse([]byte("---\n" + minimal + "\n---\nprompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, wantErr := range map[string]bool{
+		"/srv/agent/workspaces/GH-1/WORKFLOW.md":    true,
+		"/srv/agent/workspaces/WORKFLOW.md":         true,
+		"/srv/agent/workspaces-other/WORKFLOW.md":   false, // string prefix, different directory
+		"/etc/symphony/WORKFLOW.md":                 false,
+		"/srv/agent/workspaces/../conf/WORKFLOW.md": false,
+	} {
+		def.Path = path
+		_, err := Build(def, Options{})
+		got := false
+		var we *workflow.Error
+		for _, e := range flatten(err) {
+			if errors.As(e, &we) && we.Class == workflow.ClassPathUntrusted {
+				got = true
+			}
+		}
+		if got != wantErr {
+			t.Errorf("%s: untrusted = %v, want %v (err %v)", path, got, wantErr, err)
+		}
+	}
+}
+
+func flatten(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
+}
+
+func TestPerStateConcurrency(t *testing.T) {
+	c := mustBuild(t, minimal+"agent:\n  max_concurrent_agents_by_state:\n    ' In Progress ': 2\n    Rework: 0\n    Todo: many\n")
+	if got := c.Agent.MaxConcurrentAgentsByState; len(got) != 1 || got["in progress"] != 2 {
+		t.Errorf("by-state map = %v, want {in progress: 2}", got)
+	}
+	if len(c.Warnings) != 2 {
+		t.Errorf("warnings = %v, want two about ignored entries", c.Warnings)
+	}
+}
+
+func TestRequiredChecks(t *testing.T) {
+	c := mustBuild(t, minimal+"publish:\n  required_checks: [build, ' test ']\n")
+	if c.Publish.RequiredChecksFromBranchProtection || strings.Join(c.Publish.RequiredChecks, ",") != "build,test" {
+		t.Errorf("required checks = %+v", c.Publish)
+	}
+	c = mustBuild(t, minimal+"publish:\n  required_checks: []\n")
+	if c.Publish.RequiredChecksFromBranchProtection || len(c.Warnings) != 1 {
+		t.Errorf("explicit empty list: fromProtection=%v warnings=%v", c.Publish.RequiredChecksFromBranchProtection, c.Warnings)
+	}
+	c = mustBuild(t, minimal+"publish:\n  required_checks: branch-protection\n")
+	if !c.Publish.RequiredChecksFromBranchProtection {
+		t.Error("branch-protection string not honoured")
+	}
+}
+
+func TestNullableBudgets(t *testing.T) {
+	c := mustBuild(t, with("state_dir: /srv/symphony/state",
+		"state_dir: /srv/symphony/state\n  max_agent_seconds_per_day: null\n  max_tokens_per_day: 5000000", ""))
+	if c.Budget.MaxAgentSecondsPerDay != nil {
+		t.Errorf("explicit null not honoured: %d", *c.Budget.MaxAgentSecondsPerDay)
+	}
+	if c.Budget.MaxTokensPerDay == nil || *c.Budget.MaxTokensPerDay != 5000000 {
+		t.Errorf("max_tokens_per_day = %v", c.Budget.MaxTokensPerDay)
+	}
+}
+
+func TestAllErrorsReportedTogether(t *testing.T) {
+	_, err := build(t, "tracker:\n  kind: github\n", nil)
+	got := keys(err)
+	for _, want := range []string{"tracker.allowed_authors", "workspace.root", "workspace.repo",
+		"sandbox.backend", "sandbox.network.proxy", "verify.command", "budget.state_dir", "worker.name"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing error for %s; got %v", want, got)
+		}
+	}
+}
+
+func TestStallTimeoutMayBeDisabled(t *testing.T) {
+	c := mustBuild(t, minimal+"claude:\n  stall_timeout_ms: 0\n")
+	if c.Claude.StallTimeoutMS != 0 {
+		t.Errorf("stall_timeout_ms = %d, want 0", c.Claude.StallTimeoutMS)
+	}
+}

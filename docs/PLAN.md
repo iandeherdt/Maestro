@@ -36,6 +36,9 @@ the result itself, and opens a pull request for the owner to review and merge.
 4. Claude: subscription through a logged-in CLI.
 5. Board: existing product, GitHub first, Linear second. Beads is not used as the board.
 6. Mac worker: Unity and Xcode.
+7. GitHub: repositories and the Project board stay on the owner's personal account. The service
+   uses a GitHub App for the repository and a classic token with only the `project` scope for
+   the board (SPEC 12.5, user-owned Project).
 
 ## Phases
 
@@ -71,10 +74,6 @@ file, and the remaining items marked Open in phase0.md.
 
 ## Open questions for the owner
 
-- Where the repositories and the board live. Recommended: a free GitHub organization that owns
-  the target repositories and the Project, so the service needs no personal token at all. The
-  alternative is to keep everything under the personal account and give the service one extra
-  classic token limited to Projects.
 - Which board is used day to day once both adapters exist.
 - Whether the macOS guest is acceptable for Unity, or the weaker dedicated-user backend is wanted.
 - Whether to rename the repository, since Beads is no longer part of the design.
