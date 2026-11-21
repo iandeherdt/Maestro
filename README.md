@@ -9,15 +9,39 @@ pull requests for a human to review.
 
 ## Status
 
-Early. What exists: the workflow file loader, configuration validation, the scheduling core
-(polling, claims, retries, reconciliation, budgets) tested against a fake board and a fake agent,
-prompt construction with a strict template engine, the workspace manager, which talks to the
-sandbox launcher through a narrow request format, live reload of the workflow file, the service
-log format, the loopback status API, the attempt loop that takes an issue from prompt to
-pull request through the gates, the GitHub adapter in label mode (run once against a real
-repository), the diff policy with the secret scan, the import of the agent's commits into
-the service's own mirror, and the minting of short-lived GitHub App tokens.
-The service does not run anything yet: there is no sandbox, agent runner or publisher.
+Not usable yet. The parts are being built and tested one by one, and nothing runs an agent so far.
+Last updated 2026-11-21.
+
+Built and tested:
+
+| Part | State |
+|---|---|
+| Workflow file, configuration, live reload | Done |
+| Scheduling: polling, claims, retries, budgets, pause | Done, against a fake board and a fake agent |
+| Prompt construction with a strict template engine | Done |
+| Attempt loop: turns, verify, publish, hand-off | Done, against fakes |
+| Workspace manager and the request format for the sandbox | Done, against a fake launcher |
+| GitHub board, state kept in labels | Done, run once against a real repository |
+| Diff policy and secret scan | Done |
+| Import of the agent's commits and diff computation | Done, against real Git |
+| GitHub App tokens | Done, not yet tried against github.com |
+| Log format and loopback status API | Done |
+
+Not built yet:
+
+| Part | Needs |
+|---|---|
+| Push and pull request | In progress |
+| Checks gate and hand-off watch | |
+| Wiring into `symphony run`, and the `status`, `pause`, `doctor` commands | |
+| Claude Code runner | One real run on a machine with the CLI logged in |
+| Sandbox and launcher for Linux | The RHEL server |
+| Mac worker | The Mac |
+| Linear board | |
+
+The order of work and the decisions taken are in [docs/PLAN.md](docs/PLAN.md).
+
+## Try what exists
 
 ```sh
 go build ./cmd/symphony
