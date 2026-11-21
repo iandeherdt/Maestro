@@ -531,6 +531,11 @@ REQUIRED, as upstream Section 6.2:
 - An invalid reload MUST NOT crash the service. Keep the last known good configuration and emit an
   operator-visible error (log, API, and `symphony status`).
 - Re-validate defensively before each dispatch.
+- The file is checked at the start of every tick, before reconciliation, by comparing a hash of
+  its content. While the file is invalid, dispatch is skipped and reconciliation continues with
+  the last known good configuration. Fixing the file recovers without a restart.
+- When `worker.name` changes, the routing label derived from it is held back together with the
+  name, so that a worker never starts taking another worker's issues after an edit.
 
 Restart-required keys (a change is logged as ignored until restart): `workspace.root`,
 `workspace.repo`, `sandbox.backend`, `budget.state_dir`, `worker.name`, `server.port`,
@@ -1650,6 +1655,10 @@ As upstream Section 13.7, loopback only:
 - `POST /api/v1/refresh`: queue an immediate tick. Requires a header `X-Symphony-Local: 1`, so
   that a web page open in a local browser cannot trigger it with a simple cross-site request.
 - No other mutating endpoint. Pause and resume are CLI-only.
+- Requests whose `Host` is not a loopback name or address are refused with `403`, which defeats
+  DNS rebinding. Requests carrying a non-loopback `Origin` are refused too. The server never
+  sends a cross-origin permission header. Responses carry a restrictive content security policy
+  and are not cacheable.
 - Unsupported methods return `405`. Errors use `{"error":{"code","message"}}`.
 
 ### 16.6 Token Accounting
