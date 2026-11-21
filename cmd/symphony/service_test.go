@@ -314,6 +314,15 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 		t.Fatalf("%v\n%s", err, o)
 	}
 
+	// A repository without the base branch (an empty one) is reported at
+	// the start, not as a failing ticket.
+	gitIn(t, root, "--git-dir", remote, "branch", "-m", "main", "other")
+	err = serve(ctx, in, gh, log, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), `has no branch "main"`) {
+		t.Fatalf("without the base branch: %v", err)
+	}
+	gitIn(t, root, "--git-dir", remote, "branch", "-m", "other", "main")
+
 	hub.label("ian", "status:todo")
 	hub.label("ian", "run:"+worker)
 	runCtx, stop := context.WithCancel(ctx)

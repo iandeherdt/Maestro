@@ -42,7 +42,26 @@ type Error struct {
 	Output string
 }
 
-func (e *Error) Error() string { return e.Category + ": " + e.Msg }
+// Error includes the last line the failed step printed, because "exited
+// with status 128" alone does not tell a person what to fix. The line is
+// untrusted text: it is shortened and stripped of control characters.
+func (e *Error) Error() string {
+	msg := e.Category + ": " + e.Msg
+	lines := strings.Split(strings.TrimSpace(e.Output), "\n")
+	last := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, lines[len(lines)-1])
+	if last = strings.TrimSpace(last); last != "" {
+		if r := []rune(last); len(r) > 300 {
+			last = string(r[:300])
+		}
+		msg += ": " + last
+	}
+	return msg
+}
 
 // CategoryOf returns the category of err: a workspace category,
 // sandbox_launch_failed, or "".

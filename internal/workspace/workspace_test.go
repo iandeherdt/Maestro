@@ -290,3 +290,18 @@ func TestOutputTailIsCapped(t *testing.T) {
 
 // The scheduler removes workspaces through this interface.
 var _ orchestrator.Workspaces = (*Manager)(nil)
+
+func TestErrorShowsTheLastLineOfTheOutput(t *testing.T) {
+	e := &Error{Category: PopulateFailed, Msg: "clone exited with status 128",
+		Output: "Cloning\nfatal: 'origin/main' is not a commit\x1b[31m\n\n"}
+	if got := e.Error(); got != "workspace_populate_failed: clone exited with status 128: fatal: 'origin/main' is not a commit [31m" {
+		t.Errorf("%q", got)
+	}
+	if got := (&Error{Category: HookFailed, Msg: "x"}).Error(); got != "workspace_hook_failed: x" && got != HookFailed+": x" {
+		t.Errorf("%q", got)
+	}
+	long := (&Error{Category: HookFailed, Msg: "x", Output: strings.Repeat("é", 1000)}).Error()
+	if n := len([]rune(long)); n > 350 {
+		t.Errorf("the line was not shortened: %d characters", n)
+	}
+}
