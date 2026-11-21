@@ -1295,6 +1295,10 @@ Provider keys:
 - `project` (object, for `state_source: project`): `owner`, `number`, `status_field` (default
   `Status`), `token` (default: the same token; a separate token MAY be needed, see below).
 - `state_label_prefix` (for `state_source: labels`): default `status:`.
+- `bot_login` (for `state_source: labels`): REQUIRED. The login the service acts as, for example
+  `my-app[bot]`. Used for the two rules marked "own account" below.
+- `token` MUST be a `$VARIABLE` reference. A literal value is rejected, because the workflow file
+  lives in a repository.
 
 Identity and fields:
 
@@ -1305,6 +1309,12 @@ Identity and fields:
 - `blocked_by`: from `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`.
 - Pull requests returned by the Issues API are skipped. Closed issues are terminal regardless of
   the state source.
+- A closed issue is reported in the first configured terminal state. An open issue without
+  exactly one state label is reported in the state `No Status`, which is neither active nor
+  terminal.
+- `fetch_issues_by_ids` resolves an ID through the issues this process has already returned. An
+  unknown ID, an issue that no longer exists, and an issue number that now belongs to a different
+  node ID are all omitted, which the scheduler treats as "missing".
 
 State mapping:
 
@@ -1322,6 +1332,11 @@ Approval provenance:
   `allowed_authors` (to verify: the actor field on timeline events). On GitHub, applying a label
   requires the Triage role or higher, so an outside contributor cannot approve work. The timeline check also covers a collaborator who is
   not on the allowlist.
+  A label with no `labeled` event, or an event without an actor, is not approval. Own account: the
+  state label, and only the state label, may also have been applied by `bot_login`, and only for
+  a state the service itself writes. The first active state is the approval state and can never
+  be one of those, which is checked at startup. Results are cached per issue until its
+  `updated_at` changes.
 - Project status: changing a Project field requires write access to the Project. The adapter
   profile documents that the actor of a status change is not verified (to verify: whether the API
   exposes it), so the Project MUST be writable only by allowlisted accounts, and `doctor` checks
@@ -1347,6 +1362,14 @@ Credentials:
 
 Requests: REST with pagination of 100, conditional requests (ETag) for polling, and respect for
 rate-limit headers (`tracker_rate_limited` with `retry_after_ms`).
+
+Request safety: the token is sent only to the configured API origin. Redirects are not followed,
+and a pagination link that points to another origin fails the call with `tracker_pagination`.
+`upsert_status_comment` edits only a comment written by `bot_login`, so a marker planted by
+someone else is ignored. Blockers are cached for five minutes. If the dependencies endpoint does
+not exist for the repository, blockers are not checked and a warning is logged once.
+
+Not implemented yet: `state_source: project`, and conditional requests.
 
 ### 12.6 Linear Adapter Profile
 
