@@ -1348,11 +1348,11 @@ Approval provenance:
   be one of those, which is checked at startup. Results are cached per issue until its
   `updated_at` changes.
 - Project status: changing a Project field requires write access to the Project. The GraphQL
-  field value of the status carries a `creator` and an `updatedAt` (confirmed on a real Project,
-  where a card placed by the Project's own workflow reports `github-project-automation`). In
-  `project` mode the adapter MUST require that the creator of the approval status is in
-  `allowed_authors`. A status set by a Project workflow is therefore not approval. The Project
-  SHOULD still be writable only by allowlisted accounts.
+  field value of the status carries a `creator` and an `updatedAt`, but the creator does not
+  identify who moved a card: on a real Project it reported `github-project-automation` both for
+  a card the Project placed itself and after the owner moved that card. The actor of a status
+  change is therefore not verified. The Project MUST be writable only by allowlisted accounts,
+  and `doctor` checks the collaborator list where the API allows.
 
 Public repository rules:
 
@@ -1624,6 +1624,17 @@ Repository credential: a GitHub App owned by the operator and installed only on 
 repositories. The control zone holds the App's private key and mints short-lived installation
 tokens. Wherever this document says "repository token", it means such a token.
 
+Key and tokens:
+
+- The private key is read from a file that MUST be a regular file with no access for group or
+  others. A looser mode, a symbolic link or a key shorter than 2048 bits fails startup.
+- A token is requested for the repositories and permissions its user needs, not for everything
+  the installation has: the tracker adapter asks for Issues, the publisher for Contents and
+  Pull requests.
+- A token is renewed ten minutes before it expires. If renewal fails, a token that is still
+  valid stays in use. The signed assertion is never sent across a redirect.
+- Errors from this path never contain the key, the assertion, a token or the server's text.
+
 Reasons a personal token is not used:
 
 - A pull request cannot be approved by its author. Pull requests opened with the operator's own
@@ -1863,8 +1874,7 @@ Stated so the operator can accept or reject them:
 - R5 The verify command executes agent-modified scripts. It runs in the sandbox with no network,
   so the effect is limited to a false pass, which CI on the protected branch definition is there
   to catch.
-- R6 Project status changes are attributed through the `creator` of the field value (Section
-  12.5). This rests on one observation and is checked again when `project` mode is built.
+- R6 Project status changes are not attributable on GitHub (Section 12.5).
 
 ### 18.6 Supply Chain of the Service Itself
 
