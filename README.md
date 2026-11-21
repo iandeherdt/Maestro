@@ -189,6 +189,7 @@ Last updated 2026-11-21.
 | Workspace manager | Done, tested against a fake sandbox |
 | GitHub board with labels | Done, run once against a real repository |
 | Export and verify steps, mirror sync | Done, tested against a fake sandbox and local Git |
+| Egress proxy (allowlist of hosts the agent may reach) | Done, tested locally |
 | Diff policy and secret scan | Done |
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
