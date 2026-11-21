@@ -138,8 +138,26 @@ continues.
 
 If something goes wrong, the service writes why in a comment on the issue and in the terminal.
 
-Not built yet: `symphony status`, `pause`, `resume`, `unblock` and `doctor`, and running as a
-background service that starts with the machine.
+Day to day, from any terminal:
+
+```sh
+symphony status              # what is being worked on, what is waiting, today's usage
+symphony pause on holiday    # finish what is running, start nothing new
+symphony resume
+```
+
+To stop needing a terminal window:
+
+```sh
+symphony service install     # run in the background, start when you log in
+symphony service uninstall   # back to running it by hand
+```
+
+It shows the file it will write and asks before it does. The background service runs as you, and
+the agent still works in Docker, so Docker has to be running.
+
+Not built yet: `symphony unblock` and `symphony doctor`. To give a blocked ticket another
+chance, put `status:todo` back on it.
 
 ## Configure
 
@@ -218,10 +236,11 @@ Last updated 2026-11-21.
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Docker sandbox (containers, isolated network, proxies, image) | Done, tested with real containers. The image with the real Claude Code is built in CI. |
-| `symphony image`, `symphony login`, `symphony run` | Done. The whole path from an issue to a pull request is tested in real containers against a stand-in for GitHub and for Claude Code. Not yet run with the real Claude Code and github.com. |
-| `symphony status`, `pause`, `resume`, `unblock`, `doctor`, start-up self-test | Not started |
-| Running as a background service (systemd, launchd) | Not started |
-| Claude Code runner | Written from the CLI documentation and tested against a scripted agent. Needs one real run with a login. |
+| `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
+| `symphony status`, `pause`, `resume` | Done, tested against the running service |
+| Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
+| `symphony unblock`, `doctor`, start-up self-test | Not started |
+| Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board | Not started |

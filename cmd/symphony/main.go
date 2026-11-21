@@ -35,6 +35,11 @@ const usage = `usage:
   symphony image                          build the sandbox image (needs Docker)
   symphony login                          sign Claude Code in inside the sandbox
   symphony run                            start the service, stop with Ctrl-C
+  symphony status                         what the running service is doing
+  symphony pause [reason]                 start no new tickets until resume
+  symphony resume                         continue after a pause
+  symphony service install                run in the background, start at login
+  symphony service uninstall              stop running in the background
   symphony version                        print the version
 
 The usual order the first time: setup, image, login, run.`
@@ -53,6 +58,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runService(args[1:], stdout, stderr)
 		case "image":
 			return runImage(args[1:], stdout, stderr)
+		case "status", "pause", "resume":
+			return runControl(args[0], args[1:], stdout, stderr)
+		case "service":
+			return runBackground(args[1:], os.Stdin, stdout, stderr)
 		case "login":
 			return runLogin(args[1:], os.Stdin, stdout, stderr)
 		}

@@ -342,9 +342,39 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 			t.Fatalf("no hand-off. labels %v, unknown requests %v, comments %v\n%s", hub.labels, hub.unknown, hub.comments, logs.String())
 		}
 	}
+	// The commands of another terminal reach the running service.
+	var errb bytes.Buffer
+	var statusOut bytes.Buffer
+	if code := run([]string{"status", "--dir", dir, workflow}, &statusOut, &errb); code != 0 || !strings.Contains(statusOut.String(), "Symphony is running (worker") {
+		t.Errorf("status: %d %s %s", code, statusOut.String(), errb.String())
+	}
+	if code := run([]string{"pause", "--dir", dir, "--file", workflow, "back", "on", "monday"}, io.Discard, &errb); code != 0 {
+		t.Errorf("pause: %d %s", code, errb.String())
+	}
+	paused := false
+	for i := 0; i < 50 && !paused; i++ {
+		statusOut.Reset()
+		run([]string{"status", "--dir", dir, workflow}, &statusOut, &errb)
+		paused = strings.Contains(statusOut.String(), "PAUSED: back on monday")
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !paused {
+		t.Errorf("the pause did not show:\n%s", statusOut.String())
+	}
+	// A second service for the same installation is refused.
+	if err := serve(ctx, in, gh, log, io.Discard); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Errorf("a second service: %v", err)
+	}
+	if code := run([]string{"resume", "--dir", dir, workflow}, io.Discard, &errb); code != 0 {
+		t.Errorf("resume: %d %s", code, errb.String())
+	}
+
 	stop()
 	if err := <-done; err != nil {
 		t.Fatalf("stopping: %v", err)
+	}
+	if code := run([]string{"status", "--dir", dir, workflow}, io.Discard, &errb); code != 1 || !strings.Contains(errb.String(), "not running") {
+		t.Errorf("status after the stop: %d %s", code, errb.String())
 	}
 
 	hub.mu.Lock()
