@@ -462,6 +462,9 @@ func (o *Orchestrator) pause(reason string) {
 // comment writes the status comment. Failure is logged and does not change
 // scheduling state. untrusted is text from the agent or a tool.
 func (o *Orchestrator) comment(ctx context.Context, is issue.Issue, fixed, untrusted string) {
+	// The same sentence goes to the log, so that the terminal shows a
+	// ticket's progress and not only its failures.
+	o.d.Log.Info("status", "issue", is.Identifier, "text", fixed)
 	body := fixed
 	if untrusted != "" {
 		body += "\n\n" + tracker.Fence(untrusted)
