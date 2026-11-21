@@ -449,3 +449,126 @@ func TestEmptyDiff(t *testing.T) {
 		t.Fatalf("%+v %v", d, err)
 	}
 }
+
+func (l *lab) remote() string {
+	l.t.Helper()
+	dir := filepath.Join(l.root, "remote.git")
+	if _, err := os.Stat(dir); err != nil {
+		l.run(l.root, "clone", "-q", "--bare", filepath.Join(l.root, "seed"), dir)
+	}
+	l.mirror.AllowFileRemote = true
+	return dir
+}
+
+func (l *lab) importNew(file string) string {
+	l.t.Helper()
+	l.write(file, "x\n")
+	l.commit("add " + file)
+	imp, err := l.mirror.Import(ctx, l.bundle(), "k", l.base)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	return imp.Head
+}
+
+func TestPush(t *testing.T) {
+	l := newLab(t)
+	remote := l.remote()
+	first := l.importNew("a")
+	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.run(remote, "rev-parse", "refs/heads/symphony/gh-1"); got != first {
+		t.Fatalf("remote branch at %s", got)
+	}
+	if got := l.run(remote, "rev-parse", "refs/heads/main"); got != l.base {
+		t.Fatalf("the base branch moved to %s", got)
+	}
+	// Pushing the same head again is a no-op.
+	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A new attempt that rewrote its history replaces the branch.
+	l.run(l.work, "reset", "-q", "--hard", l.base)
+	second := l.importNew("b")
+	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.run(remote, "rev-parse", "refs/heads/symphony/gh-1"); got != second {
+		t.Fatalf("remote branch at %s after the second push", got)
+	}
+
+	// Someone else pushes to the branch. The service must not overwrite it.
+	l.run(remote, "update-ref", "refs/heads/symphony/gh-1", first)
+	l.run(l.work, "reset", "-q", "--hard", l.base)
+	l.importNew("c")
+	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("got %v", err)
+	}
+	if got := l.run(remote, "rev-parse", "refs/heads/symphony/gh-1"); got != first {
+		t.Fatalf("someone else's commits were overwritten: %s", got)
+	}
+}
+
+func TestFirstPushRefusesAnExistingBranch(t *testing.T) {
+	l := newLab(t)
+	remote := l.remote()
+	l.run(remote, "update-ref", "refs/heads/symphony/gh-1", l.base)
+	l.importNew("a")
+	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("got %v", err)
+	}
+	// After the record is dropped and the remote branch is gone, a push works again.
+	l.run(remote, "update-ref", "-d", "refs/heads/symphony/gh-1")
+	if err := l.mirror.ForgetPush(ctx, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPushArguments(t *testing.T) {
+	l := newLab(t)
+	remote := l.remote()
+	l.importNew("a")
+	for _, b := range []string{"", "-x", "a..b", "a b", "refs/heads/../x", "x.lock", "a/.hidden", "a//b", "a/", "feature@{1}", "a:b", "a~1"} {
+		if err := l.mirror.Push(ctx, remote, "k", b, "tok"); err == nil {
+			t.Errorf("branch %q accepted", b)
+		}
+	}
+	l.mirror.AllowFileRemote = false
+	for _, u := range []string{remote, "http://github.com/a/b.git", "https://user:pw@github.com/a/b.git", "ssh://git@github.com/a/b", "ext::sh -c x", "git@github.com:a/b.git"} {
+		if err := l.mirror.Push(ctx, u, "k", "symphony/x", "tok"); err == nil || !strings.Contains(err.Error(), "https URL") {
+			t.Errorf("remote %q: %v", u, err)
+		}
+	}
+	if err := l.mirror.Push(ctx, "https://example.invalid/a/b.git", "other", "symphony/x", "tok"); err == nil || !strings.Contains(err.Error(), "nothing was imported") {
+		t.Errorf("push without an import: %v", err)
+	}
+}
+
+func TestAskpassHelperHoldsNoSecret(t *testing.T) {
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "askpass")
+	os.WriteFile(helper, []byte(askpass), 0o700)
+	ask := func(prompt string) string {
+		cmd := exec.Command(helper, prompt)
+		cmd.Env = []string{"SYMPHONY_PUSH_TOKEN=tok$en`x`'\""}
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	if got := ask("Username for 'https://github.com': "); got != "x-access-token\n" {
+		t.Errorf("username %q", got)
+	}
+	if got := ask("Password for 'https://x-access-token@github.com': "); got != "tok$en`x`'\"\n" {
+		t.Errorf("password %q", got)
+	}
+	if strings.Contains(askpass, "tok") && !strings.Contains(askpass, "x-access-token") {
+		t.Error("unexpected helper content")
+	}
+}

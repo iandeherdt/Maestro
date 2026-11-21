@@ -25,13 +25,13 @@ Built and tested:
 | Diff policy and secret scan | Done |
 | Import of the agent's commits and diff computation | Done, against real Git |
 | GitHub App tokens | Done, not yet tried against github.com |
+| Publish: policy, push with a lease, pull request | Done, against real Git and a fake GitHub API |
 | Log format and loopback status API | Done |
 
 Not built yet:
 
 | Part | Needs |
 |---|---|
-| Push and pull request | In progress |
 | Checks gate and hand-off watch | |
 | Wiring into `symphony run`, and the `status`, `pause`, `doctor` commands | |
 | Claude Code runner | One real run on a machine with the CLI logged in |

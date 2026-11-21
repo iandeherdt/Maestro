@@ -46,6 +46,8 @@ type Mirror struct {
 	MaxBundleBytes int64
 	// MaxCommits bounds the number of new commits. Default 500.
 	MaxCommits int
+	// AllowFileRemote lets Push use a local path as the remote. Tests only.
+	AllowFileRemote bool
 }
 
 var (
@@ -59,6 +61,10 @@ func IncomingRef(workspaceKey string) string { return "refs/symphony/incoming/" 
 // git runs one git command in the mirror with a configuration that takes
 // nothing from the machine or the user and can execute nothing.
 func (m *Mirror) git(ctx context.Context, stdin io.Reader, limit int64, args ...string) ([]byte, error) {
+	return m.gitEnv(ctx, stdin, limit, nil, args...)
+}
+
+func (m *Mirror) gitEnv(ctx context.Context, stdin io.Reader, limit int64, extraEnv []string, args ...string) ([]byte, error) {
 	bin := m.Git
 	if bin == "" {
 		bin = "git"
@@ -84,6 +90,8 @@ func (m *Mirror) git(ctx context.Context, stdin io.Reader, limit int64, args ...
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0",
 		"GIT_ATTR_NOSYSTEM=1", "GIT_ASKPASS=/bin/false", "GIT_NO_REPLACE_OBJECTS=1",
 	}
+	// Later entries win, so a caller can replace GIT_ASKPASS.
+	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdin = stdin
 	out := &capped{limit: limit}
 	var stderr capped
@@ -426,4 +434,109 @@ func (m *Mirror) Diff(ctx context.Context, baseSHA, head string, lim Limits) (Di
 		}
 	}
 	return d, nil
+}
+
+// PushedRef records the head last pushed for a workspace. It is the lease
+// for the next push.
+func PushedRef(workspaceKey string) string { return "refs/symphony/pushed/" + workspaceKey }
+
+// ErrBranchMoved means the remote branch is not where the service left it:
+// someone else pushed to it. The service does not overwrite that.
+var ErrBranchMoved = errors.New("the remote branch was changed by someone else since the last push")
+
+var branchRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$`)
+
+// ValidBranch reports whether name is a branch name the service is willing
+// to push: plain characters, no component git treats specially.
+func ValidBranch(name string) bool {
+	if !branchRE.MatchString(name) || strings.Contains(name, "..") || strings.Contains(name, "//") ||
+		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	for _, seg := range strings.Split(name, "/") {
+		if strings.HasPrefix(seg, ".") || strings.HasSuffix(seg, ".lock") {
+			return false
+		}
+	}
+	return true
+}
+
+// askpass answers git's credential prompts from the environment. The file
+// holds no secret, so nothing is left on disk if the process dies.
+const askpass = `#!/bin/sh
+case "$1" in
+Username*) printf '%s\n' x-access-token ;;
+*) printf '%s\n' "$SYMPHONY_PUSH_TOKEN" ;;
+esac
+`
+
+// Push sends the imported head of a workspace to a branch of the remote.
+// The first push requires that the branch does not exist. A later push
+// replaces the branch only if it is still at the head pushed before.
+func (m *Mirror) Push(ctx context.Context, remoteURL, workspaceKey, branch, token string) error {
+	if !keyRE.MatchString(workspaceKey) || strings.Contains(workspaceKey, "..") {
+		return fmt.Errorf("invalid workspace key")
+	}
+	if !ValidBranch(branch) {
+		return fmt.Errorf("invalid branch name")
+	}
+	scheme := "https"
+	switch {
+	case strings.HasPrefix(remoteURL, "https://") && !strings.ContainsAny(remoteURL, "@ \t\n"):
+	case m.AllowFileRemote && strings.HasPrefix(remoteURL, "/"):
+		scheme = "file"
+	default:
+		return fmt.Errorf("the remote must be an https URL without credentials")
+	}
+	out, err := m.git(ctx, nil, 0, "rev-parse", "--verify", "--quiet", IncomingRef(workspaceKey)+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("nothing was imported for this workspace: %w", err)
+	}
+	head := strings.TrimSpace(string(out))
+	expected := ""
+	if out, err := m.git(ctx, nil, 0, "rev-parse", "--verify", "--quiet", PushedRef(workspaceKey)+"^{commit}"); err == nil {
+		expected = strings.TrimSpace(string(out))
+	} else if !exited(err) {
+		return err
+	}
+	if expected == head {
+		return nil // already pushed
+	}
+
+	dir, err := os.MkdirTemp(m.Dir, "push-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	helper := filepath.Join(dir, "askpass")
+	if err := os.WriteFile(helper, []byte(askpass), 0o700); err != nil {
+		return err
+	}
+	ref := "refs/heads/" + branch
+	// An empty expected value means "the branch must not exist".
+	out, err = m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "SYMPHONY_PUSH_TOKEN=" + token},
+		"-c", "protocol."+scheme+".allow=always", "-c", "http.followRedirects=false",
+		"push", "--porcelain", "--no-verify", "--no-recurse-submodules",
+		"--force-with-lease="+ref+":"+expected, remoteURL, head+":"+ref)
+	if err != nil {
+		if exited(err) {
+			if bytes.Contains(out, []byte("(stale info)")) {
+				return ErrBranchMoved
+			}
+			return fmt.Errorf("the push was rejected by the remote")
+		}
+		return err
+	}
+	_, err = m.git(ctx, nil, 0, "update-ref", PushedRef(workspaceKey), head)
+	return err
+}
+
+// ForgetPush drops the record of an earlier push, for a workspace whose
+// branch was deleted on the remote (for example after a merge).
+func (m *Mirror) ForgetPush(ctx context.Context, workspaceKey string) error {
+	if !keyRE.MatchString(workspaceKey) || strings.Contains(workspaceKey, "..") {
+		return fmt.Errorf("invalid workspace key")
+	}
+	_, err := m.git(ctx, nil, 0, "update-ref", "-d", PushedRef(workspaceKey))
+	return err
 }

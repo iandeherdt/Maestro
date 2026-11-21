@@ -1603,11 +1603,20 @@ Push (control zone, from the mirror):
 - `refs/symphony/incoming/<key>` to `refs/heads/<branch_name>` on the target repository.
 - Force is permitted only with a lease on the previously pushed head, and only for refs under
   `publish.branch_prefix`. Startup validation refuses a prefix that could match the base branch.
-- The installation token is supplied through an ephemeral `GIT_ASKPASS` helper.
+- The lease is the head the service itself pushed last, which it records in the mirror under
+  `refs/symphony/pushed/<key>`. The first push for a workspace requires that the branch does not
+  exist. If the branch is anywhere else, someone else pushed to it: the push fails and nothing is
+  overwritten.
+- The installation token is supplied through an ephemeral `GIT_ASKPASS` helper. The helper file
+  contains no secret: it prints the token from the environment of the one `git push` process.
+- The remote is an `https` URL without credentials, redirects are not followed, and every other
+  transport stays disabled.
 
 Pull request (GitHub REST):
 
 - Looked up by head branch. Created if absent, updated if present. One pull request per issue.
+  An open pull request for the branch that targets another base is an error, not something the
+  service retargets.
 - Base: `workspace.base_branch`. Draft when `publish.draft_until_green`.
 - Title: `<identifier>: <issue title>`, truncated to 120 characters, control characters removed.
 - Body, from a fixed template:
@@ -1616,6 +1625,7 @@ Pull request (GitHub REST):
   2. policy flags, each with the affected paths;
   3. proof of work: verify command, exit status, duration; worker name; attempt and turn counts;
   4. agent summary: the agent's final message, quoted as untrusted text under Section 12.2 rules;
+     (not yet passed to the publisher; the section is omitted until it is)
   5. a footer identifying the service.
 - The orchestrator never approves, merges, enables auto-merge, dismisses reviews or edits branch
   protection.
