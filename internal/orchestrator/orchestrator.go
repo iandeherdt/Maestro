@@ -354,7 +354,7 @@ func (o *Orchestrator) stateSlotFree(is issue.Issue) bool {
 // ---- dispatch -------------------------------------------------------------
 
 // dispatch claims the issue and starts a worker (SPEC 19.4).
-func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int, kind string, feedback []string, writeFailures int) {
+func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int, kind string, feedback []issue.Feedback, writeFailures int) {
 	o.claimed[is.ID] = true
 	delete(o.retries, is.ID)
 
@@ -635,7 +635,7 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 }
 
 // failed counts a failure attempt, then retries or blocks.
-func (o *Orchestrator) failed(ctx context.Context, e *runEntry, kind, category, message string, feedback []string) {
+func (o *Orchestrator) failed(ctx context.Context, e *runEntry, kind, category, message string, feedback []issue.Feedback) {
 	is := e.issue
 	n := o.d.Budget.IncFailure(is.ID)
 	o.persist()

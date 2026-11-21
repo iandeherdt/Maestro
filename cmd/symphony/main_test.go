@@ -51,3 +51,24 @@ func TestCheckUsesDefaultPath(t *testing.T) {
 		t.Errorf("exit %d, stderr %q; want missing_workflow_file for ./WORKFLOW.md", code, errOut.String())
 	}
 }
+
+func TestCheckRejectsBadTemplate(t *testing.T) {
+	example, err := os.ReadFile(filepath.Join("..", "..", "examples", "WORKFLOW.example.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"unknown variable": "Fix {{ issue.titel }}",
+		"unknown filter":   "Fix {{ issue.title | shell }}",
+		"include tag":      "{% include 'other' %}",
+	} {
+		path := filepath.Join(t.TempDir(), "WORKFLOW.md")
+		if err := os.WriteFile(path, append(example, []byte("\n"+body+"\n")...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		if code := run([]string{"check", path}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "template_render_error") {
+			t.Errorf("%s: exit %d, stderr %q", name, code, errOut.String())
+		}
+	}
+}

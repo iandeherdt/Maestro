@@ -9,6 +9,8 @@ import (
 	"os"
 
 	"github.com/iandeherdt/Symphony-beads/internal/config"
+	"github.com/iandeherdt/Symphony-beads/internal/issue"
+	"github.com/iandeherdt/Symphony-beads/internal/prompt"
 	"github.com/iandeherdt/Symphony-beads/internal/workflow"
 )
 
@@ -35,6 +37,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Build(def, config.Options{Env: os.Getenv, HomeDir: home})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	// Parse the prompt template and render it once with sample data, so that
+	// an unknown variable, filter or tag is reported here and not at the
+	// first dispatch.
+	pb, err := prompt.New(def.PromptTemplate)
+	if err == nil {
+		_, err = pb.First(prompt.Input{
+			Issue:      issue.Issue{ID: "sample", Identifier: "SAMPLE-1", Title: "Sample", State: "Todo"},
+			WorkerName: cfg.Worker.Name, RepoName: cfg.Workspace.Repo,
+			BaseBranch: cfg.Workspace.BaseBranch, Branch: cfg.Publish.BranchPrefix + "SAMPLE-1",
+		})
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", prompt.RenderError, err)
 		return 1
 	}
 	for _, w := range cfg.Warnings {

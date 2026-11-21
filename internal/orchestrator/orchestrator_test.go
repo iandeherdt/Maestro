@@ -381,7 +381,7 @@ func TestContinuationAndGateRetries(t *testing.T) {
 	}
 	e.after(time.Second)
 	e.wantStarts(2)
-	e.exit(Outcome{Kind: Rejected, Category: "verify_failed", Feedback: []string{"2 tests failed"}})
+	e.exit(Outcome{Kind: Rejected, Category: "verify_failed", Feedback: []issue.Feedback{{Source: "verify", Body: "2 tests failed"}}})
 	if r := e.retry("id-1"); r.Kind != KindGate || r.DueAt.Sub(e.clock.Now()) != time.Second {
 		t.Fatalf("gate retry = %+v", r)
 	}
@@ -390,7 +390,7 @@ func TestContinuationAndGateRetries(t *testing.T) {
 	}
 	e.after(time.Second)
 	e.wantStarts(3)
-	if a := e.w.last().attempt; a.RetryKind != KindGate || len(a.Feedback) != 1 || a.Feedback[0] != "2 tests failed" {
+	if a := e.w.last().attempt; a.RetryKind != KindGate || len(a.Feedback) != 1 || a.Feedback[0].Body != "2 tests failed" {
 		t.Fatalf("feedback not carried: %+v", a)
 	}
 }

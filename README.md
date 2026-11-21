@@ -9,8 +9,9 @@ pull requests for a human to review.
 
 ## Status
 
-Early. What exists: the workflow file loader, configuration validation, and the scheduling core
-(polling, claims, retries, reconciliation, budgets), tested against a fake board and a fake agent.
+Early. What exists: the workflow file loader, configuration validation, the scheduling core
+(polling, claims, retries, reconciliation, budgets) tested against a fake board and a fake agent,
+and prompt construction with a strict template engine.
 The service does not run anything yet: there is no sandbox, agent runner, board adapter or
 publisher.
 
