@@ -32,6 +32,7 @@ import (
 	"github.com/iandeherdt/Symphony-beads/internal/logging"
 	"github.com/iandeherdt/Symphony-beads/internal/mirror"
 	"github.com/iandeherdt/Symphony-beads/internal/orchestrator"
+	"github.com/iandeherdt/Symphony-beads/internal/plan"
 	"github.com/iandeherdt/Symphony-beads/internal/proxy"
 	"github.com/iandeherdt/Symphony-beads/internal/publish"
 	"github.com/iandeherdt/Symphony-beads/internal/reload"
@@ -523,8 +524,20 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} }},
 		Gates: &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub},
 	}
+	// The planning stage needs a board. The names of its states are read
+	// at start; changing them takes a restart.
+	var plans orchestrator.Plans
+	if onBoard && cfg.Tracker.PlanningState != "" {
+		plansDir, err := plan.OpenStore(filepath.Join(cfg.Budget.StateDir, "plans"))
+		if err != nil {
+			return err
+		}
+		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: trk, PlanningState: cfg.Tracker.PlanningState,
+			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0]}
+		wk.Planning, plans = desk, desk
+	}
 	orch := orchestrator.New(cur.config(), orchestrator.Deps{
-		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Log: log,
+		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Plans: plans, Log: log,
 		Preflight: func() (*config.Config, error) {
 			l, err := in.source.Check()
 			if l == nil {
@@ -558,6 +571,10 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if onBoard {
 		fmt.Fprintf(stdout, "It looks at the board every %d seconds. To give it a ticket: put an issue of %s on the board,\n", cfg.Polling.IntervalMS/1000, cfg.Workspace.Repo)
 		fmt.Fprintf(stdout, "set the card's Worker to %s, and move the card to the column %s.\n", cfg.Worker.Name, cfg.Tracker.ActiveStates[0])
+		if plans != nil {
+			fmt.Fprintf(stdout, "For something bigger, move the card to %s instead: an agent asks you questions on the issue and proposes\n", cfg.Tracker.PlanningState)
+			fmt.Fprintf(stdout, "a plan of small tasks. Move the card to %s to approve the plan.\n", cfg.Tracker.PlannedState)
+		}
 	} else {
 		fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
 		fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))

@@ -329,6 +329,10 @@ and `policy` MUST fail validation, because a typo there can silently disable a c
 - `in_progress_state` (string): default `"In Progress"`. MUST be active.
 - `blocked_state` (string): default `"Blocked"`. MUST NOT be active or terminal.
 - `done_state` (string): default `"Done"`. MUST be terminal.
+- `planning_state` (string): default `"Idea"` with the GitHub tracker and `state_source: project`,
+  otherwise empty, which switches the planning stage off (Section 22). It is polled like an active
+  state and MUST NOT be one of the other configured states.
+- `planned_state` (string): default `"Planned"`. MUST be a state of its own.
 - `allowed_authors` (list of provider identities): REQUIRED, non-empty. Issues created by anyone
   else are never dispatchable.
 - `allowed_commenters` (list): default equals `allowed_authors`. Only their comments are ever shown
@@ -679,6 +683,11 @@ Default state names. Each transition has exactly one owner.
 | Human Review | Done | Orchestrator | Pull request merged. |
 | Blocked | Todo | Human | After fixing the cause. Resets the failure count. |
 | any | Cancelled | Human | Stops a running session at the next reconciliation and cleans the workspace. |
+| Backlog | Idea | Human | Asks for a plan (Section 22). The card stays in Idea while it is planned. |
+| Idea | Human Review | Orchestrator | A planning run ended with questions or with a plan. |
+| Human Review | Idea | Human | After answering questions or asking for another plan. |
+| Human Review | Planned | Human | Approves the plan. The only way a plan becomes tasks. |
+| (new card) | Todo | Orchestrator | A task of a plan the owner approved, with exactly the text the owner was shown. |
 
 The orchestrator MUST NOT make any transition not listed with owner Orchestrator.
 
@@ -2515,6 +2524,107 @@ For each adapter:
 - Every `To verify` item resolved and this document updated.
 - Restore test: rebuild a worker from the deployment scripts alone.
 - Revocation drill: log out the agent, revoke tokens, confirm the service stops cleanly.
+
+## 22. Planning Stage
+
+Extension. An issue can be an idea instead of a piece of work: something too big or too vague for
+one pull request. The planning stage turns it into small tasks, with the owner deciding at every
+step. It needs a tracker that implements the planner operations below; today that is the GitHub
+adapter with `state_source: project`.
+
+### 22.1 Flow
+
+1. The owner writes the idea as an issue, sets its worker and moves the card to `planning_state`
+   (`Idea`).
+2. The orchestrator dispatches a planning run for it. The card is not moved: an idea in the
+   in-progress state would be implemented as it stands after a restart. Claims, concurrency,
+   retries, budgets and reconciliation apply as for any run.
+3. The planning run uses the same sandbox and the same agent, with a prompt of its own (22.2). The
+   agent may read the repository. Nothing it changes is exported, verified or published.
+4. The run ends with questions or with a plan. The orchestrator moves the card to the hand-off
+   state first and then posts the result as a new comment. In this order a failed state write
+   cannot lead to the idea being planned and commented on again on every poll.
+5. The owner answers in comments and moves the card back to `Idea`, which starts a new planning
+   run that is given the whole conversation: the service's earlier questions and plans, and every
+   comment by an allowlisted commenter. Or the owner approves the plan by moving the card to
+   `planned_state` (`Planned`).
+6. For a card in `Planned` that is dispatchable and routed to this worker, the orchestrator
+   creates the tasks of the latest plan (22.4). The idea's card stays in `Planned`.
+
+### 22.2 Planning prompt and answer format
+
+The prompt consists of fixed instructions, the data rule of Section 13, and delimited blocks for
+the worker names, the idea's title and description and the conversation. The workflow body is not
+part of it.
+
+The agent's final message MUST end in one of two forms:
+
+- Questions as plain text, followed by a line `SYMPHONY_PLAN: questions`.
+- One fenced `json` block `{"tasks": [{"title", "description", "worker", "depends_on"}]}` followed
+  by a line `SYMPHONY_PLAN: tasks`.
+
+The service reads the answer strictly: the last marker line counts; unknown JSON fields are an
+error; 1 to 20 tasks; a title is one line of at most 120 characters; a description is not empty
+and at most 6000 characters; the plan is at most 40000 characters in total; `worker` MUST be one
+of the board's workers (it MAY be omitted when there is only one); `depends_on` names earlier
+tasks by position, counted from 1, so the dependencies cannot form a cycle. Questions are at most
+6000 characters.
+
+An answer that does not parse is sent back to the agent in the same session with the reason, up
+to `agent.max_turns`, and then fails the attempt with `plan_malformed`. The reason is the
+service's own text and never quotes the agent.
+
+### 22.3 What the owner sees
+
+The comment is built by the service. Everything the agent wrote is inside fenced blocks, with
+mentions, issue references and markup broken as in Section 12.2, but not cut to 2000 characters:
+the owner has to be able to read every task in full, because approving the plan approves these
+texts. The comment says how to continue: answer and move back, or move to `Planned`.
+
+### 22.4 From an approved plan to tasks
+
+The plan is kept in the service's state directory, one record per idea, with the content hash of
+the idea it was made for. Tasks are created only from a record whose latest round is a plan that
+was posted successfully. If the idea's text changed since, nothing is created and a comment says
+so. A card in `Planned` for which this worker has no such record gets one comment saying that.
+
+Tasks are created in three passes, and the record is saved after every step so that a failure
+continues where it stopped and no task is created twice:
+
+1. Create an issue for every task. Title and description are the plan's text with mentions,
+   issue references and markup broken, plus a line naming the idea.
+2. Record every dependency (`blocked_by`). If the tracker cannot record dependencies, the plan is
+   not carried out: without them all tasks would start at once.
+3. Put each task on the board as a sub-issue of the idea, with its worker, in the first active
+   state. A task has no state before this step, so nothing starts before the order is recorded.
+
+Tasks are written by the service's own account. The GitHub adapter therefore treats `bot_login`
+as an allowed author. That account creates issues only here. A second machine has another
+`bot_login`; for it to work on tasks planned elsewhere, the planning machine's `bot_login` is
+added to its `tracker.allowed_authors`.
+
+### 22.5 Trust
+
+- The planning agent is as untrusted as the coding agent. It cannot reach the tracker. What it
+  writes reaches the owner fenced, and reaches other agents only as tasks the owner approved.
+- This is the one place where the orchestrator puts a card into the approval state. It does so
+  only for a plan the owner approved by moving a card, with the text the owner was shown, pinned
+  by the stored record and the idea's content hash.
+- Who moved a card is not verified (Section 12.5), so the board rules of that section apply
+  unchanged: whoever can write to the board can approve a plan.
+
+### 22.6 Planner operations
+
+Extension of Section 12.2 for adapters that support planning: `workers()`, `post_comment(issue,
+body)`, `create_task(task)`, `place_task(parent, task, worker, state)` and `add_blocker(task,
+blocker)`. All but `create_task` are idempotent.
+
+GitHub: tasks are issues created through REST; the sub-issue link and `blocked_by` use the REST
+sub-issue and dependency endpoints, where a 422 answer means it is already so; the card is added
+with `addProjectV2ItemById` and its Worker and Status fields are set, Status last.
+
+Not implemented yet: planning with `state_source: labels`, and a way to take over an idea on
+another machine than the one that planned it.
 
 ## Appendix A. Linux Worker Deployment
 

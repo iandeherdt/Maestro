@@ -27,8 +27,8 @@ dependency tries to trick it.
 5. If everything passes, the service pushes a branch and opens a pull request under its own
    GitHub identity. The pull request lists anything a reviewer should look at twice, such as
    removed tests or changed dependencies.
-6. Once CI is green the card moves to **Human Review**. You review and merge, or comment and
-   move the card to **Rework**.
+6. Once CI is green the card moves to **Human Review**. You review and merge, or
+   move the card to **Rework** to have the agent continue.
 
 If the agent fails, the ticket is retried a limited number of times and then parked in
 **Blocked** with an explanation.
@@ -104,7 +104,7 @@ What the setup does:
    for it.
 4. **Creates the board**, for a repository in an organization: it asks what this machine is
    called and what your GitHub user name is, then creates a board named Symphony with the columns
-   Backlog, Todo, In Progress, Human Review, Rework, Blocked and Done, and a field named Worker
+   Backlog, Idea, Planned, Todo, In Progress, Human Review, Rework, Blocked and Done, and a field named Worker
    that says which machine takes a card. If the organization already has a board you can pick
    that one. For a repository on a personal account this step creates the labels instead.
 5. **Writes the settings file** from two questions (how you test the repository, and whether it
@@ -145,12 +145,33 @@ Then watch the card move:
 | Column | Meaning |
 |---|---|
 | Backlog | Not approved. Nothing happens here. |
+| Idea | An agent is planning it, see below |
+| Planned | You approved the plan and its tasks were created |
 | Todo | Approved, waiting for a free slot |
 | In Progress | An agent is working on it |
 | Human Review | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
-| Rework | You asked for changes. Your comments on the issue and the pull request go to the agent. |
+| Rework | You asked for changes. The agent continues on the same branch. (Your comments are not passed to it yet; for now, put what should change in the issue text.) |
 | Blocked | The service gave up after repeated failures. The status comment on the issue says why. |
 | Done | The pull request was merged. |
+
+### Something bigger: let it plan first
+
+For an idea that is too big or too vague for one pull request, move the card to **Idea** instead
+of Todo (set its Worker first).
+
+1. An agent reads the repository and thinks about the idea. It changes nothing.
+2. If it needs to know something, it asks. The questions appear as a comment on the issue and the
+   card moves to **Human Review**. Answer in a comment and move the card back to **Idea**.
+3. When it knows enough, it posts a plan: a list of small tasks, each with a full description,
+   the machine that should do it, and what it depends on. The card moves to **Human Review**.
+4. Not happy with the plan? Say so in a comment and move the card back to **Idea**.
+5. Happy? Move the card to **Planned**. The tasks are created as issues exactly as shown, linked
+   to the idea as sub-issues, and placed in **Todo**. The agents then work through them in the
+   order the plan gives: a task waits until the tasks it depends on are done.
+
+Moving the card to Planned is your approval of every task in the plan, so read them. Each task
+then goes through the same steps as a ticket you wrote yourself and ends as a pull request for
+you to review.
 
 Anyone who can change the board can approve work, because GitHub does not record who moved a
 card. Keep the organization to yourself, or give other members read access to the board only.
@@ -272,6 +293,7 @@ Last updated 2026-11-21.
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |
+| Planning stage (idea, questions, plan, tasks) | Written and tested against stand-ins for GitHub and for the agent. Not yet run with the real Claude Code or against github.com. Needs the board. |
 | Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `symphony unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |

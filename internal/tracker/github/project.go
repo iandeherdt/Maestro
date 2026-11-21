@@ -48,6 +48,10 @@ type boardMeta struct {
 	id      string
 	fieldID string
 	options map[string]string // normalized column name -> option ID
+	// The Worker field. workerID is empty when the board has none.
+	workerID      string
+	workerOptions map[string]string // normalized worker name -> option ID
+	workers       []string          // worker names as written on the board
 }
 
 // card is where an issue stands on the board.
@@ -131,12 +135,16 @@ fragment cardFields on ProjectV2Item {
 }`
 
 const boardQuery = `
-query($owner: String!, $number: Int!, $status: String!) {
+query($owner: String!, $number: Int!, $status: String!, $worker: String!) {
   repositoryOwner(login: $owner) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         id closed
         field(name: $status) {
+          __typename
+          ... on ProjectV2SingleSelectField { id options { id name } }
+        }
+        workerField: field(name: $worker) {
           __typename
           ... on ProjectV2SingleSelectField { id options { id name } }
         }
@@ -210,6 +218,15 @@ type gqlIssue struct {
 	} `json:"repository"`
 }
 
+type gqlField struct {
+	Typename string `json:"__typename"`
+	ID       string `json:"id"`
+	Options  []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"options"`
+}
+
 type gqlName struct {
 	Name string `json:"name"`
 }
@@ -278,17 +295,11 @@ func (a *Adapter) meta(ctx context.Context, fresh bool) (*boardMeta, error) {
 	var out struct {
 		RepositoryOwner *struct {
 			ProjectV2 *struct {
-				ID     string `json:"id"`
-				Closed bool   `json:"closed"`
-				Field  *struct {
-					Typename string `json:"__typename"`
-					ID       string `json:"id"`
-					Options  []struct {
-						ID   string `json:"id"`
-						Name string `json:"name"`
-					} `json:"options"`
-				} `json:"field"`
-				Workflows struct {
+				ID          string    `json:"id"`
+				Closed      bool      `json:"closed"`
+				Field       *gqlField `json:"field"`
+				WorkerField *gqlField `json:"workerField"`
+				Workflows   struct {
 					Nodes []struct {
 						Name    string `json:"name"`
 						Enabled bool   `json:"enabled"`
@@ -297,7 +308,7 @@ func (a *Adapter) meta(ctx context.Context, fresh bool) (*boardMeta, error) {
 			} `json:"projectV2"`
 		} `json:"repositoryOwner"`
 	}
-	err := a.c.graphql(ctx, boardQuery, map[string]any{"owner": b.owner, "number": b.number, "status": b.statusField}, &out, false)
+	err := a.c.graphql(ctx, boardQuery, a.vars(map[string]any{"owner": b.owner, "number": b.number}), &out, false)
 	if errors.Is(err, errNotFound) || err == nil && (out.RepositoryOwner == nil || out.RepositoryOwner.ProjectV2 == nil) {
 		return nil, terr(tracker.Status, "%s was not found, or the service's App may not read it. The App needs the organization permission Projects, read and write", a.boardName())
 	}
@@ -311,9 +322,18 @@ func (a *Adapter) meta(ctx context.Context, fresh bool) (*boardMeta, error) {
 	if p.ID == "" || p.Field == nil || p.Field.ID == "" || p.Field.Typename != "ProjectV2SingleSelectField" {
 		return nil, terr(tracker.Status, "%s has no single-select field named %q", a.boardName(), b.statusField)
 	}
-	m := &boardMeta{id: p.ID, fieldID: p.Field.ID, options: map[string]string{}}
+	m := &boardMeta{id: p.ID, fieldID: p.Field.ID, options: map[string]string{}, workerOptions: map[string]string{}}
 	for _, o := range p.Field.Options {
 		m.options[norm(o.Name)] = o.ID
+	}
+	if w := p.WorkerField; w != nil && w.ID != "" && w.Typename == "ProjectV2SingleSelectField" {
+		m.workerID = w.ID
+		for _, o := range w.Options {
+			if name := strings.TrimSpace(o.Name); name != "" && m.workerOptions[norm(name)] == "" {
+				m.workerOptions[norm(name)] = o.ID
+				m.workers = append(m.workers, name)
+			}
+		}
 	}
 	if !b.warned {
 		b.warned = true

@@ -28,12 +28,14 @@ type column struct{ Name, Color, Description string }
 // the order a ticket passes through them.
 var columns = []column{
 	{"Backlog", "GRAY", "Not approved yet. Nothing happens here."},
+	{"Idea", "PINK", "Something bigger. An agent asks you questions and proposes a plan."},
+	{"Planned", "PURPLE", "You approved the plan. Its tasks are created in Todo."},
 	{"Todo", "GREEN", "Approved. The service may start work."},
 	{"In Progress", "BLUE", "An agent is working on this."},
 	{"Human Review", "YELLOW", "A pull request is open and waits for you."},
 	{"Rework", "ORANGE", "You asked for changes. The agent will continue."},
 	{"Blocked", "RED", "The service gave up. See the status comment on the issue."},
-	{"Done", "PURPLE", "Finished."},
+	{"Done", "GRAY", "Finished."},
 }
 
 var authorRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)

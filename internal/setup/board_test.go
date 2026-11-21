@@ -134,7 +134,7 @@ func onOrg(t *testing.T, g *github) (*State, *Board) {
 	return st, &Board{GitHub: GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}, GOOS: "linux"}
 }
 
-var allColumns = "Backlog,Todo,In Progress,Human Review,Rework,Blocked,Done"
+var allColumns = "Backlog,Idea,Planned,Todo,In Progress,Human Review,Rework,Blocked,Done"
 
 func TestBoardStepCreatesTheBoard(t *testing.T) {
 	g := newGitHub(t)
@@ -221,7 +221,7 @@ func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
 		{number: 3, title: "Odd", status: full, hasWorker: true, workerKind: "ProjectV2Field"},
 	}
 	for pick, want := range map[string]string{
-		"1": "Human Review, Rework, Blocked, Done",
+		"1": "Todo, In Progress, Human Review, Rework, Blocked, Done",
 		"2": "Add the option linux",
 	} {
 		st, step := onOrg(t, g)
