@@ -1537,13 +1537,18 @@ Built-in `deny` rules (cannot be disabled):
   `**/.env`, `**/.env.*`, plus `policy.deny_paths`.
 - D2 Submodule additions or changes (gitlink entries).
 - D3 Symbolic links added or retargeted, unless `policy.allow_symlinks`.
-- D4 File mode changes that add a setuid or setgid bit.
+- D4 Any file mode other than regular file, executable file, symbolic link or gitlink. This
+  covers setuid and setgid bits.
 - D5 More than `policy.max_changed_files` files, a total diff above `policy.max_diff_bytes`, or a
   single added file above `policy.max_file_bytes`.
 - D6 Binary files added or modified, unless `policy.allow_binary`.
 - D7 Secret scan hit in added lines (Section 15.4).
 - D8 Paths that differ only by case or Unicode normalization from an existing path, and paths
-  containing control characters.
+  containing control characters or invisible formatting characters (including the bidirectional
+  overrides that disguise a file name).
+
+A rename counts as a change to both the old and the new path. At most 100 findings are reported
+per kind, and paths in findings are shortened and escaped.
 
 Built-in `flag` rules:
 
@@ -1567,6 +1572,10 @@ Built-in `flag` rules:
   searches for the credential's documented format instead (to verify).
 - OPTIONAL external scanner if installed in the control zone, run on the diff text only.
 - Scans cover added lines, new file names and commit messages.
+- A finding names the rule, the path and the line number. It MUST NOT repeat the matched text,
+  because findings are returned to the agent and shown on the pull request.
+- Removed lines are not scanned, so a change that removes a leaked value is not rejected. Held
+  values shorter than 8 characters are not searched for.
 
 ### 15.5 Push and Pull Request
 
