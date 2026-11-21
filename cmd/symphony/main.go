@@ -189,10 +189,10 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	ui := setup.NewUI(stdin, stdout)
-	ui.Say("Symphony setup. Every step says what it will do and waits for you.")
-	ui.Say("You can stop with Ctrl-C and run this command again; finished steps are skipped.")
-	ui.Say("State and the App key are kept in %s", abs)
+	ui := setup.Terminal(stdin, stdout)
+	ui.Banner("Maestro setup", "Symphony setup. Every step says what it will do and waits for you.",
+		"You can stop with Ctrl-C and run this command again; finished steps are skipped.",
+		fmt.Sprintf("State and the App key are kept in %s", abs))
 	steps := []setup.Step{
 		&setup.Machine{},
 		&setup.CreateApp{Port: *port},
@@ -202,10 +202,10 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if err := setup.Run(ctx, ui, st, steps); err != nil {
 		if errors.Is(err, setup.ErrAborted) {
-			fmt.Fprintln(stderr, err)
+			ui.Fail(stderr, err, true)
 			return 3
 		}
-		fmt.Fprintln(stderr, "setup failed:", err)
+		ui.Fail(stderr, err, false)
 		return 1
 	}
 	ui.Say("")
@@ -213,12 +213,14 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if st.OnBoard() {
 		tickets, pickup = "the board", "cards in the Todo column whose Worker is "+st.Worker
 	}
-	ui.Say("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets)
+	ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
 	ui.Say("Three commands are left. Run them in this order, with Docker running:")
-	ui.Say("  symphony image    builds the container the agent works in (a few minutes, once)")
-	ui.Say("  symphony login    signs Claude Code in inside that container (once)")
-	ui.Say("  symphony run      starts the service; it then picks up %s", pickup)
+	ui.Commands([][2]string{
+		{"symphony image", "builds the container the agent works in (a few minutes, once)"},
+		{"symphony login", "signs Claude Code in inside that container (once)"},
+		{"symphony run", "starts the service; it then picks up " + pickup},
+	})
 	ui.Say("Your settings: %s", st.WorkflowFile)
-	ui.Say("To check them at any time: symphony check")
+	ui.Say("To check them at any time: `symphony check`")
 	return 0
 }

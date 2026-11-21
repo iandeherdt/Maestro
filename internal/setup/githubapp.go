@@ -293,7 +293,8 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	ui.Say("      %s/", local)
 	ui.Say("  If this machine has no browser, first run this on your own computer, then open the address there:")
 	ui.Say("      ssh -N -L %d:127.0.0.1:%d <this-machine>", port, port)
-	ui.Say("  Waiting for you to press Create on GitHub...")
+	waited := ui.Waiting("Waiting for you to press Create on GitHub...")
+	defer waited()
 	if c.Ready != nil {
 		c.Ready(local)
 	}
@@ -308,9 +309,12 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	case <-ctx.Done():
 		return ErrAborted
 	case <-time.After(wait):
+		waited()
 		ui.Say("  Nothing arrived from GitHub in time.")
 		return ErrAborted
 	}
+
+	waited()
 
 	// The code is exchanged once for the App's details. Nothing but the
 	// code identifies the request, so it is not logged or shown.

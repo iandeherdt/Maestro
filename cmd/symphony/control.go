@@ -252,7 +252,7 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	ctx, stop := interruptible()
 	defer stop()
-	ui := setup.NewUI(stdin, stdout)
+	ui := setup.Terminal(stdin, stdout)
 	if args[0] == "uninstall" {
 		if !u.Installed() {
 			fmt.Fprintln(stdout, "No background service is installed.")
