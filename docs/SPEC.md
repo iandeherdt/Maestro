@@ -680,7 +680,9 @@ The orchestrator MUST NOT make any transition not listed with owner Orchestrator
 After every turn that ends normally, the worker:
 
 1. Refreshes the issue (`fetch_issues_by_ids`). If it is missing, not active or not routable, exit
-   normally (reconciliation semantics).
+   normally (reconciliation semantics). The same applies if its `content_hash` differs from the
+   one recorded at dispatch: nothing from a session started for other text is published, and the
+   pull request is always built from the issue as it was dispatched.
 2. Runs the export step (Section 15.1). If the workspace has no commits beyond `base_sha` and no
    changes, the outcome is `no_changes`.
 3. Reads the agent's declared status from the final result text: the last line matching

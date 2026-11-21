@@ -262,7 +262,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		if err != nil {
 			return failed(VerifyError, err)
 		}
-		if !v.Passed && status != "done" {
+		if !v.Passed {
 			if turn >= maxTurns {
 				return orchestrator.Outcome{Kind: orchestrator.Rejected, Category: VerifyFailed,
 					Feedback: []issue.Feedback{{Source: "verify", Body: v.OutputTail}}}
