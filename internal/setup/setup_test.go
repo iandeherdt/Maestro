@@ -186,7 +186,8 @@ func TestMachineChecks(t *testing.T) {
 		"no git":         {machine(map[string]bool{"git": true}, "", "linux", true), []string{"Git is not installed"}},
 		"old git":        {machine(nil, "git version 2.30.2", "linux", true), []string{"too old"}},
 		"no claude":      {machine(map[string]bool{"claude": true, "systemd-run": true}, "git version 2.43.0", "linux", false), nil},
-		"no docker":      {machine(map[string]bool{"docker": true}, "git version 2.43.0", "linux", true), []string{"Docker is not installed"}},
+		"podman only":    {machine(map[string]bool{"docker": true}, "git version 2.43.0", "linux", true), nil},
+		"no engine":      {machine(map[string]bool{"docker": true, "podman": true}, "git version 2.43.0", "linux", true), []string{"Neither Podman nor Docker is installed"}},
 		"no docker mac":  {machine(map[string]bool{"docker": true}, "git version 2.43.0", "darwin", true), []string{"Docker is not installed"}},
 		"windows":        {machine(nil, "git version 2.43.0", "windows", true), []string{"not supported"}},
 	} {
@@ -206,7 +207,7 @@ func TestMachineChecks(t *testing.T) {
 }
 
 func TestMachineRunRechecksUntilFixed(t *testing.T) {
-	missing := map[string]bool{"docker": true}
+	missing := map[string]bool{"docker": true, "podman": true}
 	m := machine(missing, "git version 2.43.0", "linux", true)
 	u, out := ui("y\n")
 	err := m.Run(ctx, u, nil) // one recheck, then the input ends
@@ -583,7 +584,9 @@ func TestWorkflowFileStep(t *testing.T) {
 		g := newGitHub(t)
 		st := installed(t, g)
 		st.Worker = "linux"
-		step := &WorkflowFile{GOOS: goos}
+		// Linux has both engines here and takes podman; a Mac takes docker.
+		step := &WorkflowFile{GOOS: goos, LookPath: func(string) (string, error) { return "/usr/bin/x", nil }}
+		wantBackend := map[string]string{"linux": "backend: podman", "darwin": "backend: docker"}[goos]
 		u, out := ui("  go test ./...  \ny\ny\n")
 		if err := Run(ctx, u, st, []Step{step}); err != nil {
 			t.Fatalf("%s: %v\n%s", goos, err, out)
@@ -593,7 +596,7 @@ func TestWorkflowFileStep(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"repo: ian/app", "state_source: labels", `bot_login: "symphony-ian-abc123[bot]"`,
-			"allowed_authors: [ian]", "    go test ./...\n", "name: linux", "backend: docker",
+			"allowed_authors: [ian]", "    go test ./...\n", "name: linux", wantBackend,
 			"root: " + strconv.Quote(filepath.Join(st.Dir(), "workspaces")), "state_dir: " + strconv.Quote(filepath.Join(st.Dir(), "state"))} {
 			if strings.Contains(string(raw), "required_checks") {
 				t.Errorf("%s: checks were switched off after a yes:\n%s", goos, raw)

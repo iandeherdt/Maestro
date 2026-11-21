@@ -433,3 +433,10 @@ func TestRequiredChecksNone(t *testing.T) {
 		t.Error("a list of checks switched the gate off")
 	}
 }
+
+func TestPodmanBackend(t *testing.T) {
+	c := mustBuild(t, strings.Replace(with("backend: systemd", "backend: podman", ""), "  network:\n    proxy: 127.0.0.1:3128\n", "", 1))
+	if c.Sandbox.Backend != "podman" || c.Sandbox.Proxy != "" {
+		t.Errorf("%+v", c.Sandbox)
+	}
+}

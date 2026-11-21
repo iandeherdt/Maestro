@@ -383,7 +383,7 @@ Replaces upstream `codex`.
 
 #### 5.3.7 `sandbox` (object)
 
-- `backend` (string): REQUIRED. `docker` (Section 11.8), `systemd` (Linux), `macos-vm` or
+- `backend` (string): REQUIRED. `docker` or `podman` (Section 11.8), `systemd` (Linux), `macos-vm` or
   `macos-user` (Appendix B). There is no `none` backend.
 - `image` (string): the sandbox image of the `docker` backend. Default `symphony-sandbox:latest`.
 - `memory_max` (string): default `6G`.
@@ -602,7 +602,7 @@ skip dispatch for that tick and keep reconciling.
 - `claude.turn_total_timeout_ms`: default `5400000`
 - `claude.read_timeout_ms`: default `30000`
 - `claude.stall_timeout_ms`: default `300000`
-- `sandbox.backend`: `docker` | `systemd` | `macos-vm` | `macos-user`, REQUIRED
+- `sandbox.backend`: `docker` | `podman` | `systemd` | `macos-vm` | `macos-user`, REQUIRED
 - `sandbox.image`: `symphony-sandbox:latest` (docker backend)
 - `sandbox.memory_max` `6G`, `sandbox.cpu_quota` `300%`, `sandbox.tasks_max` `2048`
 - `sandbox.network.proxy`: REQUIRED except with the docker backend
@@ -1271,6 +1271,14 @@ is downloaded inside the build and checked against the release's checksum file.
 network on the operator's terminal. The login never exists on the host. `symphony run` refuses
 to start while `claude auth status` in such a container reports no login.
 
+`backend: podman` is the same backend with the `podman` command, meant for RHEL and its
+relatives, where Podman ships with the system and runs without a root daemon. The service and
+its containers then run as an ordinary user who is not equivalent to root. Three differences are
+handled: Podman is told not to copy the caller's proxy variables into containers
+(`--http-proxy=false`), bind mounts are relabelled for SELinux (`relabel=shared`), and image
+names in the built-in Dockerfile are fully qualified. The guided setup writes `podman` on Linux
+when the command is there, and `docker` otherwise.
+
 Limits of this backend, to be clear about what it is: on macOS the containers run in Docker
 Desktop's Linux VM, so the agent cannot build or test software that needs macOS itself (Xcode,
 Unity). On Linux, a user who may use Docker is equivalent to root on that machine; the service
@@ -1897,7 +1905,7 @@ Rules for every step:
 
 Steps:
 
-1. Machine: Git 2.31 or newer and Docker. Nothing is installed by the wizard; each missing item
+1. Machine: Git 2.31 or newer and a container engine (Docker, or Podman on Linux). Nothing is installed by the wizard; each missing item
    comes with what to do.
 2. GitHub App: created through GitHub's manifest flow. The wizard serves a page on a loopback
    port with a form that posts the manifest to github.com. The operator presses Create there,

@@ -29,7 +29,7 @@ import (
 
 // The image of this test has a stand-in for Claude Code: it is "logged in"
 // when a file exists in its state directory, and a turn commits one file.
-const e2eDockerfile = `FROM alpine/git:latest
+const e2eDockerfile = `FROM docker.io/alpine/git:latest
 RUN addgroup -g 10001 agent \
  && adduser -D -u 10001 -G agent agent \
  && mkdir -p /workspace /claude /handoff \
@@ -208,8 +208,12 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // TestServiceTakesAnIssueToAPullRequest runs the whole service, in real
 // containers, against a stand-in for GitHub and a stand-in for Claude Code.
 func TestServiceTakesAnIssueToAPullRequest(t *testing.T) {
-	if exec.Command("docker", "info").Run() != nil {
-		t.Skip("no Docker daemon")
+	engine := "docker"
+	if e := os.Getenv("SYMPHONY_TEST_ENGINE"); e != "" {
+		engine = e
+	}
+	if exec.Command(engine, "info").Run() != nil {
+		t.Skip("no container engine")
 	}
 	root, err := os.MkdirTemp("", "symphony-e2e-")
 	if err != nil {
@@ -264,7 +268,7 @@ workspace:
   root: "`+filepath.Join(root, "workspaces")+`"
   repo: ian/app
 sandbox:
-  backend: docker
+  backend: `+engine+`
   image: symphony-e2e-sandbox:latest
   memory_max: 512M
   cpu_quota: 100%
@@ -309,7 +313,7 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 	if in.box.ProxyRunning(ctx, "agent") {
 		t.Fatal("the proxies were left running")
 	}
-	if o, err := exec.Command("docker", "run", "--rm", "--user", "10001", "--entrypoint", "", "--mount",
+	if o, err := exec.Command(engine, "run", "--rm", "--user", "10001", "--entrypoint", "", "--mount",
 		"type=volume,src="+in.box.ClaudeVolume()+",dst=/claude", in.cfg.Sandbox.Image, "touch", "/claude/login").CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, o)
 	}

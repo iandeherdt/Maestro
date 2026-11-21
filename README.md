@@ -48,8 +48,9 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 
 - macOS or Linux.
 - Git 2.31 or newer.
-- Docker: [Docker Desktop](https://www.docker.com/products/docker-desktop/) on a Mac, Docker
-  Engine on Linux. The agent works inside containers.
+- A container engine. The agent works inside containers. On a Mac:
+  [Docker Desktop](https://www.docker.com/products/docker-desktop/). On Linux: Podman
+  (`sudo dnf install podman` on RHEL and Fedora; it needs no root daemon) or Docker Engine.
 - A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
   installed on the machine itself.
 - A GitHub repository you own. Private repositories work.
@@ -84,7 +85,7 @@ symphony setup
 
 What the setup does:
 
-1. **Checks the machine** for Git and Docker. For anything missing it tells you what to install.
+1. **Checks the machine** for Git and Docker or Podman. For anything missing it tells you what to install.
 2. **Creates a GitHub App for the service.** You open a local page, press one button on
    github.com, and the App's key is saved on your machine in a file only you can read. The App can
    open pull requests and read check results. It cannot change settings, workflows or secrets,
@@ -235,7 +236,7 @@ Last updated 2026-11-21.
 | Guided setup | Five of seven steps done (machine, App, installation, labels, settings file), run once on a Mac against github.com |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
-| Docker sandbox (containers, isolated network, proxies, image) | Done, tested with real containers. The image with the real Claude Code is built in CI. |
+| Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
 | `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `symphony status`, `pause`, `resume` | Done, tested against the running service |
 | Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
