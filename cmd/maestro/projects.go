@@ -411,8 +411,8 @@ func addProject(ui *setup.UI, name string, ps []project, forGame bool) (project,
 		return project{}, err
 	}
 	ui.Say("")
-	ui.Say("A new project gets its own settings, board or labels, rule packs, sandbox image, Claude login and")
-	ui.Say("background service. Its secrets, such as a Unity licence, are only given to its own checks.")
+	ui.Say("A new project gets its own settings, board or labels, rule packs, sandbox image, Claude login and " +
+		"background service. Its secrets, such as a Unity licence, are only given to its own checks.")
 	valid := func(s string) error {
 		if err := validProjectName(s); err != nil {
 			return err
@@ -487,8 +487,8 @@ func offerApp(ui *setup.UI, st *setup.State, ps []project, forGame bool) error {
 			options = append(options, fmt.Sprintf("Use the App %s of %s: the game's repository will be under %s", p.State.AppSlug, p.Name, owner))
 		}
 		options = append(options, "Make a new App for this project")
-		ui.Say("Another project already has a GitHub App. The game can use it too, if its repository has the")
-		ui.Say("same owner; every token the service takes stays limited to the one repository of its project.")
+		ui.Say("Another project already has a GitHub App. The game can use it too, if its repository has the " +
+			"same owner; every token the service takes stays limited to the one repository of its project.")
 		i, err := ui.Choose("Which GitHub App should this project use?", options)
 		if err != nil {
 			return err
@@ -520,8 +520,8 @@ func offerApp(ui *setup.UI, st *setup.State, ps []project, forGame bool) error {
 		}
 		from = same[0]
 		ui.Say("The project %s already has a GitHub App for %s: %s.", from.Name, owner, from.State.AppSlug)
-		ui.Say("This project can use it too, so you do not make a second App. It is then also installed on %s,", repo)
-		ui.Say("and every token the service takes stays limited to the one repository of the project it works for.")
+		ui.Say("This project can use it too, so you do not make a second App. It is then also installed on %s, "+
+			"and every token the service takes stays limited to the one repository of the project it works for.", repo)
 		options := []string{"Use the App " + from.State.AppSlug, "Make a new App for this project"}
 		i, err := ui.Choose("Which GitHub App should this project use?", options)
 		if err != nil {
@@ -587,6 +587,15 @@ func runProjects(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				os.WriteFile(filepath.Join(home, projectNameFile), []byte(name+"\n"), 0o600)
 			}
 			return code
+		}
+		if p, ok := findProject(ps, name); ok {
+			// Made before and not finished: continue it.
+			if !p.ready() {
+				fmt.Fprintf(stdout, "The project %s exists; its setup continues where it stopped.\n", name)
+				return run([]string{"setup", "--project", name}, stdout, stderr)
+			}
+			return report(stderr, explain("There is already a project called %s, and it is set up.\n"+
+				"To go through its setup again: maestro setup --project %s", name, name))
 		}
 		ui := setup.Terminal(stdin, stdout)
 		p, err := addProject(ui, name, ps, false)

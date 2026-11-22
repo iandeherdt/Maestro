@@ -402,13 +402,53 @@ func (b *Board) Run(ctx context.Context, ui *UI, st *State) error {
 	if board == nil {
 		return fmt.Errorf("board number %d was not found in %s", st.Board, m[1])
 	}
-	if err := b.prepare(ctx, ui, st, board); err != nil {
-		return err
+	for {
+		err := b.prepare(ctx, ui, st, board)
+		if !errors.Is(err, errOtherBoard) {
+			if err != nil {
+				return err
+			}
+			break
+		}
+		// The board could not take this machine: choose again.
+		st.Board = 0
+		if err := b.choose(ctx, ui, st, m[1], m[2]); err != nil {
+			return err
+		}
+		if err := st.Save(); err != nil {
+			return err
+		}
+		if board, err = b.read(ctx, st); err != nil {
+			return err
+		}
+		if board == nil {
+			return fmt.Errorf("board number %d was not found in %s", st.Board, m[1])
+		}
 	}
 	ui.Say("  The board is at %s", b.url(st))
 	ui.Say("  GitHub opens a new board as a table. To see columns: open it, click the small arrow")
 	ui.Say("  next to \"View 1\", and under Layout choose Board. That is needed once.")
 	return nil
+}
+
+// errOtherBoard is returned by prepare when the operator wants another
+// board than the one that was chosen.
+var errOtherBoard = errors.New("another board")
+
+// another asks whether to stop and change the board by hand or to choose
+// another board. It returns ErrAborted or errOtherBoard.
+func (b *Board) another(ui *UI, byHand string) error {
+	i, err := ui.Choose("  Use this board, or another one?", []string{
+		"Stop here: I will " + byHand,
+		"Use another board, or create a new one",
+	})
+	if err != nil {
+		return err
+	}
+	if i == 1 {
+		return errOtherBoard
+	}
+	return ErrAborted
 }
 
 // choose finds a board to use or creates one, and records its number.
@@ -549,7 +589,7 @@ func (b *Board) prepare(ctx context.Context, ui *UI, st *State, board *boardStat
 			ui.Say("  then %s in the list on the left. Add these options and save:", statusField)
 			ui.Say("      %s", strings.Join(miss, ", "))
 			ui.Say("  Then run setup again.")
-			return ErrAborted
+			return b.another(ui, "add them to this board by hand")
 		}
 		var opts []option
 		for _, c := range columns {
@@ -585,10 +625,9 @@ func (b *Board) prepare(ctx context.Context, ui *UI, st *State, board *boardStat
 		ui.Say("  Field %s now also has the choice %s.", workerField, st.Worker)
 	case !board.Worker.has(st.Worker):
 		ui.Say("  The board already has cards, so setup does not rewrite the choices of the %s field.", workerField)
-		ui.Say("  Open %s, click the three dots at the top right, then Settings,", b.url(st))
-		ui.Say("  then %s in the list on the left. Add the option %s and save.", workerField, st.Worker)
-		ui.Say("  Then run setup again.")
-		return ErrAborted
+		ui.Say("  To use this board, open %s, click the three dots at the top right, then Settings, "+
+			"then %s in the list on the left. Add the option %s and save. Then run setup again.", b.url(st), workerField, st.Worker)
+		return b.another(ui, "add "+st.Worker+" to this board by hand")
 	}
 	// A card can ask for a model. An empty field means the default from the
 	// settings file, so the field is never required.

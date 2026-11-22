@@ -254,3 +254,21 @@ func TestAddGameProjectSharesTheApp(t *testing.T) {
 		t.Fatalf("state %+v", st)
 	}
 }
+
+// Adding a project that was made before continues its setup.
+func TestProjectsAddContinues(t *testing.T) {
+	home := projectsHome(t)
+	writeState(t, home, map[string]any{"repo": "acme/web", "worker": "mac", "workflow_file": filepath.Join(home, "WORKFLOW.md")})
+	writeState(t, filepath.Join(home, "projects", "done"), map[string]any{"repo": "acme/done", "worker": "mac-done",
+		"workflow_file": filepath.Join(home, "projects", "done", "WORKFLOW.md")})
+	var out, errOut bytes.Buffer
+	if code := run([]string{"projects", "add", "done"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "maestro setup --project done") {
+		t.Fatalf("finished: %d %q", code, errOut.String())
+	}
+	writeState(t, filepath.Join(home, "projects", "web"), map[string]any{"worker": "mac-web"})
+	out.Reset()
+	run([]string{"projects", "add", "web"}, &out, &errOut)
+	if !strings.Contains(out.String(), "continues where it stopped") || strings.Contains(errOut.String(), "already a project called web") {
+		t.Fatalf("unfinished: %q %q", out.String(), errOut.String())
+	}
+}

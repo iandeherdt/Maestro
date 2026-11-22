@@ -302,11 +302,14 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}()
 	if err := setup.Run(ctx, ui, st, steps); err != nil {
-		if errors.Is(err, setup.ErrAborted) {
-			ui.Fail(stderr, err, true)
+		aborted := errors.Is(err, setup.ErrAborted)
+		ui.Fail(stderr, err, aborted)
+		if chosen.named {
+			fmt.Fprintf(stderr, "To continue this project: maestro setup --project %s\n", chosen.name)
+		}
+		if aborted {
 			return 3
 		}
-		ui.Fail(stderr, err, false)
 		return 1
 	}
 	ui.Say("")
