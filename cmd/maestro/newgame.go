@@ -1102,19 +1102,25 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 		// Unity 6's Hub keeps an entitlement licence bound to this machine,
 		// which a Linux container cannot use, so Hub is no way in.
 		i, err := ui.Choose("How should the checks get a licence?", []string{
-			"With my Unity account, here in the terminal (maestro unity activate)",
+			"Sign in to Unity in my browser (two-step verification works)",
+			"With my Unity account's email and password (no two-step verification)",
 			"From a licence file I have (Unity_lic.ulf)",
 		})
 		if err != nil {
 			return err
 		}
 		switch i {
-		case 0:
-			if code := unityActivate(s.setupDir, st.WorkflowFile, store, false, s.rawIn, s.stdout, s.stderr); code != 0 {
-				return errors.New("the activation did not succeed; the reason is above")
+		case 0, 1:
+			mode := activateBrowser
+			if i == 1 {
+				mode = activatePassword
+			}
+			if code := unityActivate(s.setupDir, st.WorkflowFile, store, mode, s.rawIn, s.stdout, s.stderr); code != 0 {
+				ui.Say("  The activation did not succeed; the reason is above. Choose again, or stop with Ctrl-C.")
+				continue
 			}
 			return nil
-		case 1:
+		case 2:
 			ans, err := ui.Ask("  The licence file", "", nil)
 			if err != nil {
 				return err

@@ -58,3 +58,19 @@ func TestActivationRefusesAccountsThatAreNotOneLine(t *testing.T) {
 		t.Errorf("the password is printed: %s", s)
 	}
 }
+
+func TestSignInScriptAsksForNothingAndWritesOnlyTheTar(t *testing.T) {
+	// Standard output carries the licence, so every line for the person
+	// goes to standard error, and the tools read no input.
+	for _, line := range strings.Split(signInScript, "\n") {
+		if strings.HasPrefix(line, "unity ") && !strings.Contains(line, "</dev/null >&2") {
+			t.Errorf("%q may read input or write to the licence stream", line)
+		}
+		if strings.HasPrefix(line, "echo ") && !strings.HasSuffix(line, ">&2") {
+			t.Errorf("%q writes to the licence stream", line)
+		}
+	}
+	if !strings.Contains(signInScript, "{{places}}") {
+		t.Error("the script does not take the licence places")
+	}
+}

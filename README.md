@@ -564,7 +564,8 @@ Unity needs a licence to open a project and run its tests, so the pack also need
 
 ```sh
 maestro conventions enable unity && maestro image
-maestro unity activate          # once, with a Unity account; or --file Unity_lic.ulf
+maestro unity activate          # once: sign in to Unity in your browser (two-step verification works)
+                                # or --password (no two-step verification), or --file Unity_lic.ulf
 maestro unity                   # whether this machine has a licence
 ```
 
