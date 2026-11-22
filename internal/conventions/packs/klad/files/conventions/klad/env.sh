@@ -12,12 +12,11 @@ if [ -n "${KLAD_VERSION:-}" ] && [ "$have" != "$KLAD_VERSION" ]; then
     echo "Pictures exported with another version can differ. Use klad $KLAD_VERSION, or change the version by hand and export every drawing again." >&2
     exit 1
 fi
-if [ ! -d "$KLAD_SOURCE" ]; then
-    echo "conventions: there is no drawing folder $KLAD_SOURCE (KLAD_SOURCE in conventions/klad/settings.sh)." >&2
-    exit 1
-fi
+# A missing drawing folder is a project without drawings yet: Git keeps
+# no empty folders, so a new project never has one.
 # The drawings, as paths relative to KLAD_SOURCE without .klad.
 drawings() {
+    [ -d "$KLAD_SOURCE" ] || return 0
     (cd "$KLAD_SOURCE" && find . -type d -name '*.klad' -prune -print | sed 's#^\./##; s#\.klad$##' | sort)
 }
 

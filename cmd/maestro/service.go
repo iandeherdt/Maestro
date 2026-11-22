@@ -361,7 +361,11 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 
 // image explains what to do when the image is missing.
 func (in *install) image(ctx context.Context) error {
-	if !in.box.ImageExists(ctx) {
+	ok, err := in.box.ImageState(ctx)
+	if err != nil {
+		return explain("Docker could not say whether the sandbox image %s is there: %v\nTry again in a moment; Docker Desktop may still be starting.", in.cfg.Sandbox.Image, err)
+	}
+	if !ok {
 		return explain("the sandbox image %s does not exist yet. Build it with: %s", in.cfg.Sandbox.Image, mention("maestro image"))
 	}
 	return nil

@@ -7,10 +7,8 @@ if ! command -v "$BLENDER" >/dev/null 2>&1; then
     echo "Elsewhere: set BLENDER to the Blender program, for example /Applications/Blender.app/Contents/MacOS/Blender." >&2
     exit 1
 fi
-if [ ! -d "$ART_SOURCE" ]; then
-    echo "conventions: there is no generator folder $ART_SOURCE (ART_SOURCE in conventions/blender/settings.sh)." >&2
-    exit 1
-fi
+# A missing generator folder is a project without generators yet: Git
+# keeps no empty folders, so a new project never has one.
 
 # The generators, by name: every .py file in ART_SOURCE whose name does
 # not start with an underscore.
