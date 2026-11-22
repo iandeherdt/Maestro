@@ -983,6 +983,7 @@ func (o *Orchestrator) watchPlans(ctx context.Context) {
 			o.designDone(ctx, is)
 			continue
 		default:
+			o.finishIdea(ctx, is)
 			continue
 		}
 		if !o.planNoted[is.ID] {
@@ -995,6 +996,29 @@ func (o *Orchestrator) watchPlans(ctx context.Context) {
 			delete(o.planNoted, id)
 		}
 	}
+}
+
+// finishIdea moves an idea to Done once every task of its plan is done.
+// The tasks are what was built; the idea's card would otherwise stay in
+// Planned for good.
+func (o *Orchestrator) finishIdea(ctx context.Context, is issue.Issue) {
+	f, ok := o.d.Plans.(PlanFinisher)
+	if !ok || o.cfg.Tracker.DoneState == "" {
+		return
+	}
+	done, n, err := f.Finished(ctx, is)
+	if err != nil {
+		o.d.Log.Warn("the tasks of a plan could not be read, will retry", "issue", is.Identifier, "error", err)
+		return
+	}
+	if !done {
+		return
+	}
+	if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.DoneState); err != nil {
+		o.d.Log.Warn("done state not written, will retry", "issue", is.Identifier, "error", err)
+		return
+	}
+	o.comment(ctx, is, fmt.Sprintf("All %d task(s) of the plan are done, so this idea is done too.", n), "")
 }
 
 // designDone tidies up after the tasks of a plan with a design were

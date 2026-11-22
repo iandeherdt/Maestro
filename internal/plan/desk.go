@@ -39,7 +39,9 @@ type Desk struct {
 	// (SPEC 27). Designs reads the design pull requests.
 	DesignState, DesignFolder string
 	Designs                   DesignReviews
-	Now                       func() time.Time
+	// TerminalStates are the states a finished task is in.
+	TerminalStates []string
+	Now            func() time.Time
 }
 
 func (d *Desk) now() time.Time {
@@ -214,4 +216,36 @@ func (d *Desk) Materialize(ctx context.Context, is issue.Issue) (string, error) 
 		with = fmt.Sprintf(" They follow the design of pull request #%d.", rec.Design.Design.PRNumber)
 	}
 	return fmt.Sprintf("The plan was approved. %d task(s) were created and placed in %s: %s.%s", len(tasks), d.TaskState, strings.Join(names, ", "), with), nil
+}
+
+// Finished reports whether every task of the approved plan of an idea is
+// done, so that the idea itself can be moved to Done. It also returns the
+// number of tasks. A task that is no longer visible, for example because
+// it was deleted, counts as done: it cannot be finished any more.
+func (d *Desk) Finished(ctx context.Context, is issue.Issue) (bool, int, error) {
+	rec, err := d.Store.Load(is.ID)
+	if err != nil || rec == nil || !rec.Done || len(rec.Progress) == 0 {
+		return false, 0, err
+	}
+	ids := make([]string, 0, len(rec.Progress))
+	for _, p := range rec.Progress {
+		if p.Ref.ID == "" {
+			return false, 0, nil
+		}
+		ids = append(ids, p.Ref.ID)
+	}
+	tasks, err := d.Tracker.FetchIssuesByIDs(ctx, ids)
+	if err != nil {
+		return false, 0, err
+	}
+	for _, t := range tasks {
+		done := false
+		for _, s := range d.TerminalStates {
+			done = done || strings.EqualFold(strings.TrimSpace(t.State), strings.TrimSpace(s))
+		}
+		if !done {
+			return false, len(ids), nil
+		}
+	}
+	return true, len(ids), nil
 }

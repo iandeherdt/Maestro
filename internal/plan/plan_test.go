@@ -286,3 +286,30 @@ func TestStore(t *testing.T) {
 		t.Fatal("delete")
 	}
 }
+
+func TestFinishedOnceEveryTaskIsDone(t *testing.T) {
+	d, f := desk(t)
+	d.TerminalStates = []string{"Done", "Cancelled"}
+	if done, _, err := d.Finished(ctx, idea); done || err != nil {
+		t.Fatalf("without a plan: %v %v", done, err)
+	}
+	p, _ := Parse(twoTasks, workers)
+	if err := d.Propose(ctx, idea, p); err != nil {
+		t.Fatal(err)
+	}
+	if done, _, _ := d.Finished(ctx, idea); done {
+		t.Fatal("a plan without tasks is finished")
+	}
+	if _, err := d.Materialize(ctx, idea); err != nil {
+		t.Fatal(err)
+	}
+	f.Put(issue.Issue{ID: "task-1", State: "Done"})
+	f.Put(issue.Issue{ID: "task-2", State: "In Progress"})
+	if done, n, _ := d.Finished(ctx, idea); done || n != 2 {
+		t.Fatalf("one task open: %v %d", done, n)
+	}
+	f.Put(issue.Issue{ID: "task-2", State: " cancelled"})
+	if done, n, err := d.Finished(ctx, idea); !done || n != 2 || err != nil {
+		t.Fatalf("all tasks done: %v %d %v", done, n, err)
+	}
+}
