@@ -83,8 +83,14 @@ func (g *game) save() error {
 	return os.WriteFile(g.savePath(), append(raw, '\n'), 0o600)
 }
 
+// git runs git without a terminal: a question for a password fails at
+// once instead of waiting where nobody sees it.
 func (g *game) git(args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", g.dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if os.Getenv("GIT_SSH_COMMAND") == "" {
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new")
+	}
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -157,8 +163,9 @@ func runGame(ctx context.Context, ui *setup.UI, g *game) int {
 	steps := []setup.Step{
 		&gameKind{g}, &gameFolder{g}, &gameGit{g}, &gamePacks{g}, &gameCommit{g}, &gameGitHub{g},
 		&gameRepo{g},
-		&setup.Machine{}, &setup.CreateApp{Port: setup.DefaultPort}, &setup.InstallApp{}, &setup.Tickets{}, &setup.WorkflowFile{},
-		&gameEnable{g}, &gameLicence{g}, &gameImage{g},
+		&setup.Machine{}, &setup.CreateApp{Port: setup.DefaultPort}, &setup.InstallApp{}, &setup.Tickets{},
+		&setup.WorkflowFile{PackTests: func() string { return "sh conventions/" + g.engine + "/verify.sh" }},
+		&gameEnable{g}, &gameImage{g}, &gameLicence{g},
 	}
 	if err := setup.Run(ctx, ui, g.st, steps); err != nil {
 		if errors.Is(err, setup.ErrAborted) {
@@ -355,14 +362,37 @@ func (s *gameFolder) Run(_ context.Context, ui *setup.UI, _ *setup.State) error 
 		other := len(options)
 		options = append(options, "Another folder: I will type its path")
 		none := len(options)
-		options = append(options, "None yet: tell me how to make one in Unity Hub")
+		if s.localEditor(want) != "" {
+			options = append(options, "None yet: make a new one with Unity "+want)
+		} else {
+			options = append(options, "None yet: tell me how to make one in Unity Hub")
+		}
 		i, err := ui.Choose("Which Unity project is the game?", options)
 		if err != nil {
 			return err
 		}
 		switch i {
 		case none:
-			ui.Say("  Make the project in Unity Hub:")
+			if editor := s.localEditor(want); editor != "" {
+				ans, err := ui.Ask("  Where should the new project be? A folder that does not exist yet, or an empty one", filepath.Join(cwd, "my-game"), nil)
+				if err != nil {
+					return err
+				}
+				dir, err := filepath.Abs(expandHome(ans, s.home))
+				if err != nil {
+					return err
+				}
+				if err := s.create(ui, editor, want, dir); err != nil {
+					if errors.Is(err, setup.ErrAborted) {
+						return err
+					}
+					ui.Say("  %v", err)
+					continue
+				}
+				s.dir = dir
+				break
+			}
+			ui.Say("  Unity %s is not installed in Unity Hub on this machine, so make the project in Hub:", want)
 			ui.Say("   1. If Hub's Installs page has no Unity %s: Install Editor, the Archive tab, and pick %s.", want, want)
 			ui.Say("   2. Projects, New project, Editor version %s, a template such as Universal 3D.", want)
 			ui.Say("   3. Give it a name and a location, press Create project, and close Unity when it has opened.")
@@ -382,8 +412,35 @@ func (s *gameFolder) Run(_ context.Context, ui *setup.UI, _ *setup.State) error 
 		default:
 			s.dir = paths[i]
 		}
+		if projectVersion(s.dir) == "" {
+			// Hub makes the project in a folder of its own inside the one
+			// chosen as its location.
+			if sub := onlyProject(s.dir); sub != "" {
+				ui.Say("  The Unity project is in the folder inside it: %s", tildePath(sub, s.home))
+				s.dir = sub
+			} else if emptyDir(s.dir) {
+				if editor := s.localEditor(want); editor != "" {
+					if err := s.create(ui, editor, want, s.dir); err != nil {
+						if errors.Is(err, setup.ErrAborted) {
+							return err
+						}
+						ui.Say("  %v", err)
+						s.dir = ""
+						continue
+					}
+				}
+			}
+		}
 		if p := s.problem(); p != "" {
 			ui.Say("  %s.", p)
+			if projectVersion(s.dir) == "" {
+				if emptyDir(s.dir) {
+					ui.Say("  Unity %s is not installed in Unity Hub, so the project cannot be made here. Install it in", want)
+					ui.Say("  Hub (Installs, Install Editor, Archive), or choose None yet for the steps in Hub.")
+				} else {
+					ui.Say("  The folder holds no Unity project. Choose one, or a new or empty folder to make one in.")
+				}
+			}
 			if strings.Contains(p, "the checks use") {
 				ui.Say("  Open it in Unity Hub with Editor %s (Hub asks whether to change the version: yes), let Unity", want)
 				ui.Say("  finish, close it, and choose it here again. The agents' checks run that exact version.")
@@ -393,6 +450,100 @@ func (s *gameFolder) Run(_ context.Context, ui *setup.UI, _ *setup.State) error 
 		}
 		return s.save()
 	}
+}
+
+// emptyDir reports whether a folder does not exist or holds nothing but
+// Git's and the Finder's own files.
+func emptyDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	for _, e := range entries {
+		if e.Name() != ".git" && e.Name() != ".DS_Store" {
+			return false
+		}
+	}
+	return true
+}
+
+// onlyProject is the one Unity project directly inside dir, empty when
+// there is none or more than one.
+func onlyProject(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	found := ""
+	for _, e := range entries {
+		if p := filepath.Join(dir, e.Name()); e.IsDir() && projectVersion(p) != "" {
+			if found != "" {
+				return ""
+			}
+			found = p
+		}
+	}
+	return found
+}
+
+// localEditor is the Unity Editor of a version as Unity Hub installs it on
+// this machine, empty when there is none.
+func (s *gameFolder) localEditor(version string) string {
+	var roots []string
+	var rel string
+	switch s.goos {
+	case "darwin":
+		roots = []string{"/Applications/Unity/Hub/Editor"}
+		rel = "Unity.app/Contents/MacOS/Unity"
+	case "windows":
+		roots = []string{`C:\Program Files\Unity\Hub\Editor`}
+		rel = `Editor\Unity.exe`
+	default:
+		roots = []string{filepath.Join(s.home, "Unity", "Hub", "Editor")}
+		rel = "Editor/Unity"
+	}
+	// Hub can be told to install editors elsewhere; it keeps that place as
+	// a JSON string.
+	for _, f := range []string{
+		filepath.Join(s.home, "Library", "Application Support", "UnityHub", "secondaryInstallPath.json"),
+		filepath.Join(s.home, ".config", "UnityHub", "secondaryInstallPath.json"),
+	} {
+		var other string
+		if raw, err := os.ReadFile(f); err == nil && json.Unmarshal(raw, &other) == nil && other != "" {
+			roots = append(roots, other)
+		}
+	}
+	for _, r := range roots {
+		p := filepath.Join(r, version, rel)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// create makes a new Unity project with the Editor on this machine, which
+// uses the licence Unity Hub activated here.
+func (s *gameFolder) create(ui *setup.UI, editor, version, dir string) error {
+	if !emptyDir(dir) {
+		return fmt.Errorf("%s holds other files; a new project needs a new or empty folder", tildePath(dir, s.home))
+	}
+	ok, err := ui.Confirm(fmt.Sprintf("  Make a new Unity project in %s with Unity %s? It takes a minute or two.", tildePath(dir, s.home), version))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return setup.ErrAborted
+	}
+	logFile := filepath.Join(os.TempDir(), "maestro-unity-create.log")
+	stop := ui.Waiting("Unity is making the project")
+	err = exec.Command(editor, "-batchmode", "-nographics", "-quit", "-createProject", dir, "-logFile", logFile).Run()
+	stop()
+	if err != nil || projectVersion(dir) == "" {
+		return fmt.Errorf("unity could not make the project (%v). Its log is %s; the last lines often say why, such as no licence: sign in to Unity Hub and add one", err, logFile)
+	}
+	ui.Say("  The project is made with Unity %s.", projectVersion(dir))
+	return nil
 }
 
 func expandHome(p, home string) string {
@@ -583,7 +734,7 @@ type gameGitHub struct{ *game }
 
 func (*gameGitHub) Title() string { return "Put it on GitHub" }
 
-var remoteRE = regexp.MustCompile(`github\.com[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(\.git)?/?$`)
+var remoteRE = regexp.MustCompile(`github\.com(?::443)?[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(\.git)?/?$`)
 
 // origin is the GitHub repository the project is pushed to.
 func (s *gameGitHub) origin() string {
@@ -607,7 +758,10 @@ func (s *gameGitHub) Check(context.Context, *setup.State) (setup.Status, error) 
 		return setup.Status{Detail: "Nothing is committed yet."}, nil
 	}
 	remote, err := s.git("ls-remote", "--heads", "origin")
-	if err != nil || !strings.Contains(remote, head) {
+	if err != nil {
+		return setup.Status{Detail: "Git cannot reach " + repo + " on GitHub without asking for a password; the next part sets that up."}, nil
+	}
+	if !strings.Contains(remote, head) {
 		return setup.Status{Detail: "The project is not pushed to " + repo + " yet."}, nil
 	}
 	s.repo = repo
@@ -649,13 +803,154 @@ func (s *gameGitHub) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 		if _, err := ui.Ask("  Press Enter when it exists", "", nil); err != nil {
 			return err
 		}
-		if out, err := s.git("remote", "add", "origin", "https://github.com/"+repo+".git"); err != nil {
-			return fmt.Errorf("git remote add: %v: %s", err, out)
+		verb := "add"
+		if _, err := s.git("config", "--get", "remote.origin.url"); err == nil {
+			verb = "set-url" // an origin the guide cannot read
+		}
+		if out, err := s.git("remote", verb, "origin", "https://github.com/"+repo+".git"); err != nil {
+			return fmt.Errorf("git remote %s: %v: %s", verb, err, out)
 		}
 	}
-	ui.Say("  Pushing to %s (Git may ask you to sign in):", s.origin())
+	if err := s.access(ui); err != nil {
+		return err
+	}
+	if err := s.mergeRemote(ui); err != nil {
+		return err
+	}
+	ui.Say("  Pushing to %s:", s.origin())
 	if err := s.interactive("git", "push", "-u", "origin", "HEAD"); err != nil {
 		return explain("the push did not succeed. Fix what Git said above and run `maestro new` again")
+	}
+	return nil
+}
+
+// mergeRemote takes in what the repository on GitHub already holds, such
+// as the README GitHub adds when it makes a repository, so the push is
+// not refused.
+func (s *gameGitHub) mergeRemote(ui *setup.UI) error {
+	branch, err := s.git("symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return nil
+	}
+	if out, err := s.git("fetch", "origin", branch); err != nil {
+		if strings.Contains(out, "couldn't find remote ref") {
+			return nil // an empty repository
+		}
+		return fmt.Errorf("git fetch: %s", out)
+	}
+	if _, err := s.git("merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"); err == nil {
+		return nil
+	}
+	files, _ := s.git("ls-tree", "-r", "--name-only", "FETCH_HEAD")
+	ui.Say("  The repository on GitHub already holds commits, with these files:")
+	for i, f := range strings.Split(files, "\n") {
+		if i == 8 {
+			ui.Say("    and more")
+			break
+		}
+		ui.Show("    %s", f)
+	}
+	ok, err := ui.Confirm("  Merge them into the project, keeping the project's own version of a file both have?")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return setup.ErrAborted
+	}
+	if out, err := s.git("merge", "--allow-unrelated-histories", "--no-edit", "-X", "ours", "FETCH_HEAD"); err != nil {
+		s.git("merge", "--abort")
+		return explain("the merge did not succeed: %s\nMerge by hand (git pull --allow-unrelated-histories origin %s) and run `maestro new` again", out, branch)
+	}
+	return nil
+}
+
+// port443 moves an SSH remote to GitHub's SSH service on port 443 when the
+// network lets nothing through on port 22, and reports whether git can
+// reach the repository then.
+func (s *gameGitHub) port443(ui *setup.UI, failure string) bool {
+	url, _ := s.git("config", "--get", "remote.origin.url")
+	if !strings.HasPrefix(url, "git@github.com:") && !strings.HasPrefix(url, "ssh://git@github.com/") {
+		return false
+	}
+	if !strings.Contains(failure, "port 22") && !strings.Contains(failure, "Connection closed") && !strings.Contains(failure, "timed out") {
+		return false
+	}
+	alt := "ssh://git@ssh.github.com:443/" + s.origin() + ".git"
+	if _, err := s.git("remote", "set-url", "origin", alt); err != nil {
+		return false
+	}
+	if _, err := s.git("ls-remote", "--heads", "origin"); err != nil {
+		s.git("remote", "set-url", "origin", url)
+		return false
+	}
+	ui.Say("  This network lets no SSH through on port 22, so Git now uses GitHub's SSH on port 443: %s", alt)
+	return true
+}
+
+// access makes sure git can reach the repository without a password,
+// which GitHub no longer takes: with the gh command's login, or with an
+// SSH key.
+func (s *gameGitHub) access(ui *setup.UI) error {
+	out, err := s.git("ls-remote", "--heads", "origin")
+	if err == nil {
+		return nil
+	}
+	repo := s.origin()
+	if s.port443(ui, out) {
+		return nil
+	}
+	url, _ := s.git("config", "--get", "remote.origin.url")
+	ui.Say("  Git cannot sign in to GitHub by itself yet. GitHub takes no passwords for Git, only a login")
+	ui.Say("  through the gh command or an SSH key.")
+	var options []string
+	var acts []func() error
+	if _, err := s.look("gh"); err == nil {
+		options = append(options, "Use my GitHub login through gh (gh auth login, then gh auth setup-git)")
+		acts = append(acts, func() error {
+			if exec.Command("gh", "auth", "status").Run() != nil {
+				if err := s.interactive("gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https"); err != nil {
+					return err
+				}
+			}
+			if err := s.interactive("gh", "auth", "setup-git"); err != nil {
+				return err
+			}
+			if !strings.HasPrefix(url, "https://") {
+				_, err := s.git("remote", "set-url", "origin", "https://github.com/"+repo+".git")
+				return err
+			}
+			return nil
+		})
+	}
+	keys, _ := filepath.Glob(filepath.Join(s.home, ".ssh", "id_*.pub"))
+	if len(keys) > 0 {
+		options = append(options, "Use my SSH key ("+tildePath(strings.TrimSuffix(keys[0], ".pub"), s.home)+")")
+		acts = append(acts, func() error {
+			if _, err := s.git("remote", "set-url", "origin", "git@github.com:"+repo+".git"); err != nil {
+				return err
+			}
+			if out, err := s.git("ls-remote", "--heads", "origin"); err != nil {
+				s.port443(ui, out)
+			}
+			return nil
+		})
+	}
+	options = append(options, "I will set it up myself, then run maestro new again")
+	i, err := ui.Choose("How should Git sign in to GitHub?", options)
+	if err != nil {
+		return err
+	}
+	if i == len(acts) {
+		ui.Say("  The simplest way: install gh (on a Mac: brew install gh), then run")
+		ui.Say("    gh auth login && gh auth setup-git")
+		ui.Say("  Or add an SSH key to your GitHub account: https://docs.github.com/en/authentication/connecting-to-github-with-ssh")
+		return setup.ErrAborted
+	}
+	if err := acts[i](); err != nil {
+		return explain("that did not work (%v). Run `maestro new` again to try another way", err)
+	}
+	if out, err := s.git("ls-remote", "--heads", "origin"); err != nil {
+		return explain("Git still cannot reach %s: %s\nIf the repository does not exist yet, make it on github.com first; then run `maestro new` again", repo, out)
 	}
 	return nil
 }
@@ -750,7 +1045,7 @@ func (s *gameEnable) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 	return nil
 }
 
-// ---- 9. the Unity licence
+// ---- 10. the Unity licence (after the image: Unity activates inside it)
 
 type gameLicence struct{ *game }
 
@@ -804,24 +1099,25 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 				return nil
 			}
 		}
+		// Unity 6's Hub keeps an entitlement licence bound to this machine,
+		// which a Linux container cannot use, so Hub is no way in.
 		i, err := ui.Choose("How should the checks get a licence?", []string{
-			"With Unity Hub: I will sign in there and add a licence, then come back",
-			"With my Unity account, here in the terminal (maestro unity activate)",
+			"Sign in to Unity in my browser (two-step verification works)",
+			"With my Unity account's email and password (no two-step verification)",
 			"From a licence file I have (Unity_lic.ulf)",
 		})
 		if err != nil {
 			return err
 		}
 		switch i {
-		case 0:
-			ui.Say("  In Unity Hub: sign in, open Preferences (or Settings), Licenses, Add, and pick")
-			ui.Say("  Get a free personal license (or the licence you have).")
-			if _, err := ui.Ask("  Press Enter when Hub shows the licence", "", nil); err != nil {
-				return err
+		case 0, 1:
+			mode := activateBrowser
+			if i == 1 {
+				mode = activatePassword
 			}
-		case 1:
-			if code := unityActivate(s.setupDir, st.WorkflowFile, store, false, s.rawIn, s.stdout, s.stderr); code != 0 {
-				return errors.New("the activation did not succeed; the reason is above")
+			if code := unityActivate(s.setupDir, st.WorkflowFile, store, mode, s.rawIn, s.stdout, s.stderr); code != 0 {
+				ui.Say("  The activation did not succeed; the reason is above. Choose again, or stop with Ctrl-C.")
+				continue
 			}
 			return nil
 		case 2:
@@ -838,7 +1134,7 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 	}
 }
 
-// ---- 10. the image
+// ---- 9. the image
 
 type gameImage struct{ *game }
 

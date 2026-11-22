@@ -27,6 +27,9 @@ type WorkflowFile struct {
 	GOOS string
 	// LookPath finds a program. Default exec.LookPath.
 	LookPath func(string) (string, error)
+	// PackTests, when set, names the conventions pack's own test command.
+	// The service runs that by itself, so there is nothing to ask.
+	PackTests func() string
 }
 
 func (*WorkflowFile) Title() string { return "Write the workflow file" }
@@ -80,23 +83,34 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	ui.Say("  One question: how do you test %s?", st.Repo)
-	ui.Say("  When the agent says it is done, the service runs your test command itself, in the agent's")
-	ui.Say("  copy of the repository. If the command fails, the work is not published and the agent")
-	ui.Say("  gets the output to fix it. Type the command you would run yourself, for example:")
-	ui.Say("      npm test        go test ./...        make check")
-	ui.Say("  If the repository has no tests yet, just press Enter.")
-	verify, err := ui.Ask("  Test command", "", validCommand)
-	if err != nil {
-		return err
+	packTests := ""
+	if w.PackTests != nil {
+		packTests = w.PackTests()
 	}
-	verify = strings.TrimSpace(verify)
-	if verify == "" {
-		// "true" always succeeds. The file must hold a command, and a
-		// first try on an empty repository should not need one.
-		verify = noTests
-		ui.Say("  No test command: the agent's work will be published without being tested. That is")
-		ui.Say("  fine for a first try. Later, change verify.command in the file below.")
+	var verify string
+	if packTests != "" {
+		verify = noTests // config runs the packs' checks in its place
+		ui.Say("  The tests: the service runs %s itself before it publishes anything,", packTests)
+		ui.Say("  so there is no test command to give. Your own command can go in verify.command later.")
+	} else {
+		ui.Say("  One question: how do you test %s?", st.Repo)
+		ui.Say("  When the agent says it is done, the service runs your test command itself, in the agent's")
+		ui.Say("  copy of the repository. If the command fails, the work is not published and the agent")
+		ui.Say("  gets the output to fix it. Type the command you would run yourself, for example:")
+		ui.Say("      npm test        go test ./...        make check")
+		ui.Say("  If the repository has no tests yet, just press Enter.")
+		answer, err := ui.Ask("  Test command", "", validCommand)
+		if err != nil {
+			return err
+		}
+		verify = strings.TrimSpace(answer)
+		if verify == "" {
+			// "true" always succeeds. The file must hold a command, and a
+			// first try on an empty repository should not need one.
+			verify = noTests
+			ui.Say("  No test command: the agent's work will be published without being tested. That is")
+			ui.Say("  fine for a first try. Later, change verify.command in the file below.")
+		}
 	}
 	ui.Say("")
 	ui.Say("  One more: does %s run automatic checks on pull requests (GitHub Actions or another CI)?", st.Repo)
