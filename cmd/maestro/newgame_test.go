@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iandeherdt/Maestro/internal/setup"
 )
 
 // A new Godot game from an empty folder, as far as the steps that need
@@ -87,5 +89,46 @@ func TestHubProjects(t *testing.T) {
 	f := &gameFolder{&game{engine: "unity", home: home, goos: "darwin"}}
 	if got := f.hubProjects(); len(got) != 1 || got[0] != proj {
 		t.Errorf("hub projects: %v", got)
+	}
+}
+
+// Hub puts a new project in a folder of its own inside the location; the
+// guide finds it there. An empty folder gets a project made by the Editor
+// Hub installed.
+func TestUnityFolderInsideAndNewProject(t *testing.T) {
+	home := t.TempDir()
+	want := unityVersion()
+	loc := filepath.Join(home, "projects", "test")
+	proj := filepath.Join(loc, "My project")
+	os.MkdirAll(filepath.Join(proj, "ProjectSettings"), 0o755)
+	os.WriteFile(filepath.Join(proj, "ProjectSettings", "ProjectVersion.txt"), []byte("m_EditorVersion: "+want+"\n"), 0o644)
+	if got := onlyProject(loc); got != proj {
+		t.Errorf("onlyProject: %q", got)
+	}
+	if emptyDir(loc) || !emptyDir(filepath.Join(home, "nothing")) {
+		t.Error("emptyDir")
+	}
+
+	// A stand-in for the Editor: it makes ProjectSettings in the folder after -createProject.
+	editor := filepath.Join(home, "Unity", "Hub", "Editor", want, "Editor", "Unity")
+	os.MkdirAll(filepath.Dir(editor), 0o755)
+	os.WriteFile(editor, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -createProject ]; then d=$2; fi; shift; done\n"+
+		"mkdir -p \"$d/ProjectSettings\" && echo 'm_EditorVersion: "+want+"' > \"$d/ProjectSettings/ProjectVersion.txt\"\n"), 0o755)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	g := &game{engine: "unity", home: home, goos: "linux", setupDir: t.TempDir()}
+	f := &gameFolder{g}
+	if f.localEditor(want) != editor {
+		t.Fatalf("editor not found: %q", f.localEditor(want))
+	}
+	// Choose "None yet" (the last of: another folder, none yet), take the
+	// offered folder, and say yes.
+	var out strings.Builder
+	ui := setup.NewUI(strings.NewReader("2\n\ny\n"), &out)
+	if err := f.Run(t.Context(), ui, nil); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if g.dir != filepath.Join(cwd, "my-game") || projectVersion(g.dir) != want {
+		t.Errorf("project %q:\n%s", g.dir, out.String())
 	}
 }

@@ -355,14 +355,37 @@ func (s *gameFolder) Run(_ context.Context, ui *setup.UI, _ *setup.State) error 
 		other := len(options)
 		options = append(options, "Another folder: I will type its path")
 		none := len(options)
-		options = append(options, "None yet: tell me how to make one in Unity Hub")
+		if s.localEditor(want) != "" {
+			options = append(options, "None yet: make a new one with Unity "+want)
+		} else {
+			options = append(options, "None yet: tell me how to make one in Unity Hub")
+		}
 		i, err := ui.Choose("Which Unity project is the game?", options)
 		if err != nil {
 			return err
 		}
 		switch i {
 		case none:
-			ui.Say("  Make the project in Unity Hub:")
+			if editor := s.localEditor(want); editor != "" {
+				ans, err := ui.Ask("  Where should the new project be? A folder that does not exist yet, or an empty one", filepath.Join(cwd, "my-game"), nil)
+				if err != nil {
+					return err
+				}
+				dir, err := filepath.Abs(expandHome(ans, s.home))
+				if err != nil {
+					return err
+				}
+				if err := s.create(ui, editor, want, dir); err != nil {
+					if errors.Is(err, setup.ErrAborted) {
+						return err
+					}
+					ui.Say("  %v", err)
+					continue
+				}
+				s.dir = dir
+				break
+			}
+			ui.Say("  Unity %s is not installed in Unity Hub on this machine, so make the project in Hub:", want)
 			ui.Say("   1. If Hub's Installs page has no Unity %s: Install Editor, the Archive tab, and pick %s.", want, want)
 			ui.Say("   2. Projects, New project, Editor version %s, a template such as Universal 3D.", want)
 			ui.Say("   3. Give it a name and a location, press Create project, and close Unity when it has opened.")
@@ -382,8 +405,35 @@ func (s *gameFolder) Run(_ context.Context, ui *setup.UI, _ *setup.State) error 
 		default:
 			s.dir = paths[i]
 		}
+		if projectVersion(s.dir) == "" {
+			// Hub makes the project in a folder of its own inside the one
+			// chosen as its location.
+			if sub := onlyProject(s.dir); sub != "" {
+				ui.Say("  The Unity project is in the folder inside it: %s", tildePath(sub, s.home))
+				s.dir = sub
+			} else if emptyDir(s.dir) {
+				if editor := s.localEditor(want); editor != "" {
+					if err := s.create(ui, editor, want, s.dir); err != nil {
+						if errors.Is(err, setup.ErrAborted) {
+							return err
+						}
+						ui.Say("  %v", err)
+						s.dir = ""
+						continue
+					}
+				}
+			}
+		}
 		if p := s.problem(); p != "" {
 			ui.Say("  %s.", p)
+			if projectVersion(s.dir) == "" {
+				if emptyDir(s.dir) {
+					ui.Say("  Unity %s is not installed in Unity Hub, so the project cannot be made here. Install it in", want)
+					ui.Say("  Hub (Installs, Install Editor, Archive), or choose None yet for the steps in Hub.")
+				} else {
+					ui.Say("  The folder holds no Unity project. Choose one, or a new or empty folder to make one in.")
+				}
+			}
 			if strings.Contains(p, "the checks use") {
 				ui.Say("  Open it in Unity Hub with Editor %s (Hub asks whether to change the version: yes), let Unity", want)
 				ui.Say("  finish, close it, and choose it here again. The agents' checks run that exact version.")
@@ -393,6 +443,100 @@ func (s *gameFolder) Run(_ context.Context, ui *setup.UI, _ *setup.State) error 
 		}
 		return s.save()
 	}
+}
+
+// emptyDir reports whether a folder does not exist or holds nothing but
+// Git's and the Finder's own files.
+func emptyDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	for _, e := range entries {
+		if e.Name() != ".git" && e.Name() != ".DS_Store" {
+			return false
+		}
+	}
+	return true
+}
+
+// onlyProject is the one Unity project directly inside dir, empty when
+// there is none or more than one.
+func onlyProject(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	found := ""
+	for _, e := range entries {
+		if p := filepath.Join(dir, e.Name()); e.IsDir() && projectVersion(p) != "" {
+			if found != "" {
+				return ""
+			}
+			found = p
+		}
+	}
+	return found
+}
+
+// localEditor is the Unity Editor of a version as Unity Hub installs it on
+// this machine, empty when there is none.
+func (s *gameFolder) localEditor(version string) string {
+	var roots []string
+	var rel string
+	switch s.goos {
+	case "darwin":
+		roots = []string{"/Applications/Unity/Hub/Editor"}
+		rel = "Unity.app/Contents/MacOS/Unity"
+	case "windows":
+		roots = []string{`C:\Program Files\Unity\Hub\Editor`}
+		rel = `Editor\Unity.exe`
+	default:
+		roots = []string{filepath.Join(s.home, "Unity", "Hub", "Editor")}
+		rel = "Editor/Unity"
+	}
+	// Hub can be told to install editors elsewhere; it keeps that place as
+	// a JSON string.
+	for _, f := range []string{
+		filepath.Join(s.home, "Library", "Application Support", "UnityHub", "secondaryInstallPath.json"),
+		filepath.Join(s.home, ".config", "UnityHub", "secondaryInstallPath.json"),
+	} {
+		var other string
+		if raw, err := os.ReadFile(f); err == nil && json.Unmarshal(raw, &other) == nil && other != "" {
+			roots = append(roots, other)
+		}
+	}
+	for _, r := range roots {
+		p := filepath.Join(r, version, rel)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// create makes a new Unity project with the Editor on this machine, which
+// uses the licence Unity Hub activated here.
+func (s *gameFolder) create(ui *setup.UI, editor, version, dir string) error {
+	if !emptyDir(dir) {
+		return fmt.Errorf("%s holds other files; a new project needs a new or empty folder", tildePath(dir, s.home))
+	}
+	ok, err := ui.Confirm(fmt.Sprintf("  Make a new Unity project in %s with Unity %s? It takes a minute or two.", tildePath(dir, s.home), version))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return setup.ErrAborted
+	}
+	logFile := filepath.Join(os.TempDir(), "maestro-unity-create.log")
+	stop := ui.Waiting("Unity is making the project")
+	err = exec.Command(editor, "-batchmode", "-nographics", "-quit", "-createProject", dir, "-logFile", logFile).Run()
+	stop()
+	if err != nil || projectVersion(dir) == "" {
+		return fmt.Errorf("unity could not make the project (%v). Its log is %s; the last lines often say why, such as no licence: sign in to Unity Hub and add one", err, logFile)
+	}
+	ui.Say("  The project is made with Unity %s.", projectVersion(dir))
+	return nil
 }
 
 func expandHome(p, home string) string {
