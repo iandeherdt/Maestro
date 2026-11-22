@@ -75,7 +75,7 @@
   "after_apply": [
     "In Unity, set Edit > Project Settings > Editor > Asset Serialization to Force Text and Version Control to Visible Meta Files, if they are not already.",
     "Run `maestro unity activate` on every machine that runs agents for the project. The licence stays on that machine and is given to the checks only, never to the agent.",
-    "For CI, add the repository secret UNITY_LICENSE (see the comment at the top of .github/workflows/conventions-unity.yml)."
+    "CI checks the meta files without a licence. For Unity's tests in CI too, add the repository secret UNITY_LICENSE (see the comment at the top of .github/workflows/conventions-unity.yml)."
   ],
   "requires": {
     "path": "ProjectSettings/ProjectVersion.txt",
