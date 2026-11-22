@@ -79,6 +79,9 @@ type Pack struct {
 	// that a new project passes its checks from the first commit. A
 	// starter file that exists is never touched.
 	StarterUnless string `json:"starter_unless"`
+	// Platform is the one platform the pack's tools exist for, such as
+	// "linux/amd64" for the Unity Editor. The sandbox is then made for it.
+	Platform string `json:"platform"`
 }
 
 // Requirement is a file the project must have, and how to make it.
@@ -185,6 +188,9 @@ func (p *Pack) valid(name string) error {
 	}
 	if p.Requires != nil && (!safeRel(p.Requires.Path) || p.Requires.Hint == "") {
 		return errors.New("requires needs a relative path and a hint")
+	}
+	if p.Platform != "" && !regexp.MustCompile(`^linux/(amd64|arm64)$`).MatchString(p.Platform) {
+		return errors.New("platform must be linux/amd64 or linux/arm64")
 	}
 	if p.StarterUnless != "" && !safeRel(p.StarterUnless) {
 		return errors.New("starter_unless must be a relative path")
@@ -460,6 +466,8 @@ type Settings struct {
 	Checks []string
 	// BinaryPaths are the packs' folders for binary files.
 	BinaryPaths []string
+	// Platform is the platform a pack needs, empty for any.
+	Platform string
 }
 
 // Derive combines packs into settings.
@@ -472,6 +480,9 @@ func Derive(list []*Pack) Settings {
 		s.Image = append(s.Image, p.Image...)
 		s.Checks = append(s.Checks, p.Check)
 		s.BinaryPaths = append(s.BinaryPaths, p.BinaryPaths...)
+		if p.Platform != "" {
+			s.Platform = p.Platform
+		}
 		// A pack that is switched on while its files are not in the
 		// repository must fail with words, not with "No such file".
 		guard := fmt.Sprintf("[ -f %s ] || { echo 'The conventions pack %s is switched on in the settings file, "+

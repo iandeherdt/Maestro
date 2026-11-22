@@ -507,22 +507,44 @@ cannot skip; pick the ones that fit the project.
 
 ### Start a game project
 
-Several packs go on in one command. For a new Godot game with art made by scripts:
+One command walks you through it, step by step, in the terminal:
 
 ```sh
-mkdir my-game && cd my-game && git init
-maestro conventions apply godot blender klad   # a new Godot project gets a starter project and test
+maestro new
+```
+
+It asks which engine the game uses (Unity or Godot) and whether the agents make Blender models
+or klad art, and then:
+
+1. finds the project. For Unity it lists the projects Unity Hub knows and checks that one is
+   saved with the Editor version of the image (6000.3.29f1), and tells you how to make one in
+   Hub if there is none. For Godot any folder will do, an empty one too;
+2. makes it a Git repository, writes the packs (rules, checks, CI and skills; a new Godot project
+   also gets a starter project, a first test and GUT; a Unity project a first EditMode test) and
+   commits it;
+3. puts it on GitHub (with `gh` when you have it, or it tells you what to make on github.com),
+   and points Maestro on this machine at it: the GitHub App gets access, and the settings file
+   is written;
+4. switches the packs on, gives the checks your Unity licence (it finds the one Unity Hub left
+   on this machine), and builds the sandbox image.
+
+Every step says what it will do and waits for you. Stop it at any point and run `maestro new`
+again: finished steps are skipped. `maestro new --another` starts another game. One machine
+runs agents for one repository; when Maestro already works on another one of the same owner,
+`maestro new` switches it and keeps the old settings file.
+
+The steps one by one, for a script or for an existing project:
+
+```sh
+maestro conventions apply godot blender klad   # in a checkout; a new Godot project gets a starter
 sh conventions/godot/get-gut.sh                # the GUT test framework, checked by its commit
-git add -A && git commit -m "Start the game" && git push   # to a new repository on GitHub
+git add -A && git commit -m "Start the game" && git push
 maestro conventions enable godot blender klad && maestro image
 ```
 
-For Unity, make the project in Unity Hub first (Editor 6000.3.29f1), run `git init` in its folder,
-and then `maestro conventions apply unity`: the pack adds a first EditMode test, so the project
-passes its checks from its first commit. Then `maestro unity activate` once. `apply` prints
-what is left for the packs you named, in order, and writes nothing when one of them cannot be
-applied. The art packs name their output folders as the only places binary files may go (see
-below), with no settings to write.
+The Unity Editor for Linux exists for Intel only. On a Mac with Apple Silicon the sandbox then
+runs emulated, more slowly: switch on "Use Rosetta for x86_64/amd64 emulation" in Docker
+Desktop's settings.
 
 What it does not do: play the game, judge how it feels, or run anything that needs a screen or a
 GPU (the sandbox has neither; Blender renders on the CPU). Art drawn by hand stays yours: commit

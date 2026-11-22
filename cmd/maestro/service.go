@@ -163,6 +163,7 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	if err != nil {
 		return nil, err
 	}
+	in.box.Platform = conventions.Derive(packs).Platform
 	if err := conventions.SyncSkills(in.skills.SkillsDir(), packs); err != nil {
 		return nil, err
 	}
@@ -248,6 +249,9 @@ func interruptible() (context.Context, context.CancelFunc) {
 // browserLine adds a browser and fonts to the sandbox image.
 const browserLine = "RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji && rm -rf /var/lib/apt/lists/*"
 
+// imagePacksLabel says which conventions packs the image was built for.
+const imagePacksLabel = "maestro.conventions"
+
 // runImage builds the sandbox image.
 func runImage(args []string, stdout, stderr io.Writer) int {
 	dir, explicit, ok := parse("image", args, stderr)
@@ -267,7 +271,8 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return report(stderr, err)
 	}
-	b := dockerbox.Build{Out: stdout, Version: version, Extra: conventions.Derive(packs).Image}
+	b := dockerbox.Build{Out: stdout, Version: version, Extra: conventions.Derive(packs).Image,
+		Labels: map[string]string{imagePacksLabel: strings.Join(in.cfg.Conventions, ",")}}
 	if len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "" {
 		// The service takes the screenshots and the pictures of designs
 		// with this browser (SPEC 24 and 25).
@@ -277,7 +282,7 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 	if !strings.HasPrefix(b.Version, "v") {
 		b.Version = "v" + b.Version
 	}
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" && (in.box.Platform == "" || in.box.Platform == "linux/"+runtime.GOARCH) {
 		if self, err := os.Executable(); err == nil {
 			b.Binary = self
 		}

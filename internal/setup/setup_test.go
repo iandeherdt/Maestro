@@ -701,3 +701,27 @@ func TestLabelsStepReportsARefusal(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestSwitchRepo(t *testing.T) {
+	dir := t.TempDir()
+	st, err := LoadState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := filepath.Join(dir, "WORKFLOW.md")
+	os.WriteFile(wf, []byte("old"), 0o600)
+	st.Repo, st.InstallationID, st.WorkflowFile = "acme/web", "42", wf
+	if _, err := SwitchRepo(st, "other/game"); err == nil || !strings.Contains(err.Error(), "belongs to acme") {
+		t.Fatalf("another owner: %v", err)
+	}
+	kept, err := SwitchRepo(st, "acme/game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept != filepath.Join(dir, "WORKFLOW.web.md") || st.Repo != "acme/game" || st.InstallationID != "" || st.WorkflowFile != "" {
+		t.Fatalf("after the switch: %q %+v", kept, st)
+	}
+	if raw, _ := os.ReadFile(kept); string(raw) != "old" {
+		t.Error("the old settings file was not kept")
+	}
+}
