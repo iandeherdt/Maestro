@@ -69,7 +69,7 @@
   "image": [
     "COPY --from=docker.io/unityci/editor:ubuntu-6000.5.8f1-base-4.0.0@sha256:b34dac1ef79a927bc078d95e8c0993c94f47ac7b0b66e354a29b7ead878b90a8 /opt/unity /opt/unity",
     "COPY --from=docker.io/unityci/editor:ubuntu-6000.5.8f1-base-4.0.0@sha256:b34dac1ef79a927bc078d95e8c0993c94f47ac7b0b66e354a29b7ead878b90a8 /usr/lib/game-ci /usr/lib/game-ci",
-    "RUN apt-get update \\\n && apt-get install -y --no-install-recommends xvfb xauth libgtk-3-0 libgl1 libglu1-mesa libgbm1 libvulkan1 libasound2 libnss3 libxtst6 libxss1 libcap2 libicu72 libssl3 \\\n && rm -rf /var/lib/apt/lists/* \\\n && printf '6d61657374726f2d756e697479303031\\n' > /etc/machine-id"
+    "RUN apt-get update \\\n && apt-get install -y --no-install-recommends unzip xvfb xauth libgtk-3-0 libgl1 libglu1-mesa libgbm1 libvulkan1 libasound2 libnss3 libxtst6 libxss1 libcap2 libicu72 libssl3 \\\n && rm -rf /var/lib/apt/lists/* \\\n && printf '6d61657374726f2d756e697479303031\\n' > /etc/machine-id"
   ],
   "image_note": "the Unity Editor 6000.5.8f1 for Linux (about 8 GB)",
   "after_apply": [

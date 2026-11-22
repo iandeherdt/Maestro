@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -256,6 +258,26 @@ const browserLine = "RUN apt-get update && apt-get install -y --no-install-recom
 // imagePacksLabel says which conventions packs the image was built for.
 const imagePacksLabel = "maestro.conventions"
 
+// imageLinesLabel holds a hash of the packs' own lines of the image, so a
+// newer Maestro whose packs install something more can tell the image is
+// out of date.
+const imageLinesLabel = "maestro.image-lines"
+
+// imageExtra is what the image gets on top of the base: the packs' lines
+// and, when the service takes screenshots (SPEC 24 and 25), the browser.
+func imageExtra(packs []*conventions.Pack, browser bool) []string {
+	extra := conventions.Derive(packs).Image
+	if browser {
+		extra = append(extra, browserLine)
+	}
+	return extra
+}
+
+func linesHash(lines []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:8])
+}
+
 // runImage builds the sandbox image.
 func runImage(args []string, stdout, stderr io.Writer) int {
 	dir, explicit, ok := parse("image", args, stderr)
@@ -275,13 +297,9 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return report(stderr, err)
 	}
-	b := dockerbox.Build{Out: stdout, Version: version, Extra: conventions.Derive(packs).Image,
-		Labels: map[string]string{imagePacksLabel: strings.Join(in.cfg.Conventions, ",")}}
-	if len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "" {
-		// The service takes the screenshots and the pictures of designs
-		// with this browser (SPEC 24 and 25).
-		b.Extra = append(b.Extra, browserLine)
-	}
+	extra := imageExtra(packs, len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "")
+	b := dockerbox.Build{Out: stdout, Version: version, Extra: extra,
+		Labels: map[string]string{imagePacksLabel: strings.Join(in.cfg.Conventions, ","), imageLinesLabel: linesHash(extra)}}
 
 	if !strings.HasPrefix(b.Version, "v") {
 		b.Version = "v" + b.Version

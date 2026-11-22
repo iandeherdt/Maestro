@@ -60,6 +60,11 @@ if [ ! -x /opt/unity/Editor/Unity ]; then
   echo "The sandbox image has no Unity Editor. Switch the unity conventions pack on and run maestro image first." >&2
   exit 3
 fi
+if ! command -v unzip >/dev/null 2>&1; then
+  echo "The sandbox image is older than this version of Maestro and lacks unzip, which Unity's" >&2
+  echo "tool needs. Build it again with: maestro image" >&2
+  exit 3
+fi
 echo "Installing Unity's command-line tool in the container (it is thrown away afterwards)." >&2
 got=""
 for url in https://unity.com/install.sh https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh; do
@@ -81,40 +86,14 @@ echo >&2
 unity auth login --insecure-storage </dev/null >&2
 echo >&2
 echo "Signed in. Activating a Personal licence." >&2
-# Unity's tool and the Editor both talk to Unity's licensing client, a
-# separate program, over a local channel. Without Unity Hub nothing runs
-# it, and under emulation it starts slower than the Editor waits for, so
-# it is started here and given time.
+# Unity's tool downloads Unity's licensing client itself and unpacks it
+# with unzip; the client then activates the licence.
 activated=""
-try() { unity license activate --personal --accept-eula </dev/null >/tmp/activate.out 2>&1; }
-if try; then activated=1; fi
-client=/opt/unity/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client
-if [ -z "$activated" ] && [ -x "$client" ]; then
-  echo "Starting Unity's licensing client. On a Mac with Apple silicon this can take a few minutes." >&2
-  "$client" --namedPipe "LicenseClient-$(id -un)" >/tmp/client.out 2>&1 &
-  pre=""
-  if [ -f /usr/lib/game-ci/libsem_eintr_retry.so ]; then pre=/usr/lib/game-ci/libsem_eintr_retry.so; fi
-  # The Editor starts the client the way it wants it, should the line
-  # above not be enough; it gives up after a minute, the client stays.
-  LD_PRELOAD="$pre" xvfb-run -a -s "-screen 0 1024x768x24" /opt/unity/Editor/Unity -batchmode -nographics -quit \
-    -logFile /tmp/editor.log >/dev/null 2>&1 &
-  waited=0
-  while [ "$waited" -lt 300 ]; do
-    sleep 10
-    waited=$((waited + 10))
-    if try; then activated=1; break; fi
-    echo "  still waiting for the licensing client ($waited s)" >&2
-  done
-fi
-cat /tmp/activate.out >&2 2>/dev/null || true
+if unity license activate --personal --accept-eula </dev/null >&2; then activated=1; fi
 if [ -z "$activated" ]; then
-  echo "The licensing client did not answer. What it and the Editor wrote:" >&2
-  tail -n 15 /tmp/client.out >&2 2>/dev/null || true
-  grep -iE 'licen[cs]|entitlement|access token' /tmp/editor.log 2>/dev/null | tail -n 15 >&2 || true
-  for f in $(find "$HOME" /tmp -iname '*licensing*.log' 2>/dev/null | head -n 3); do
-    echo "== $f" >&2
-    tail -n 25 "$f" >&2
-  done
+  echo "What Unity's tool logged:" >&2
+  unity doctor </dev/null 2>&1 | grep -E '^recentLog' | tail -n 8 >&2 || true
+  exit 1
 fi
 cd "$HOME"
 found=""
