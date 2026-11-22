@@ -48,6 +48,75 @@ fi
 tar -cf - $found
 `
 
+// signInScript installs Unity's command-line tool in the container, signs
+// in through the browser, activates a Personal licence and writes it to
+// standard output as a tar stream, like activateScript. The sign-in is
+// kept in a plain file: a container has no keyring, and it is thrown away
+// afterwards, so nothing of it stays. Everything the
+// person should read goes to standard error.
+const signInScript = `set -eu
+export PATH="$HOME/.local/bin:$PATH"
+if [ ! -x /opt/unity/Editor/Unity ]; then
+  echo "The sandbox image has no Unity Editor. Switch the unity conventions pack on and run maestro image first." >&2
+  exit 3
+fi
+echo "Installing Unity's command-line tool in the container (it is thrown away afterwards)." >&2
+got=""
+for url in https://unity.com/install.sh https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh; do
+  if curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/unity-install.sh "$url"; then got=1; break; fi
+done
+if [ -z "$got" ]; then
+  echo "Unity's install script could not be downloaded." >&2
+  exit 1
+fi
+if ! bash /tmp/unity-install.sh >/tmp/install.log 2>&1 || ! command -v unity >/dev/null 2>&1; then
+  tail -n 20 /tmp/install.log >&2
+  echo "Unity's command-line tool did not install." >&2
+  exit 1
+fi
+echo >&2
+echo "Open the link below in your browser, sign in to Unity (two-step verification works)" >&2
+echo "and allow the login request. The link works once, for about five minutes." >&2
+echo >&2
+unity auth login --insecure-storage </dev/null >&2
+echo >&2
+echo "Signed in. Activating a Personal licence." >&2
+activated=""
+if unity license activate --personal --accept-eula </dev/null >&2; then activated=1; fi
+client=/opt/unity/Editor/Data/Resources/Licensing/Client
+if [ -z "$activated" ] && [ -d "$client" ]; then
+  # Without Unity Hub there may be no licensing client where the tool
+  # looks for one; lend it the Editor's own and try once more.
+  echo "Trying again with the licensing client of the Editor in the image." >&2
+  mkdir -p "$HOME/.config/unityhub/external-modules"
+  ln -sfn "$client" "$HOME/.config/unityhub/external-modules/licensingClient"
+  if unity license activate --personal --accept-eula </dev/null >&2; then activated=1; fi
+fi
+if [ -z "$activated" ]; then
+  # The Editor asks the signed-in tool for the account itself and can
+  # activate a Personal licence on its own.
+  echo "Letting the Unity Editor activate the licence with the sign-in." >&2
+  pre=""
+  if [ -f /usr/lib/game-ci/libsem_eintr_retry.so ]; then pre=/usr/lib/game-ci/libsem_eintr_retry.so; fi
+  LD_PRELOAD="$pre" xvfb-run -a -s "-screen 0 1024x768x24" /opt/unity/Editor/Unity -batchmode -nographics -quit \
+    -logFile /tmp/editor.log >/dev/null 2>&1 || true
+  grep -iE 'licen[cs]|entitlement|access token' /tmp/editor.log 2>/dev/null | tail -n 15 >&2 || true
+fi
+cd "$HOME"
+found=""
+for p in ` + "{{places}}" + `; do
+  if [ -d "$p" ]; then found="$found $p"; fi
+done
+if [ -z "$found" ]; then
+  echo "No licence came out of the activation. Files with licence in their name:" >&2
+  find . -iname '*licen*' -o -iname '*.ulf' -o -iname '*entitlement*' 2>/dev/null | head -n 20 >&2
+  echo "What Unity's tool reports:" >&2
+  unity doctor </dev/null 2>&1 | head -n 40 >&2 || true
+  exit 1
+fi
+tar -cf - $found
+`
+
 // Account is what Unity's activation needs.
 type Account struct{ Email, Password, Serial string }
 
@@ -68,6 +137,23 @@ func (b *Box) ActivateUnity(ctx context.Context, acct Account, stderr io.Writer)
 	if acct.Email == "" || acct.Password == "" {
 		return nil, fail("the activation needs the email address and the password of the Unity account")
 	}
+	return b.activate(ctx, activateScript, acct.Email+"\n"+acct.Password+"\n"+acct.Serial+"\n", stderr)
+}
+
+// SignInUnity activates a Personal licence through Unity's own sign-in in
+// a browser, so an account with two-step verification works. Unity's
+// command-line tool prints a link and waits while the person signs in on
+// any machine; nothing is typed into the container.
+func (b *Box) SignInUnity(ctx context.Context, stderr io.Writer) (map[string][]byte, error) {
+	if err := b.check(); err != nil {
+		return nil, err
+	}
+	return b.activate(ctx, signInScript, "", stderr)
+}
+
+// activate runs script in a container of the sandbox image, with input on
+// its standard input, and returns the licence it wrote to standard output.
+func (b *Box) activate(ctx context.Context, script, input string, stderr io.Writer) (map[string][]byte, error) {
 	name := b.prefix() + "-unity-" + token()
 	args := []string{"run", "--rm", "--interactive", "--name", name,
 		"--label", "maestro.worker=" + b.Worker, "--label", "maestro.step=unity-activate",
@@ -91,11 +177,11 @@ func (b *Box) ActivateUnity(ctx context.Context, acct Account, stderr io.Writer)
 	for i, p := range unity.Places {
 		places[i] = "'" + p + "'"
 	}
-	script := strings.Replace(activateScript, "{{places}}", strings.Join(places, " "), 1)
+	script = strings.Replace(script, "{{places}}", strings.Join(places, " "), 1)
 	args = append(args, b.Image, "sh", "-c", script)
 
 	cmd := exec.CommandContext(ctx, b.docker(), args...)
-	cmd.Stdin = strings.NewReader(acct.Email + "\n" + acct.Password + "\n" + acct.Serial + "\n")
+	cmd.Stdin = strings.NewReader(input)
 	var out capped
 	out.max = 8 << 20
 	cmd.Stdout, cmd.Stderr = &out, stderr

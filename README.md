@@ -553,8 +553,9 @@ or klad art, and then:
 3. puts it on GitHub (with `gh` when you have it, or it tells you what to make on github.com),
    and points Maestro on this machine at it: the GitHub App gets access, and the settings file
    is written;
-4. switches the packs on, gives the checks your Unity licence (it finds the one Unity Hub left
-   on this machine), and builds the sandbox image.
+4. switches the packs on, builds the sandbox image, and gives the checks a Unity licence: it
+   activates your Unity account inside the image, or takes a `Unity_lic.ulf` you have. The
+   licence Unity 6's Hub keeps on a Mac or PC is bound to that machine and does not work there.
 
 Every step says what it will do and waits for you. Stop it at any point and run `maestro new`
 again: finished steps are skipped. `maestro new --another` starts another game. When Maestro
@@ -592,7 +593,8 @@ Unity needs a licence to open a project and run its tests, so the pack also need
 
 ```sh
 maestro conventions enable unity && maestro image
-maestro unity activate          # once, with a Unity account; or --file Unity_lic.ulf
+maestro unity activate          # once: sign in to Unity in your browser (two-step verification works)
+                                # or --password (no two-step verification), or --file Unity_lic.ulf
 maestro unity                   # whether this machine has a licence
 ```
 

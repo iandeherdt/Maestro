@@ -18,8 +18,13 @@ import (
 
 const unityUsage = `usage:
   maestro unity                    whether this machine has a Unity licence for the checks
-  maestro unity activate [--serial] [--file Unity_lic.ulf]
-                                   activate one with your Unity account, or import a licence file
+  maestro unity activate          sign in to Unity in your browser and activate a Personal licence
+                                   (two-step verification works)
+  maestro unity activate --password [--serial]
+                                   activate with the account's email and password instead (no
+                                   two-step verification), with --serial for a Plus or Pro licence
+  maestro unity activate --file Unity_lic.ulf
+                                   import a licence file
   maestro unity remove             delete the licence from this machine
 
 The licence is for the conventions pack unity. Unity needs one to open a
@@ -40,6 +45,7 @@ func runUnity(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	wf := fs.String("file-settings", "", "the settings file")
 	file := fs.String("file", "", "a licence file activated elsewhere")
 	serial := fs.Bool("serial", false, "ask for the serial of a Plus or Pro licence")
+	password := fs.Bool("password", false, "activate with email and password instead of the browser")
 	var words []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -83,7 +89,13 @@ func runUnity(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "The licence file is imported. The checks of a Unity project get it from the next run on.")
 		return 0
 	case len(words) == 1 && words[0] == "activate":
-		return unityActivate(setupDir, *wf, store, *serial, stdin, stdout, stderr)
+		mode := activateBrowser
+		if *serial {
+			mode = activateSerial
+		} else if *password {
+			mode = activatePassword
+		}
+		return unityActivate(setupDir, *wf, store, mode, stdin, stdout, stderr)
 	}
 	fmt.Fprintln(stderr, unityUsage)
 	return 2
@@ -103,7 +115,14 @@ func unityStatus(store unity.Store, stdout io.Writer) int {
 	return 0
 }
 
-func unityActivate(dir, settings string, store unity.Store, withSerial bool, stdin io.Reader, stdout, stderr io.Writer) int {
+// How `maestro unity activate` gets the licence.
+const (
+	activateBrowser  = iota // Unity's sign-in in a browser
+	activatePassword        // the account's email and password
+	activateSerial          // the same, with a Plus or Pro serial
+)
+
+func unityActivate(dir, settings string, store unity.Store, mode int, stdin io.Reader, stdout, stderr io.Writer) int {
 	ctx, stop := interruptible()
 	defer stop()
 	in, err := open(dir, settings, nil)
@@ -121,18 +140,34 @@ func unityActivate(dir, settings string, store unity.Store, withSerial bool, std
 		fmt.Fprintln(stderr, "First: maestro conventions enable unity, then maestro image.")
 		return 1
 	}
+	if mode == activateBrowser {
+		fmt.Fprintln(stdout, "Unity's own sign-in now runs once, in a container of the sandbox image that holds")
+		fmt.Fprintln(stdout, "nothing of your repository. You sign in in your browser, so Maestro never sees your")
+		fmt.Fprintln(stdout, "password; the licence Unity gives back is kept on this machine. The checks run code the")
+		fmt.Fprintln(stdout, "agent wrote and can read the licence.")
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Starting the container and installing Unity's command-line tool in it. That takes a")
+		fmt.Fprintln(stdout, "minute or two, longer on a Mac with Apple silicon; then a sign-in link appears here.")
+		files, err := in.box.SignInUnity(ctx, stderr)
+		if err != nil {
+			fmt.Fprintln(stderr, "If the sign-in does not work, `maestro unity activate --password` uses the email and")
+			fmt.Fprintln(stderr, "password of an account without two-step verification instead.")
+			return report(stderr, err)
+		}
+		return saveLicence(store, files, stdout, stderr)
+	}
 	fmt.Fprintln(stdout, "Unity's own activation now runs once, in a container of the sandbox image that holds")
 	fmt.Fprintln(stdout, "nothing of your repository. Your password goes to Unity and is not kept; the licence it")
 	fmt.Fprintln(stdout, "gives back is kept on this machine. The checks run code the agent wrote and can read the")
 	fmt.Fprintln(stdout, "licence, so use a Unity account that holds nothing else. An account with two-step")
-	fmt.Fprintln(stdout, "verification cannot be activated this way; use `maestro unity activate --file` instead.")
+	fmt.Fprintln(stdout, "verification cannot be activated this way; use `maestro unity activate` instead.")
 	fmt.Fprintln(stdout)
 	r := bufio.NewReader(stdin)
 	var acct dockerbox.Account
 	if acct.Email, err = ask(r, stdout, "Email address of the Unity account: "); err == nil {
 		acct.Password, err = askSecret(r, stdin, stdout, "Password (not shown): ")
 	}
-	if err == nil && withSerial {
+	if err == nil && mode == activateSerial {
 		acct.Serial, err = askSecret(r, stdin, stdout, "Serial of the Plus or Pro licence (not shown): ")
 	}
 	if err != nil {
@@ -143,6 +178,10 @@ func unityActivate(dir, settings string, store unity.Store, withSerial bool, std
 	if err != nil {
 		return report(stderr, err)
 	}
+	return saveLicence(store, files, stdout, stderr)
+}
+
+func saveLicence(store unity.Store, files map[string][]byte, stdout, stderr io.Writer) int {
 	if err := store.Save(files); err != nil {
 		return report(stderr, err)
 	}
