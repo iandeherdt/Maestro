@@ -1493,6 +1493,10 @@ Approval provenance:
   A Project automation that sets the approval status on new items would approve every item
   that is added; the adapter logs a warning at startup when the built-in workflows
   "Item added to project" or "Auto-add to project" are enabled.
+  A board holds the cards of one repository. At start the service reads the board's cards; when
+  some belong to issues of other repositories, it deletes the board's enabled workflows whose
+  name starts with "Auto-add", and then removes those cards from the board (the issues stay). A
+  board with only its own repository's cards is not changed.
 
 Public repository rules:
 

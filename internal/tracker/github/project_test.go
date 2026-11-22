@@ -38,6 +38,9 @@ type fakeBoard struct {
 	automation []string
 	workers    []string
 	noWorkers  bool
+	// What Tidy deleted: automations by name, cards by item ID.
+	deletedFlows []string
+	removed      []string
 }
 
 func newBoardHub(t *testing.T) *hub {
@@ -244,6 +247,35 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 		}
 		answer(wrap(map[string]any{"id": "PVT_board", "closed": b.closed, "fields": map[string]any{"nodes": fields},
 			"workflows": map[string]any{"nodes": flows}}))
+	case strings.Contains(in.Query, "deleteProjectV2Workflow"):
+		h.requests = append(h.requests, "DELETE_FLOW")
+		name := strings.TrimPrefix(str("workflow"), "PVTW_")
+		for i, n := range b.automation {
+			if n == name {
+				b.automation = append(b.automation[:i:i], b.automation[i+1:]...)
+				b.deletedFlows = append(b.deletedFlows, name)
+				answer(map[string]any{"deleteProjectV2Workflow": map[string]string{"deletedWorkflowId": str("workflow")}})
+				return
+			}
+		}
+		fail("NOT_FOUND")
+	case strings.Contains(in.Query, "deleteProjectV2Item"):
+		h.requests = append(h.requests, "REMOVE")
+		if str("project") != "PVT_board" {
+			fail("NOT_FOUND")
+			return
+		}
+		b.removed = append(b.removed, str("item"))
+		b.extra = nil
+		answer(map[string]any{"deleteProjectV2Item": map[string]string{"deletedItemId": str("item")}})
+	case strings.Contains(in.Query, "workflows(first:"):
+		h.requests = append(h.requests, "FLOWS")
+		var flows []any
+		for _, name := range b.automation {
+			flows = append(flows, map[string]any{"id": "PVTW_" + name, "name": name, "enabled": true})
+		}
+		flows = append(flows, map[string]any{"id": "PVTW_off", "name": "Auto-add to project (2)", "enabled": false})
+		answer(wrap(map[string]any{"workflows": map[string]any{"nodes": flows}}))
 	default:
 		w.WriteHeader(400)
 	}
@@ -614,5 +646,47 @@ func TestBoardConfigValidation(t *testing.T) {
 	cfg.Tracker.Provider["project"] = map[string]any{"number": 7}
 	if _, err := New(cfg, Options{Env: env}); tracker.CategoryOf(err) != tracker.InvalidConfig {
 		t.Errorf("a project with state_source labels was accepted: %v", err)
+	}
+}
+
+func TestBoardTidyRemovesCardsOfOtherRepositories(t *testing.T) {
+	h := newBoardHub(t)
+	h.card(1, owner, "Todo", "linux")
+	h.board.automation = []string{"Item added to project", "Auto-add to project"}
+	a := boardAdapter(t, h)
+	// Only this repository's cards: nothing changes, not even the
+	// automation.
+	if got, err := a.Tidy(ctx); err != nil || got.Cards != 0 || len(h.board.deletedFlows) != 0 {
+		t.Fatalf("a tidy board: %+v %v", got, err)
+	}
+	h.board.extra = []*fakeCard{{status: "Todo"}, {kind: "draft"}, {kind: "pr"}}
+	got, err := a.Tidy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cards != 1 || strings.Join(got.Repos, ",") != owner+"/other" || strings.Join(got.Workflows, ",") != "Auto-add to project" {
+		t.Fatalf("tidied %+v", got)
+	}
+	if strings.Join(h.board.deletedFlows, ",") != "Auto-add to project" || strings.Join(h.board.removed, ",") != "PVTI_0" {
+		t.Fatalf("deleted %v, removed %v", h.board.deletedFlows, h.board.removed)
+	}
+	// The automation is deleted before any card is taken off.
+	reqs := strings.Join(h.requests, " ")
+	if strings.Index(reqs, "DELETE_FLOW") > strings.Index(reqs, "REMOVE") {
+		t.Errorf("order: %s", reqs)
+	}
+	if h.board.cards[1] == nil {
+		t.Error("the repository's own card was removed")
+	}
+}
+
+func TestBoardTidyRefusalIsExplained(t *testing.T) {
+	h := newBoardHub(t)
+	h.board.extra = []*fakeCard{{status: "Todo"}}
+	h.board.errors["deleteProjectV2Item"] = "FORBIDDEN"
+	a := boardAdapter(t, h)
+	_, err := a.Tidy(ctx)
+	if tracker.CategoryOf(err) != tracker.WriteRejected || !strings.Contains(err.Error(), "Projects, read and write") {
+		t.Fatalf("err %v", err)
 	}
 }

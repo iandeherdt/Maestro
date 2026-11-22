@@ -624,6 +624,19 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if err != nil {
 		return err
 	}
+	if onBoard {
+		// Cards of other repositories on this project's board were put
+		// there by a board automation; with several projects, every new
+		// issue would land on every board.
+		t, err := trk.Tidy(ctx)
+		switch {
+		case err != nil:
+			log.Warn("cards of other repositories could not be taken off the board", "error", err)
+		case t.Cards > 0:
+			log.Info("took cards of other repositories off the board; the issues themselves stay",
+				"cards", t.Cards, "repositories", strings.Join(t.Repos, ", "), "deleted_automations", strings.Join(t.Workflows, ", "))
+		}
+	}
 	store, err := budget.Open(cfg.Budget.StateDir)
 	if err != nil {
 		return err

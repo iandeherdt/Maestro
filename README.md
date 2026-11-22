@@ -391,6 +391,11 @@ as it is. It is named after its worker. Further projects live in `projects/NAME`
 build their own image, `maestro-sandbox-NAME`. `maestro projects remove NAME` stops a project's
 background service and moves its files to `removed/`; nothing is deleted.
 
+Each project's board is for its own repository. When the service starts and finds cards of issues
+from another repository on its board, it deletes the board's "Auto-add to project" automation that
+put them there (a board copied from another one keeps that automation) and takes those cards off
+the board. The issues themselves stay where they are.
+
 ## Let your own Claude Code talk to it
 
 Your own Claude Code on the same machine (the one you chat with, not the agents in the
