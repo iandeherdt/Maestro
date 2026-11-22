@@ -407,13 +407,14 @@ project hold: every rule in a pack names the tool that checks it, and the checks
 agent cannot skip them.
 
 ```sh
-maestro conventions                 # the packs: dotnet, typescript
+maestro conventions                 # the packs: dotnet, typescript, unity
 maestro conventions show dotnet     # every rule, and the tool that enforces it
 ```
 
 | Pack | For | Rules, in short |
 |---|---|---|
 | `dotnet` | C# with one solution in the root | `dotnet format`, warnings as errors with the .NET analyzers and SonarAnalyzer, security rules, limits on file and method size, tests, 80% coverage per test project, no vulnerable packages |
+| `unity` | A Unity project in the root, on the Unity version of the image | every asset has its `.meta` file and no GUID is used twice, assets saved as text, the project on the Editor's version, scripts compile in Unity, EditMode and PlayMode tests pass, packages changed by the owner only. Needs a Unity licence: see [Unity projects](#unity-projects) |
 | `typescript` | TypeScript with React, Next.js or TanStack, npm or pnpm | Prettier, ESLint without warnings (typescript-eslint strict, React, hooks, accessibility, SonarJS, security, the framework's own rules), limits on size and complexity, strict type check, tests with vitest, 80% coverage of all source files, no vulnerable packages |
 
 A rule is enforced in three places:
@@ -451,6 +452,56 @@ at the top of `conventions/<pack>/verify.sh`.
 Limits for now: an agent cannot add a new package by itself, because its sandbox does not reach
 package registries. Add the dependency yourself, or the ticket fails its checks. Monorepos are
 not covered, and the TypeScript pack measures coverage with vitest only.
+
+## Unity projects
+
+The `unity` pack puts the Unity Editor for Linux (6000.3.29f1, about 8 GB) in the sandbox image.
+Unity needs a licence to open a project and run its tests, so the pack also needs one:
+
+```sh
+maestro conventions enable unity && maestro image
+maestro unity activate          # once, with a Unity account; or --file Unity_lic.ulf
+maestro unity                   # whether this machine has a licence
+```
+
+The licence is kept on this machine and given read-only to the steps that run the project's own
+scripts (preparing the project and the checks), never to the agent's container. Your password
+is not kept. The checks do run code the agent wrote, and that code can read the licence: use a
+Unity account that holds nothing else, such as a free Personal account made for this.
+
+The agent has no licence, but it has the quick checks: `sh conventions/unity/check.sh` checks the
+`.meta` files and compiles every script with the compiler that comes with the Editor.
+
+Not yet run against Unity's servers: the activation, the package download in `prepare.sh` and the
+tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the
+workspace as pointer files.
+
+## Generated art: Blender
+
+Models that are made by Python scripts in Blender are code to Maestro: an agent can write a new
+generator, run it, look at the render and try again. Blender goes into the image with one line:
+
+```yaml
+sandbox:
+  tools: [blender]                  # Blender 5.0.1, runs headless; BLENDER names it
+policy:
+  binary_paths: ["Assets/Art/Kit/**"]   # the only place the agent may commit binary files
+  binary_max_file_bytes: 52428800       # per file there; the default
+```
+
+Everywhere else binary files stay refused. A text file in a binary folder is read and limited
+like any other, so the secret scan still sees it.
+
+Two things make a build script a good check:
+
+- **It fails when Blender fails.** Blender exits with 0 after a Python error unless it is given
+  `--python-exit-code 1`, and a script that pipes each step through `grep` loses the status.
+- **The check builds into a throwaway folder.** An export that carries the time changes the
+  committed file on every build, and Maestro fails a check that changes files. Let the script
+  take its output folder from a variable and give the check a temporary one.
+
+Preview renders go on the pull request with the screenshots command: have it write PNG files to
+`$SCREENSHOT_DIR` (see [Screenshots on the pull request](#screenshots-on-the-pull-request)).
 
 ## Configure
 
@@ -548,6 +599,8 @@ Last updated 2026-11-22.
 | Skills and agent files for the agents (`maestro skills`) | Written. Finding, checking, storing and removing them is tested, also fetching from a git repository. The read-only mount is tested with a real container in CI. Not yet tried with a real Claude Code run: that the agent picks a skill up from that place is taken from Claude Code's documentation. |
 | Model per card, for planning and by default | Written and tested against stand-ins for the board and for Claude Code. Not yet run with a real card. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
+| Unity (pack `unity`, `maestro unity`) | Written. The `.meta`, version and quick compile checks were run against a sample project in the Unity 6.3 image, and shown to fail on a violation. The Editor was shown to start under the sandbox's settings and stop for want of a licence. The licence is shown to reach the hooks and verify read-only and not the agent. Not yet run with a real licence, against Unity's servers, or in an image built with `maestro image`. |
+| Blender (`sandbox.tools`) and binary folders (`policy.binary_paths`) | Written and tested. Blender 5.0.1 was run headless under the sandbox's settings (models exported, a preview rendered). The image line that downloads it has not been built here. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |

@@ -171,6 +171,31 @@ func TestBinary(t *testing.T) {
 	}
 }
 
+func TestBinaryPaths(t *testing.T) {
+	c := cfg()
+	c.BinaryPaths = []string{"Assets/Art/Kit/**"}
+	c.BinaryMaxFileBytes = 50000
+	model := add("Assets/Art/Kit/Barrel.fbx")
+	model.Binary, model.NewSize = true, 40000
+	if res := eval(c, model); !res.OK() {
+		t.Errorf("a model in the folder for binary files: %+v", res.Denied)
+	}
+	model.NewSize = 50001
+	if got := rules(eval(c, model).Denied); got != "D5" {
+		t.Errorf("over the size for binary files: %q", got)
+	}
+	elsewhere := add("Assets/Scripts/blob.bin")
+	elsewhere.Binary = true
+	if got := rules(eval(c, elsewhere).Denied); got != "D6" {
+		t.Errorf("a binary file outside the folder: %q", got)
+	}
+	text := add("Assets/Art/Kit/notes.txt")
+	text.NewSize = 40000
+	if got := rules(eval(c, text).Denied); got != "D5" {
+		t.Errorf("a large text file in the folder for binary files keeps the normal limit: %q", got)
+	}
+}
+
 func TestPathCollisionsAndBadPaths(t *testing.T) {
 	c := cfg()
 	base := []string{"README.md", "src/café.txt", "src/old.go"}

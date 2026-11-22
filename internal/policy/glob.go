@@ -65,6 +65,9 @@ func matchSeg(pat, s string) bool {
 	return rec(0, 0)
 }
 
+// MatchAny reports whether path matches one of the patterns.
+func MatchAny(patterns []string, path string) bool { return matchAny(patterns, path) }
+
 func matchAny(patterns []string, path string) bool {
 	for _, p := range patterns {
 		if Match(p, path) {

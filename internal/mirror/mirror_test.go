@@ -442,6 +442,33 @@ func TestDiffStopsReadingAtTheLimits(t *testing.T) {
 	}
 }
 
+func TestDiffOfBinaryPaths(t *testing.T) {
+	l := newLab(t)
+	l.write("Assets/Art/Kit/Barrel.fbx", "Kaydara FBX Binary  \x00"+strings.Repeat("\x01\x00", 3000))
+	l.write("Assets/Art/Kit/notes.txt", strings.Repeat("line\n", 400))
+	l.write("Assets/logo.png", "\x89PNG\x00"+strings.Repeat("x", 3000))
+	l.commit("c")
+	imp, err := l.mirror.Import(ctx, l.bundle(), "k", l.base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := l.mirror.Diff(ctx, l.base, imp.Head, Limits{MaxChangedFiles: 10, MaxDiffBytes: 1 << 20, MaxFileBytes: 1000,
+		BinaryPaths: []string{"Assets/Art/Kit/**"}, BinaryMaxFileBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byPath(d)
+	if m := got["Assets/Art/Kit/Barrel.fbx"]; !m.Binary || m.DiffBytes != 0 || m.NewSize != 6021 {
+		t.Errorf("model: binary %v, diff bytes %d, size %d", m.Binary, m.DiffBytes, m.NewSize)
+	}
+	if n := got["Assets/Art/Kit/notes.txt"]; n.Binary || n.DiffBytes != 2000 {
+		t.Errorf("a large text file in the folder must be treated as text over the limit: %+v", n)
+	}
+	if p := got["Assets/logo.png"]; p.Binary || p.DiffBytes != p.NewSize {
+		t.Errorf("a file outside the folder is limited as before: %+v", p)
+	}
+}
+
 func TestEmptyDiff(t *testing.T) {
 	l := newLab(t)
 	d, err := l.mirror.Diff(ctx, l.base, l.base, lim)

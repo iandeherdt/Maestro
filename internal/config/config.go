@@ -111,7 +111,14 @@ type Sandbox struct {
 	AllowAgent []string
 	AllowHooks []string
 	Env        map[string]string
+	// Tools are programs added to the sandbox image by name, such as
+	// "blender" (see dockerbox.Tools).
+	Tools []string
 }
+
+// SandboxTools are the names sandbox.tools accepts. The Dockerfile lines
+// are in dockerbox.Tools; a test keeps the two lists equal.
+var SandboxTools = []string{"blender"}
 
 type Verify struct {
 	Command         string
@@ -169,9 +176,13 @@ type Policy struct {
 	MaxDiffBytes    int64
 	MaxFileBytes    int64
 	AllowBinary     bool
-	AllowSymlinks   bool
-	TestPaths       []string
-	SecretScan      bool
+	// BinaryPaths are where binary files are allowed, such as generated
+	// models, up to BinaryMaxFileBytes each.
+	BinaryPaths        []string
+	BinaryMaxFileBytes int64
+	AllowSymlinks      bool
+	TestPaths          []string
+	SecretScan         bool
 }
 
 type Budget struct {
@@ -665,6 +676,12 @@ func (b *builder) sandbox(s *section) {
 		}
 	}
 	sb.Env = s.strMap("env")
+	sb.Tools = trimAll(s.strList("tools", nil))
+	for _, t := range sb.Tools {
+		if !slices.Contains(SandboxTools, t) {
+			b.fail("sandbox.tools", "%q is not a tool the image can add. The tools are: %s", t, strings.Join(SandboxTools, ", "))
+		}
+	}
 	b.strict(n)
 	b.strict(s)
 
@@ -822,6 +839,8 @@ func (b *builder) policy(s *section) {
 	p.MaxDiffBytes = b.positive("policy.max_diff_bytes", s.integer("max_diff_bytes", 2097152))
 	p.MaxFileBytes = b.positive("policy.max_file_bytes", s.integer("max_file_bytes", 1048576))
 	p.AllowBinary = s.boolean("allow_binary", false)
+	p.BinaryPaths = trimAll(s.strList("binary_paths", nil))
+	p.BinaryMaxFileBytes = b.positive("policy.binary_max_file_bytes", s.integer("binary_max_file_bytes", 52428800))
 	p.AllowSymlinks = s.boolean("allow_symlinks", false)
 	p.TestPaths = trimAll(s.strList("test_paths", []string{
 		"**/test/**", "**/tests/**", "**/*_test.*", "**/*.test.*", "**/*.spec.*", "**/Tests/**"}))

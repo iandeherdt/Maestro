@@ -303,6 +303,12 @@ type Limits struct {
 	MaxChangedFiles int64
 	MaxDiffBytes    int64
 	MaxFileBytes    int64
+	// BinaryPaths are where the owner allows binary files, up to
+	// BinaryMaxFileBytes each. Only the start of such a file is read to
+	// tell binary from text; a binary file there adds nothing to the diff
+	// size. A text file there is read and limited like any other.
+	BinaryPaths        []string
+	BinaryMaxFileBytes int64
 }
 
 // Diff is the change between two commits in the form the policy reads.
@@ -310,6 +316,10 @@ type Diff struct {
 	Changes   []policy.Change
 	BasePaths []string
 }
+
+// binarySniff is how much of a file decides whether it is binary: a NUL
+// byte in it, the way git decides.
+const binarySniff = 8000
 
 // Diff computes the change between base and head from objects alone.
 // Renames are not detected: a rename is a deletion and an addition, so the
@@ -390,10 +400,25 @@ func (m *Mirror) Diff(ctx context.Context, baseSHA, head string, lim Limits) (Di
 	// repository can hide lines from the scan. Binary files are detected
 	// here instead, the way git does it: a NUL byte near the start.
 	budget := lim.MaxDiffBytes + 1
+	blobOf := map[int]string{}
+	for _, b := range blobs {
+		blobOf[b.idx] = b.newSHA
+	}
 	for i := range d.Changes {
 		c := &d.Changes[i]
 		if c.NewMode == policy.ModeGitlink || c.OldMode == policy.ModeGitlink {
 			continue
+		}
+		if sha := blobOf[i]; sha != "" && c.Status != 'D' && c.NewMode != policy.ModeSymlink &&
+			policy.MatchAny(lim.BinaryPaths, c.Path) && c.NewSize <= lim.BinaryMaxFileBytes {
+			start, err := m.git(ctx, nil, binarySniff, "cat-file", "blob", sha)
+			if err != nil {
+				return d, err
+			}
+			if bytes.IndexByte(start, 0) >= 0 {
+				c.Binary = true
+				continue
+			}
 		}
 		if c.Status != 'D' && c.NewSize > lim.MaxFileBytes {
 			c.DiffBytes = c.NewSize // denied on size; the content is not loaded

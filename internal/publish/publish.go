@@ -112,7 +112,8 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 	}
 
 	diff, err := p.Mirror.Diff(ctx, ws.BaseSHA, imp.Head, mirror.Limits{
-		MaxChangedFiles: cfg.Policy.MaxChangedFiles, MaxDiffBytes: cfg.Policy.MaxDiffBytes, MaxFileBytes: cfg.Policy.MaxFileBytes})
+		MaxChangedFiles: cfg.Policy.MaxChangedFiles, MaxDiffBytes: cfg.Policy.MaxDiffBytes, MaxFileBytes: cfg.Policy.MaxFileBytes,
+		BinaryPaths: cfg.Policy.BinaryPaths, BinaryMaxFileBytes: cfg.Policy.BinaryMaxFileBytes})
 	if err != nil {
 		return nil, nil, fmt.Errorf("diff: %w", err)
 	}

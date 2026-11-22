@@ -259,6 +259,9 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		// The service takes the screenshots with this browser (SPEC 24).
 		b.Extra = append(b.Extra, browserLine)
 	}
+	for _, name := range in.cfg.Sandbox.Tools {
+		b.Extra = append(b.Extra, dockerbox.Tools[name].Lines...)
+	}
 	if !strings.HasPrefix(b.Version, "v") {
 		b.Version = "v" + b.Version
 	}
@@ -273,6 +276,9 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		if len(p.Image) > 0 {
 			fmt.Fprintf(stdout, "For the conventions pack %s it also gets %s.\n", p.Name, p.ImageNote)
 		}
+	}
+	for _, name := range in.cfg.Sandbox.Tools {
+		fmt.Fprintf(stdout, "It also gets %s.\n", dockerbox.Tools[name].Note)
 	}
 	fmt.Fprintln(stdout)
 	if err := in.box.BuildImage(ctx, b); err != nil {
