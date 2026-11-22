@@ -466,7 +466,9 @@ Replaces upstream `codex`.
 #### 5.3.11 `budget` (object)
 
 - `max_failure_attempts` (integer): default `3`. Per issue, across restarts.
-- `max_runs_per_day` (integer): default `20`.
+- `max_runs_per_day` (integer): default `20`. A run is an attempt whose agent started its first
+  turn; an attempt that has not started yet holds its place under the limit. When a daily limit
+  stops dispatch, the service logs it once at warning level and `maestro status` says which.
 - `max_tokens_per_day` (integer or null): default null.
 - `max_agent_seconds_per_day` (integer or null): default `28800`.
 - `quota_backoff_ms` (integer): default `3600000`.
@@ -2299,7 +2301,8 @@ function dispatch_issue(issue, state, attempt, retry_kind=null, feedback=[]):
     state.claimed.add(issue.id)
     return schedule_retry(state, issue.id, attempt or 1, kind=tracker,
                           error="tracker write failed")
-  budget.runs_today += 1; persist(budget)
+  # budget.runs_today += 1 happens when the agent's first turn starts
+  # (19.5), so an attempt a hook or the sandbox stops first is no run.
   tracker.upsert_status_comment(issue, status_body(dispatched))
 
   worker = spawn_worker(fn -> run_agent_attempt(issue, attempt, retry_kind, feedback))

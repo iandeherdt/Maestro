@@ -107,9 +107,10 @@ type statusJSON struct {
 		PRNumber   int    `json:"pr_number"`
 	} `json:"awaiting_checks"`
 	Budget struct {
-		Runs    int64 `json:"runs_today"`
-		Tokens  int64 `json:"tokens_today"`
-		Seconds int64 `json:"agent_seconds_today"`
+		Runs    int64  `json:"runs_today"`
+		Tokens  int64  `json:"tokens_today"`
+		Seconds int64  `json:"agent_seconds_today"`
+		Limit   string `json:"daily_limit"`
 	} `json:"budget"`
 	Paused      bool    `json:"paused"`
 	PauseReason string  `json:"pause_reason"`
@@ -142,6 +143,9 @@ func printStatus(w io.Writer, s statusJSON, now time.Time) {
 	}
 	if s.ConfigError != nil {
 		fmt.Fprintf(w, "The settings file has an error, so no new tickets are started:\n  %s\n", plain(*s.ConfigError, 500))
+	}
+	if s.Budget.Limit != "" {
+		fmt.Fprintf(w, "No new tickets are started until tomorrow: %s.\n  Raise it in the budget section of the settings file; it applies at once.\n", plain(s.Budget.Limit, 200))
 	}
 	if len(s.Running)+len(s.Retrying)+len(s.Awaiting) == 0 {
 		fmt.Fprintln(w, "Nothing is being worked on.")

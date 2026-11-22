@@ -253,7 +253,7 @@ func stateJSON(s orchestrator.Snapshot) map[string]any {
 		"awaiting_checks": aw,
 		"agent_totals":    totals,
 		"budget": map[string]any{"runs_today": s.Today.Runs, "tokens_today": s.Today.TotalTokens,
-			"agent_seconds_today": s.Today.AgentSeconds},
+			"agent_seconds_today": s.Today.AgentSeconds, "daily_limit": s.DailyLimit},
 		"paused":              s.Paused,
 		"pause_reason":        s.PauseReason,
 		"quota_blocked_until": ts(s.QuotaBlockedUntil),

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -112,6 +113,8 @@ type Orchestrator struct {
 	gen           uint64
 	spawnFailures int
 	configError   string
+	// gateNoted is the last logged reason that dispatch is stopped.
+	gateNoted string
 
 	active, terminal map[string]bool
 
@@ -335,8 +338,17 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 	if o.configError != "" {
 		return
 	}
-	if reason := o.gated(); reason != "" {
-		o.d.Log.Debug("dispatch skipped", "reason", reason)
+	reason := o.gated()
+	if reason != o.gateNoted {
+		// A change is logged once, so a stopped dispatch is never silent.
+		if reason != "" {
+			o.d.Log.Warn("dispatch stopped", "reason", reason)
+		} else {
+			o.d.Log.Info("dispatch resumed", "was", o.gateNoted)
+		}
+		o.gateNoted = reason
+	}
+	if reason != "" {
 		return
 	}
 
@@ -401,13 +413,28 @@ func (o *Orchestrator) gated() string {
 		return "quota window"
 	}
 	day, lim := b.Today(now), o.cfg.Budget
+	// An attempt whose agent has not started yet is not a run, but holds
+	// its place, so that concurrent dispatches stay under the limit.
+	for _, e := range o.running {
+		if e.turnCount == 0 {
+			day.Runs++
+		}
+	}
 	switch {
 	case day.Runs >= lim.MaxRunsPerDay:
-		return "daily run budget reached"
+		return fmt.Sprintf("daily run limit reached (%d of %d runs); raise budget.max_runs_per_day", day.Runs, lim.MaxRunsPerDay)
 	case lim.MaxTokensPerDay != nil && day.TotalTokens >= *lim.MaxTokensPerDay:
-		return "daily token budget reached"
+		return fmt.Sprintf("daily token limit reached (%d of %d tokens); raise budget.max_tokens_per_day", day.TotalTokens, *lim.MaxTokensPerDay)
 	case lim.MaxAgentSecondsPerDay != nil && day.AgentSeconds >= *lim.MaxAgentSecondsPerDay:
-		return "daily runtime budget reached"
+		return fmt.Sprintf("daily agent time limit reached (%ds of %ds); raise budget.max_agent_seconds_per_day", day.AgentSeconds, *lim.MaxAgentSecondsPerDay)
+	}
+	return ""
+}
+
+// dailyLimit is gated's reason when a daily limit is what stops dispatch.
+func (o *Orchestrator) dailyLimit() string {
+	if r := o.gated(); strings.HasPrefix(r, "daily ") {
+		return r
 	}
 	return ""
 }
@@ -483,8 +510,6 @@ func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int
 		is.State = o.cfg.Tracker.InProgressState
 	}
 
-	o.d.Budget.AddRun(o.now())
-	o.persist()
 	what := "Dispatched to"
 	if planning {
 		what = "Planning on"
@@ -755,6 +780,12 @@ func (o *Orchestrator) onEvent(id string, gen uint64, ev Event) {
 		e.usage = *ev.Usage
 	}
 	if ev.TurnStart {
+		// A run counts against the daily limit once the agent starts: an
+		// attempt that a hook or the sandbox stops before then does not.
+		if e.turnCount == 0 {
+			o.d.Budget.AddRun(o.now())
+			o.persist()
+		}
 		e.turnCount++
 	}
 }
@@ -1386,7 +1417,7 @@ func (o *Orchestrator) cleanup(ctx context.Context, is issue.Issue) {
 
 // Snapshot copies the scheduling state for status output.
 func (o *Orchestrator) Snapshot() Snapshot {
-	s := Snapshot{Totals: o.totals, ConfigError: o.configError, GeneratedAt: o.now(),
+	s := Snapshot{Totals: o.totals, ConfigError: o.configError, GeneratedAt: o.now(), DailyLimit: o.dailyLimit(),
 		Worker: o.cfg.Worker.Name, Today: o.d.Budget.Today(o.now()),
 		QuotaBlockedUntil: o.d.Budget.QuotaBlockedUntil()}
 	s.Paused, s.PauseReason = o.d.Budget.Paused()

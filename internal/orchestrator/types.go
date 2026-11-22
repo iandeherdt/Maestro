@@ -235,6 +235,8 @@ type Snapshot struct {
 	PauseReason       string
 	QuotaBlockedUntil time.Time
 	ConfigError       string
+	// DailyLimit says which daily limit stops new work, or is empty.
+	DailyLimit string
 }
 
 // CheckState is what the checks gate found for a published pull request.

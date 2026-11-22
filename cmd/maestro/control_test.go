@@ -40,7 +40,8 @@ func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 			LastMessage: "editing \x1b[31mhello.txt\nnext"}},
 		Retrying:       []orchestrator.RetryEntry{{Identifier: "GH-12", Kind: "failure", DueAt: now.Add(20 * time.Second), Error: "verify_failed"}},
 		AwaitingChecks: []orchestrator.PublishRecord{{Identifier: "GH-13", PRNumber: 14}},
-		Paused:         true, PauseReason: "on holiday"}}
+		Paused:         true, PauseReason: "on holiday",
+		DailyLimit: "daily run limit reached (20 of 20 runs); raise budget.max_runs_per_day"}}
 	srv, err := httpapi.Listen(0, orch)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +57,7 @@ func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, s, now)
 	for _, want := range []string{`worker "mac"`, "PAUSED: on holiday", "maestro resume",
-		"GH-11    working (agent, turn 2, started 1m30s ago)", "last: editing  [31mhello.txt next",
+		"until tomorrow: daily run limit reached (20 of 20 runs)", "GH-11    working (agent, turn 2, started 1m30s ago)", "last: editing  [31mhello.txt next",
 		"GH-13    pull request #14 is open", "GH-12    will be tried again in 20s (verify_failed)",
 		"Today: 2 agent run(s), 1500 tokens, 1m35s of agent time."} {
 		if !strings.Contains(out.String(), want) {
@@ -89,7 +90,7 @@ func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 
 	out.Reset()
 	printStatus(&out, statusJSON{Worker: "mac"}, now)
-	if !strings.Contains(out.String(), "Nothing is being worked on.") || strings.Contains(out.String(), "PAUSED") {
+	if !strings.Contains(out.String(), "Nothing is being worked on.") || strings.Contains(out.String(), "PAUSED") || strings.Contains(out.String(), "tomorrow") {
 		t.Errorf("idle status:\n%s", out.String())
 	}
 }
