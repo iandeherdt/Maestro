@@ -468,11 +468,21 @@ const fastForwardScript = `set -eu
 cd /workspace/repo
 G="git -c core.hooksPath=/dev/null -c core.fsmonitor=false"
 if ! $G ls-remote --exit-code --heads origin "refs/heads/$1" >/dev/null 2>&1; then
+  # Nothing published. A workspace that holds no work yet starts again
+  # from the newest base, so a fix to the base branch reaches it.
+  base="$(cat .git/maestro-base)"
+  if [ -n "${2:-}" ] && [ "$($G rev-parse HEAD)" = "$base" ] && [ -z "$($G status --porcelain)" ] &&
+    $G fetch --quiet origin "refs/heads/$2" 2>/dev/null; then
+    $G reset --quiet --hard FETCH_HEAD
+    $G rev-parse HEAD > .git/maestro-base
+  fi
+  cat .git/maestro-base
   exit 0
 fi
 $G fetch --quiet origin "refs/heads/$1"
 # Forward only. A branch that went another way is left as it is.
 $G merge --quiet --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+cat .git/maestro-base
 `
 
 const exportScript = `set -eu
@@ -553,7 +563,10 @@ func (b *Box) populate(ctx context.Context, s spec, p sandbox.Populate) (sandbox
 			return sandbox.Result{}, fail("the workspace does not exist")
 		}
 		s.mirror = true
-		s.argv = []string{"sh", "-c", fastForwardScript, "fast-forward", p.Branch}
+		if p.BaseBranch != "" && !validBranch(p.BaseBranch) {
+			return sandbox.Result{}, fail("invalid base branch name")
+		}
+		s.argv = []string{"sh", "-c", fastForwardScript, "fast-forward", p.Branch, p.BaseBranch}
 		return b.start(ctx, s, nil, nil)
 
 	case sandbox.OpRemove:

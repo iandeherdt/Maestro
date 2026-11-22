@@ -165,8 +165,14 @@ func (m *Manager) Ensure(ctx context.Context, is issue.Issue) (Workspace, error)
 
 	// Reuse. Pick up work a previous process already published. This only
 	// ever moves the branch forward; a reused workspace is never reset.
-	if _, err := m.populate(ctx, k, sandbox.Populate{Op: sandbox.OpFastForward, Branch: ws.Branch}); err != nil {
+	// A workspace with no work in it yet is moved to the newest base, and
+	// says which base it is on now.
+	res, err = m.populate(ctx, k, sandbox.Populate{Op: sandbox.OpFastForward, Branch: ws.Branch, BaseBranch: m.BaseBranch})
+	if err != nil {
 		return ws, err
+	}
+	if sha := strings.TrimSpace(string(res.Stdout)); shaRE.MatchString(sha) {
+		ws.BaseSHA = sha
 	}
 	return ws, nil
 }

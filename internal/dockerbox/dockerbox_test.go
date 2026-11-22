@@ -253,8 +253,32 @@ func TestFastForward(t *testing.T) {
 	}
 	// The branch is not in the mirror yet: nothing happens.
 	ff()
-	// A commit published by an earlier process appears in the mirror.
+
+	// A workspace with no work yet moves to the newest base, and says so.
 	src := filepath.Join(stateDir, "src")
+	newBase := "base-" + key
+	git(src, "checkout", "-q", "-b", newBase, baseSHA)
+	os.WriteFile(filepath.Join(src, "fix.txt"), []byte("fix\n"), 0o644)
+	git(src, "add", "-A")
+	git(src, "commit", "-q", "-m", "fix")
+	fixed := git(src, "rev-parse", "HEAD")
+	git(src, "push", "-q", b.MirrorDir, newBase)
+	git(src, "checkout", "-q", "main")
+	defer git(b.MirrorDir, "update-ref", "-d", "refs/heads/"+newBase)
+	res, err := populate(b, key, sandbox.Populate{Op: sandbox.OpFastForward, Branch: branch, BaseBranch: newBase})
+	if err != nil || res.ExitStatus != 0 || strings.TrimSpace(string(res.Stdout)) != fixed {
+		t.Fatalf("refresh: %v, status %d, %q %s", err, res.ExitStatus, res.Stdout, res.Stderr)
+	}
+	if out, _ := sh(t, b, key, sandbox.NetNone, `git rev-parse HEAD; cat .git/maestro-base`); out != fixed+"\n"+fixed {
+		t.Fatalf("after refresh: %q", out)
+	}
+	// With work in it, the workspace stays where it is.
+	sh(t, b, key, sandbox.NetNone, `echo w > w.txt`)
+	if res, _ := populate(b, key, sandbox.Populate{Op: sandbox.OpFastForward, Branch: branch, BaseBranch: "main"}); strings.TrimSpace(string(res.Stdout)) != fixed {
+		t.Fatalf("a workspace with work was moved: %q", res.Stdout)
+	}
+	sh(t, b, key, sandbox.NetNone, `rm w.txt && git reset -q --hard `+baseSHA+` && echo `+baseSHA+` > .git/maestro-base`)
+	// A commit published by an earlier process appears in the mirror.
 	git(src, "checkout", "-q", "-b", branch, baseSHA)
 	os.WriteFile(filepath.Join(src, "published.txt"), []byte("x\n"), 0o644)
 	git(src, "add", "-A")
