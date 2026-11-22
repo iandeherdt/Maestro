@@ -83,8 +83,14 @@ func (g *game) save() error {
 	return os.WriteFile(g.savePath(), append(raw, '\n'), 0o600)
 }
 
+// git runs git without a terminal: a question for a password fails at
+// once instead of waiting where nobody sees it.
 func (g *game) git(args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", g.dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if os.Getenv("GIT_SSH_COMMAND") == "" {
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new")
+	}
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -751,7 +757,10 @@ func (s *gameGitHub) Check(context.Context, *setup.State) (setup.Status, error) 
 		return setup.Status{Detail: "Nothing is committed yet."}, nil
 	}
 	remote, err := s.git("ls-remote", "--heads", "origin")
-	if err != nil || !strings.Contains(remote, head) {
+	if err != nil {
+		return setup.Status{Detail: "Git cannot reach " + repo + " on GitHub without asking for a password; the next part sets that up."}, nil
+	}
+	if !strings.Contains(remote, head) {
 		return setup.Status{Detail: "The project is not pushed to " + repo + " yet."}, nil
 	}
 	s.repo = repo
@@ -797,9 +806,71 @@ func (s *gameGitHub) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 			return fmt.Errorf("git remote add: %v: %s", err, out)
 		}
 	}
-	ui.Say("  Pushing to %s (Git may ask you to sign in):", s.origin())
+	if err := s.access(ui); err != nil {
+		return err
+	}
+	ui.Say("  Pushing to %s:", s.origin())
 	if err := s.interactive("git", "push", "-u", "origin", "HEAD"); err != nil {
 		return explain("the push did not succeed. Fix what Git said above and run `maestro new` again")
+	}
+	return nil
+}
+
+// access makes sure git can reach the repository without a password,
+// which GitHub no longer takes: with the gh command's login, or with an
+// SSH key.
+func (s *gameGitHub) access(ui *setup.UI) error {
+	if _, err := s.git("ls-remote", "--heads", "origin"); err == nil {
+		return nil
+	}
+	repo := s.origin()
+	url, _ := s.git("config", "--get", "remote.origin.url")
+	ui.Say("  Git cannot sign in to GitHub by itself yet. GitHub takes no passwords for Git, only a login")
+	ui.Say("  through the gh command or an SSH key.")
+	var options []string
+	var acts []func() error
+	if _, err := s.look("gh"); err == nil {
+		options = append(options, "Use my GitHub login through gh (gh auth login, then gh auth setup-git)")
+		acts = append(acts, func() error {
+			if exec.Command("gh", "auth", "status").Run() != nil {
+				if err := s.interactive("gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https"); err != nil {
+					return err
+				}
+			}
+			if err := s.interactive("gh", "auth", "setup-git"); err != nil {
+				return err
+			}
+			if !strings.HasPrefix(url, "https://") {
+				_, err := s.git("remote", "set-url", "origin", "https://github.com/"+repo+".git")
+				return err
+			}
+			return nil
+		})
+	}
+	keys, _ := filepath.Glob(filepath.Join(s.home, ".ssh", "id_*.pub"))
+	if len(keys) > 0 {
+		options = append(options, "Use my SSH key ("+tildePath(strings.TrimSuffix(keys[0], ".pub"), s.home)+")")
+		acts = append(acts, func() error {
+			_, err := s.git("remote", "set-url", "origin", "git@github.com:"+repo+".git")
+			return err
+		})
+	}
+	options = append(options, "I will set it up myself, then run maestro new again")
+	i, err := ui.Choose("How should Git sign in to GitHub?", options)
+	if err != nil {
+		return err
+	}
+	if i == len(acts) {
+		ui.Say("  The simplest way: install gh (on a Mac: brew install gh), then run")
+		ui.Say("    gh auth login && gh auth setup-git")
+		ui.Say("  Or add an SSH key to your GitHub account: https://docs.github.com/en/authentication/connecting-to-github-with-ssh")
+		return setup.ErrAborted
+	}
+	if err := acts[i](); err != nil {
+		return explain("that did not work (%v). Run `maestro new` again to try another way", err)
+	}
+	if out, err := s.git("ls-remote", "--heads", "origin"); err != nil {
+		return explain("Git still cannot reach %s: %s\nIf the repository does not exist yet, make it on github.com first; then run `maestro new` again", repo, out)
 	}
 	return nil
 }
