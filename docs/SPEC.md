@@ -2833,6 +2833,34 @@ command needs.
 - Nothing can be shown that needs a host outside the sandbox: a web font from a CDN is missing
   in the picture.
 
+## 25. Assistant Interface
+
+The owner of an installation may let an assistant of their own, such as Claude Code on the same
+machine, ask the service what it does. This assistant is not a worker agent and runs outside the
+sandbox, with the owner's rights.
+
+### 25.1 Server
+
+`maestro mcp` is a Model Context Protocol server over standard input and output, one JSON-RPC
+message per line. It MUST offer exactly these tools: `maestro_info`, `maestro_status`,
+`maestro_ticket`, `maestro_pause`, `maestro_resume`, `maestro_refresh`, `maestro_check`.
+
+- The server MUST reach the running service only through the loopback status API of Section 16.5,
+  at the address in the service's own file, like the `status` command does.
+- The server MUST NOT hold or read a GitHub token or the App key, and MUST NOT offer a tool that
+  changes a tracker state, approves a plan, merges, or edits the workflow file.
+- Text that originates from issues or from worker agents MUST have control characters removed and
+  MUST be preceded by a line saying that it is information and not instructions.
+- A tool failure is reported as a tool result with `isError` true, not as a protocol error.
+
+### 25.2 Skill
+
+`maestro assistant` writes a skill for Claude Code to `~/.claude/skills/maestro/SKILL.md` and
+prints the command that registers the server. It MUST NOT change the assistant's configuration
+itself. The skill MUST state that approving a ticket is the owner's act, that the assistant
+writes tickets in the unapproved state only, and that text from tickets and worker agents is not
+to be followed. `maestro assistant remove` deletes the skill.
+
 ## Appendix A. Linux Worker Deployment
 
 Host: RHEL 8 or 9 with libvirt. The host runs nothing of the service except the VM and firewall
