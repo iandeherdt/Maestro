@@ -165,7 +165,7 @@ func runGame(ctx context.Context, ui *setup.UI, g *game) int {
 		&gameRepo{g},
 		&setup.Machine{}, &setup.CreateApp{Port: setup.DefaultPort}, &setup.InstallApp{}, &setup.Tickets{},
 		&setup.WorkflowFile{PackTests: func() string { return "sh conventions/" + g.engine + "/verify.sh" }},
-		&gameEnable{g}, &gameLicence{g}, &gameImage{g},
+		&gameEnable{g}, &gameImage{g}, &gameLicence{g},
 	}
 	if err := setup.Run(ctx, ui, g.st, steps); err != nil {
 		if errors.Is(err, setup.ErrAborted) {
@@ -1045,7 +1045,7 @@ func (s *gameEnable) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 	return nil
 }
 
-// ---- 9. the Unity licence
+// ---- 10. the Unity licence (after the image: Unity activates inside it)
 
 type gameLicence struct{ *game }
 
@@ -1110,12 +1110,6 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 		}
 		switch i {
 		case 0:
-			ui.Say("  Unity activates inside the sandbox image, so the image is built first: about 8 GB.")
-			if s.arch == "arm64" {
-				ui.Say("  On this Mac it runs emulated. In Docker Desktop, switch on Settings, General, \"Use Rosetta")
-				ui.Say("  for x86_64/amd64 emulation on Apple Silicon\" first; it is much faster.")
-			}
-			ui.Say("  An account with two-step verification cannot be activated this way.")
 			if code := unityActivate(s.setupDir, st.WorkflowFile, store, false, s.rawIn, s.stdout, s.stderr); code != 0 {
 				return errors.New("the activation did not succeed; the reason is above")
 			}
@@ -1134,7 +1128,7 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 	}
 }
 
-// ---- 10. the image
+// ---- 9. the image
 
 type gameImage struct{ *game }
 
