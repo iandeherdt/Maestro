@@ -403,6 +403,39 @@ echo ok > /claude/login-check && echo volume-writable`}}, nil)
 	}
 }
 
+func TestUnityLicenceReachesHooksAndVerifyButNotTheAgent(t *testing.T) {
+	shared := box(t)
+	b := *shared
+	dir := t.TempDir()
+	os.Chmod(dir, 0o755)
+	b.UnityLicenceDir = filepath.Join(dir, "unity-licence")
+	os.MkdirAll(filepath.Join(b.UnityLicenceDir, ".local", "share", "unity3d", "Unity"), 0o755)
+	lic := filepath.Join(b.UnityLicenceDir, ".local", "share", "unity3d", "Unity", "Unity_lic.ulf")
+	os.WriteFile(lic, []byte("licence\n"), 0o644)
+	key := workspace(t, &b)
+	read := `exec 2>/dev/null
+cat /unity-licence/.local/share/unity3d/Unity/Unity_lic.ulf 2>/dev/null || echo none
+echo x > /unity-licence/planted 2>/dev/null && echo planted
+echo x >> /unity-licence/.local/share/unity3d/Unity/Unity_lic.ulf 2>/dev/null && echo changed
+true`
+	if o, _ := sh(t, &b, key, sandbox.NetNone, read); o != "licence" {
+		t.Errorf("hook: %q", o)
+	}
+	res, err := b.Run(ctx, sandbox.Request{Step: sandbox.StepVerify, WorkspaceKey: key,
+		Argv: []string{"sh", "-c", read}}, nil)
+	if err != nil || strings.TrimSpace(string(res.Stdout)) != "licence" {
+		t.Errorf("verify: %v, stdout %q, stderr %q", err, res.Stdout, res.Stderr)
+	}
+	res, err = b.Run(ctx, sandbox.Request{Step: sandbox.StepAgent, WorkspaceKey: key, NetworkProfile: sandbox.NetAgent,
+		Argv: []string{"sh", "-c", `ls -A /unity-licence 2>/dev/null; echo end`}}, nil)
+	if err != nil || string(res.Stdout) != "end\n" {
+		t.Errorf("the agent step sees the licence: %v, stdout %q", err, res.Stdout)
+	}
+	if raw, _ := os.ReadFile(lic); string(raw) != "licence\n" {
+		t.Errorf("the licence on the machine was changed: %q", raw)
+	}
+}
+
 func TestStepIsKilledWhenItsTimeIsUp(t *testing.T) {
 	b := box(t)
 	key := workspace(t, b)
@@ -493,6 +526,8 @@ func TestBoxConfigurationIsChecked(t *testing.T) {
 		"image that is a flag": {Worker: "w", Image: "--privileged", MirrorDir: "/m", HandoffDir: "/h"},
 		"relative mirror":      {Worker: "w", Image: "i", MirrorDir: "m", HandoffDir: "/h"},
 		"comma in a path":      {Worker: "w", Image: "i", MirrorDir: "/m,dst=/etc", HandoffDir: "/h"},
+		"relative licence dir": {Worker: "w", Image: "i", MirrorDir: "/m", HandoffDir: "/h", UnityLicenceDir: "lic"},
+		"comma in licence dir": {Worker: "w", Image: "i", MirrorDir: "/m", HandoffDir: "/h", UnityLicenceDir: "/l,dst=/etc"},
 	} {
 		if _, err := b.Run(ctx, sandbox.Request{Step: sandbox.StepHook, WorkspaceKey: "k", Argv: []string{"true"}}, nil); err == nil {
 			t.Errorf("%s: accepted", name)

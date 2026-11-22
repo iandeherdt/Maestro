@@ -148,6 +148,11 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		Memory: strings.ToLower(in.cfg.Sandbox.MemoryMax), CPUs: cpus(in.cfg.Sandbox.CPUQuota), PIDs: in.cfg.Sandbox.TasksMax,
 		BotName: bot, BotEmail: bot + "@users.noreply.github.com",
 	}
+	// The checks get the Unity licence, when there is one (`maestro unity
+	// activate`). The agent's own step never does.
+	if lic := unityStore(dir); lic.Has() {
+		in.box.UnityLicenceDir = lic.Dir
+	}
 	return in, nil
 }
 
