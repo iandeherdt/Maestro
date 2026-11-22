@@ -30,6 +30,8 @@ func (s *start) Terminate() { s.terminated = true }
 type fakeWorker struct {
 	starts []*start
 	fail   int
+	// noTurn leaves the agent unstarted, as when a hook fails first.
+	noTurn bool
 }
 
 func (w *fakeWorker) Start(a Attempt, sink Sink) (Handle, error) {
@@ -39,6 +41,9 @@ func (w *fakeWorker) Start(a Attempt, sink Sink) (Handle, error) {
 	}
 	s := &start{attempt: a, sink: sink}
 	w.starts = append(w.starts, s)
+	if !w.noTurn {
+		sink.Event(Event{Kind: "turn_start", TurnStart: true})
+	}
 	return s, nil
 }
 
@@ -512,6 +517,30 @@ func TestPauseAndDailyBudgetStopDispatchNotReconciliation(t *testing.T) {
 	e.clock.advance(24 * time.Hour) // next day
 	e.tick()
 	e.wantStarts(3)
+}
+
+// TestARunCountsOnceTheAgentStarts: an attempt that fails before the
+// agent starts, for example in a hook, is not a run of the daily limit.
+// One that has not started yet still holds its place under the limit.
+func TestARunCountsOnceTheAgentStarts(t *testing.T) {
+	e := newEnv(t, todo(1), todo(2))
+	e.cfg.Budget.MaxRunsPerDay = 1
+	e.w.noTurn = true
+	e.tick()
+	e.wantStarts(1) // the pending start fills the limit of 1
+	if s := e.o.Snapshot(); s.Today.Runs != 0 || s.DailyLimit == "" {
+		t.Fatalf("before the agent starts: %+v", s)
+	}
+	e.exit(Outcome{Kind: Failed, Category: "hook_failed"})
+	if s := e.o.Snapshot(); s.Today.Runs != 0 || s.DailyLimit != "" {
+		t.Fatalf("a failed hook counted: %+v", s)
+	}
+	e.w.noTurn = false
+	e.tick()
+	e.wantStarts(2)
+	if s := e.o.Snapshot(); s.Today.Runs != 1 || !strings.Contains(s.DailyLimit, "1 of 1") {
+		t.Fatalf("after the agent started: %+v", s)
+	}
 }
 
 func TestDailyTokenBudget(t *testing.T) {
