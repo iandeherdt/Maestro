@@ -81,15 +81,37 @@ echo >&2
 unity auth login --insecure-storage </dev/null >&2
 echo >&2
 echo "Signed in. Activating a Personal licence." >&2
-unity license activate --personal --accept-eula </dev/null >&2
+activated=""
+if unity license activate --personal --accept-eula </dev/null >&2; then activated=1; fi
+client=/opt/unity/Editor/Data/Resources/Licensing/Client
+if [ -z "$activated" ] && [ -d "$client" ]; then
+  # Without Unity Hub there may be no licensing client where the tool
+  # looks for one; lend it the Editor's own and try once more.
+  echo "Trying again with the licensing client of the Editor in the image." >&2
+  mkdir -p "$HOME/.config/unityhub/external-modules"
+  ln -sfn "$client" "$HOME/.config/unityhub/external-modules/licensingClient"
+  if unity license activate --personal --accept-eula </dev/null >&2; then activated=1; fi
+fi
+if [ -z "$activated" ]; then
+  # The Editor asks the signed-in tool for the account itself and can
+  # activate a Personal licence on its own.
+  echo "Letting the Unity Editor activate the licence with the sign-in." >&2
+  pre=""
+  if [ -f /usr/lib/game-ci/libsem_eintr_retry.so ]; then pre=/usr/lib/game-ci/libsem_eintr_retry.so; fi
+  LD_PRELOAD="$pre" xvfb-run -a -s "-screen 0 1024x768x24" /opt/unity/Editor/Unity -batchmode -nographics -quit \
+    -logFile /tmp/editor.log >/dev/null 2>&1 || true
+  grep -iE 'licen[cs]|entitlement|access token' /tmp/editor.log 2>/dev/null | tail -n 15 >&2 || true
+fi
 cd "$HOME"
 found=""
 for p in ` + "{{places}}" + `; do
   if [ -d "$p" ]; then found="$found $p"; fi
 done
 if [ -z "$found" ]; then
-  echo "Unity activated, but the licence is not where the Editor looks. Files it left:" >&2
+  echo "No licence came out of the activation. Files with licence in their name:" >&2
   find . -iname '*licen*' -o -iname '*.ulf' -o -iname '*entitlement*' 2>/dev/null | head -n 20 >&2
+  echo "What Unity's tool reports:" >&2
+  unity doctor </dev/null 2>&1 | head -n 40 >&2 || true
   exit 1
 fi
 tar -cf - $found
