@@ -159,6 +159,12 @@ type Plans interface {
 	Materialize(ctx context.Context, is issue.Issue) (summary string, err error)
 }
 
+// PlanFinisher is implemented by a Plans that can tell when every task of
+// an approved plan is done.
+type PlanFinisher interface {
+	Finished(ctx context.Context, is issue.Issue) (done bool, tasks int, err error)
+}
+
 // Designs is the design stage as the orchestrator sees it (SPEC 27).
 type Designs interface {
 	// HasPlan reports whether the idea has a plan a design can be made for.

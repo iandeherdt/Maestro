@@ -2642,7 +2642,7 @@ adapter with `state_source: project`.
    comment by an allowlisted commenter. Or the owner approves the plan by moving the card to
    `planned_state` (`Planned`).
 6. For a card in `Planned` that is dispatchable and routed to this worker, the orchestrator
-   creates the tasks of the latest plan (22.4). The idea's card stays in `Planned`.
+   creates the tasks of the latest plan (22.4). The idea's card stays in `Planned` until every one of those tasks is in a terminal state; the service then moves it to `done_state` with a comment.
 
 ### 22.2 Planning prompt and answer format
 

@@ -18,6 +18,11 @@ type fakePlans struct {
 	materialized []string
 	summary      string
 	err          error
+	finished     bool
+}
+
+func (f *fakePlans) Finished(context.Context, issue.Issue) (bool, int, error) {
+	return f.finished, 2, nil
 }
 
 func (f *fakePlans) Propose(_ context.Context, _ issue.Issue, p *plan.Plan) error {
@@ -231,4 +236,23 @@ func TestPlannedCardWithoutAUsablePlanIsExplainedOnce(t *testing.T) {
 			t.Errorf("%s: comment %q", name, lastComment(e, "id-1"))
 		}
 	}
+}
+
+func TestIdeaIsDoneOnceItsTasksAre(t *testing.T) {
+	is := idea(1)
+	is.State = "Planned"
+	e, p := planEnv(t, is)
+	e.cfg.Tracker.DoneState = "Done"
+	e.o.SetConfig(e.cfg)
+	e.tick()
+	if e.tr.Get("id-1").State != "Planned" {
+		t.Fatalf("moved before its tasks are done: %q", e.tr.Get("id-1").State)
+	}
+	p.finished = true
+	e.clock.advance(time.Minute)
+	e.tick()
+	if e.tr.Get("id-1").State != "Done" || !strings.Contains(lastComment(e, "id-1"), "All 2 task(s)") {
+		t.Fatalf("state %q, comment %q", e.tr.Get("id-1").State, lastComment(e, "id-1"))
+	}
+	e.wantStarts(0)
 }
