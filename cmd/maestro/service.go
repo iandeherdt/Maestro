@@ -197,6 +197,10 @@ func (in *install) docker(ctx context.Context) error {
 		if err := exec.CommandContext(c, "podman", "info").Run(); err != nil {
 			return explain("Podman is installed but `podman info` fails for this user. Run it yourself to see why.")
 		}
+		out, err := exec.CommandContext(c, "podman", "info", "--format", "{{.Host.NetworkBackend}}").Output()
+		if err == nil && strings.TrimSpace(string(out)) == "cni" {
+			return explain(cniHelp)
+		}
 		return nil
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -207,6 +211,18 @@ func (in *install) docker(ctx context.Context) error {
 	}
 	return nil
 }
+
+// cniHelp is said when Podman uses its old CNI network backend (RHEL 8).
+// CNI turns DNS off on internal networks, so the agent cannot find its
+// proxy by name.
+const cniHelp = `Podman uses its old CNI network backend. On it, containers on an internal network cannot
+find each other by name, so the agent cannot reach its proxy. Switch Podman to netavark:
+  sudo dnf install -y netavark aardvark-dns
+  podman ps -a -q --filter label=maestro.worker | xargs -r podman rm -f
+  podman network ls --format '{{.Name}}' | grep '^maestro-' | xargs -r podman network rm
+  mkdir -p ~/.config/containers
+  printf '[network]\nnetwork_backend = "netavark"\n' >> ~/.config/containers/containers.conf
+Then podman info --format '{{.Host.NetworkBackend}}' says netavark. Your images are kept.`
 
 // hostChecks runs the unity pack's checks with the Editor of this Mac
 // (unity.editor), inside macOS's sandbox. Nil where there is no such
