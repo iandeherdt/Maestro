@@ -50,7 +50,9 @@ tar -cf - $found
 
 // signInScript installs Unity's command-line tool in the container, signs
 // in through the browser, activates a Personal licence and writes it to
-// standard output as a tar stream, like activateScript. Everything the
+// standard output as a tar stream, like activateScript. The sign-in is
+// kept in a plain file: a container has no keyring, and it is thrown away
+// afterwards, so nothing of it stays. Everything the
 // person should read goes to standard error.
 const signInScript = `set -eu
 export PATH="$HOME/.local/bin:$PATH"
@@ -76,7 +78,7 @@ echo >&2
 echo "Open the link below in your browser, sign in to Unity (two-step verification works)" >&2
 echo "and allow the login request. The link works once, for about five minutes." >&2
 echo >&2
-unity auth login </dev/null >&2
+unity auth login --insecure-storage </dev/null >&2
 echo >&2
 echo "Signed in. Activating a Personal licence." >&2
 unity license activate --personal --accept-eula </dev/null >&2
