@@ -62,8 +62,8 @@ func TestUnityProjectVersion(t *testing.T) {
 	}
 	os.MkdirAll(filepath.Join(dir, "ProjectSettings"), 0o755)
 	os.WriteFile(filepath.Join(dir, "ProjectSettings", "ProjectVersion.txt"),
-		[]byte("m_EditorVersion: 6000.3.29f1\nm_EditorVersionWithRevision: 6000.3.29f1 (abc)\n"), 0o644)
-	if v := projectVersion(dir); v != "6000.3.29f1" || v != unityVersion() {
+		[]byte("m_EditorVersion: 6000.5.8f1\nm_EditorVersionWithRevision: 6000.5.8f1 (abc)\n"), 0o644)
+	if v := projectVersion(dir); v != "6000.5.8f1" || v != unityVersion() {
 		t.Errorf("version %q, the pack's %q", v, unityVersion())
 	}
 	f := &gameFolder{&game{engine: "unity", dir: dir}}
@@ -71,7 +71,7 @@ func TestUnityProjectVersion(t *testing.T) {
 		t.Errorf("a project on the right version: %s", p)
 	}
 	os.WriteFile(filepath.Join(dir, "ProjectSettings", "ProjectVersion.txt"), []byte("m_EditorVersion: 2022.3.1f1\n"), 0o644)
-	if p := f.problem(); !strings.Contains(p, "the checks use Unity 6000.3.29f1") {
+	if p := f.problem(); !strings.Contains(p, "the checks use Unity 6000.5.8f1") {
 		t.Errorf("a project on another version: %q", p)
 	}
 }
@@ -80,10 +80,10 @@ func TestHubProjects(t *testing.T) {
 	home := t.TempDir()
 	proj := filepath.Join(home, "Games", "Cave")
 	os.MkdirAll(filepath.Join(proj, "ProjectSettings"), 0o755)
-	os.WriteFile(filepath.Join(proj, "ProjectSettings", "ProjectVersion.txt"), []byte("m_EditorVersion: 6000.3.29f1\n"), 0o644)
+	os.WriteFile(filepath.Join(proj, "ProjectSettings", "ProjectVersion.txt"), []byte("m_EditorVersion: 6000.5.8f1\n"), 0o644)
 	hub := filepath.Join(home, "Library", "Application Support", "UnityHub")
 	os.MkdirAll(hub, 0o755)
-	os.WriteFile(filepath.Join(hub, "projects-v1.json"), []byte(`{"schema_version":"v1","data":{"`+proj+`":{"title":"Cave","path":"`+proj+`","version":"6000.3.29f1"},"/gone":{"path":"/gone"}}}`), 0o644)
+	os.WriteFile(filepath.Join(hub, "projects-v1.json"), []byte(`{"schema_version":"v1","data":{"`+proj+`":{"title":"Cave","path":"`+proj+`","version":"6000.5.8f1"},"/gone":{"path":"/gone"}}}`), 0o644)
 	f := &gameFolder{&game{engine: "unity", home: home, goos: "darwin"}}
 	if got := f.hubProjects(); len(got) != 1 || got[0] != proj {
 		t.Errorf("hub projects: %v", got)

@@ -517,7 +517,7 @@ It asks which engine the game uses (Unity or Godot) and whether the agents make 
 or klad art, and then:
 
 1. finds the project. For Unity it lists the projects Unity Hub knows and checks that one is
-   saved with the Editor version of the image (6000.3.29f1), and tells you how to make one in
+   saved with the Editor version of the image (6000.5.8f1), and tells you how to make one in
    Hub if there is none. For Godot any folder will do, an empty one too;
 2. makes it a Git repository, writes the packs (rules, checks, CI and skills; a new Godot project
    also gets a starter project, a first test and GUT; a Unity project a first EditMode test) and
@@ -558,7 +558,7 @@ uses it in that project too. A skill of your own with the same name wins.
 
 ### Unity
 
-The `unity` pack puts the Unity Editor for Linux (6000.3.29f1, about 8 GB) in the sandbox image.
+The `unity` pack puts the Unity Editor for Linux (6000.5.8f1, about 8 GB) in the sandbox image.
 Unity needs a licence to open a project and run its tests, so the pack also needs one:
 
 ```sh
