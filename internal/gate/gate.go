@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"github.com/iandeherdt/Maestro/internal/issue"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
 	"github.com/iandeherdt/Maestro/internal/sandbox"
@@ -33,11 +34,20 @@ type Publisher interface {
 	Publish(ctx context.Context, is issue.Issue, ws workspace.Workspace, v worker.VerifyResult) (*orchestrator.PublishRecord, *worker.Rejection, error)
 }
 
+// HostChecks runs the unity pack's checks on this machine (unity.editor).
+type HostChecks interface {
+	Unity(ctx context.Context, editor, key, head, script string) (hostcheck.Result, error)
+	Forget(key string)
+}
+
 // Gates implements worker.Gates.
 type Gates struct {
 	Config    func() *config.Config
 	Launcher  sandbox.Launcher
 	Publisher Publisher
+	// Host runs the checks that do not run in the sandbox. Nil: there
+	// are none on this machine.
+	Host HostChecks
 
 	mu    sync.Mutex
 	heads map[string]string // workspace key -> head of the last export
@@ -136,6 +146,24 @@ func (g *Gates) Verify(ctx context.Context, ws workspace.Workspace) (worker.Veri
 		out.OutputTail = DirtiedTree + ": the verify command changed files in the repository. " +
 			"Commit the result of formatters and generators before finishing.\n" + out.OutputTail
 	}
+	if u := g.Config().Unity; out.Passed && u.Verify != "" {
+		if g.Host == nil {
+			return worker.VerifyResult{}, errors.New("unity.editor is set, but this service cannot run checks outside the sandbox")
+		}
+		hctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		res, err := g.Host.Unity(hctx, u.Editor, ws.Key, after, u.Verify)
+		if hctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+			return worker.VerifyResult{ExitStatus: -1, OutputTail: tail(append(res.Output,
+				fmt.Sprintf("\nThe Unity checks ran longer than %s and were stopped.", timeout)...), int(cfg.OutputTailBytes))}, nil
+		}
+		if err != nil {
+			return worker.VerifyResult{}, fmt.Errorf("unity checks on this machine: %w", err)
+		}
+		both := append([]byte(out.OutputTail), res.Output...)
+		out = worker.VerifyResult{Passed: res.ExitStatus == 0, ExitStatus: res.ExitStatus,
+			OutputTail: tail(both, int(cfg.OutputTailBytes))}
+	}
 	if out.Passed && g.Config().Screenshots.On() {
 		out.Screenshots, out.ScreenshotNote = g.screenshots(ctx, ws.Key)
 	}
@@ -152,6 +180,9 @@ func (g *Gates) Forget(workspaceKey string) {
 	g.mu.Lock()
 	delete(g.heads, workspaceKey)
 	g.mu.Unlock()
+	if g.Host != nil {
+		g.Host.Forget(workspaceKey)
+	}
 }
 
 // tail returns the last max bytes of b as valid text.

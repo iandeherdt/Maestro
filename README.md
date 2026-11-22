@@ -576,9 +576,23 @@ git add -A && git commit -m "Start the game" && git push
 maestro conventions enable godot blender klad && maestro image
 ```
 
-The Unity Editor for Linux exists for Intel only. On a Mac with Apple Silicon the sandbox then
-runs emulated, more slowly: switch on "Use Rosetta for x86_64/amd64 emulation" in Docker
-Desktop's settings.
+The Unity Editor for Linux exists for Intel only, and it crashes when it runs emulated. So on a
+Mac with Apple Silicon the agent's container runs emulated, while Unity's own checks (opening the
+project, compiling it and running the tests) run with the Unity Editor that Unity Hub installed on
+the Mac, with Unity Hub's licence. `maestro new` finds that Editor and writes it into the settings
+file:
+
+```yaml
+unity:
+  editor: /Applications/Unity/Hub/Editor/6000.5.8f1/Unity.app/Contents/MacOS/Unity
+```
+
+The service then checks out exactly what it would push into a folder of its own
+(`~/Library/Caches/maestro/unity-checks/`, which keeps Unity's Library between checks) and runs
+`conventions/unity/verify.sh` there inside macOS's sandbox: no network but the loopback, where a
+proxy lets through only Unity's hosts and the hooks' allowlist; no writes outside that folder, the
+temporary folders and Unity's own; no reads of Maestro's setup and state. That fence is weaker
+than the container, because the code the agent wrote runs as you, so use it for your own projects.
 
 What it does not do: play the game, judge how it feels, or run anything that needs a screen or a
 GPU (the sandbox has neither; Blender renders on the CPU). Art drawn by hand stays yours: commit
