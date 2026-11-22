@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	boardTitle  = "Symphony"
+	boardTitle  = "Maestro"
 	statusField = "Status"
 	workerField = "Worker"
 )

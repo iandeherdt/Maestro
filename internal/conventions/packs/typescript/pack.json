@@ -60,13 +60,13 @@
     {
       "id": "secrets",
       "rule": "No credentials in the change.",
-      "enforced_by": ["the secret scan of the Symphony service"],
+      "enforced_by": ["the secret scan of the Maestro service"],
       "where": ["service"]
     },
     {
       "id": "rules-stay",
       "rule": "The agent cannot change these rules, the scripts that check them, or the CI workflows.",
-      "enforced_by": ["the diff policy of the Symphony service (protected paths)"],
+      "enforced_by": ["the diff policy of the Maestro service (protected paths)"],
       "where": ["service"]
     }
   ],

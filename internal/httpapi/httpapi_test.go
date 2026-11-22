@@ -39,7 +39,7 @@ func state() *fakeState {
 		Retrying: []orchestrator.RetryEntry{{IssueID: "id-2", Identifier: "GH-2", Attempt: 2,
 			Kind: orchestrator.KindFailure, DueAt: at.Add(time.Minute), Error: evil}},
 		AwaitingChecks: []orchestrator.PublishRecord{{IssueID: "id-3", Identifier: "GH-3",
-			Branch: "symphony/GH-3", HeadSHA: "abc", PRNumber: 12}},
+			Branch: "maestro/GH-3", HeadSHA: "abc", PRNumber: 12}},
 		Paused: true, PauseReason: evil,
 	}}
 }

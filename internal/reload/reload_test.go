@@ -139,10 +139,10 @@ func TestRestartRequiredKeysAreNotApplied(t *testing.T) {
 	old := *f.src.Current().Config
 	content := f.base
 	for _, r := range [][2]string{
-		{"root: /var/lib/symphony-agent/workspaces", "root: /tmp/elsewhere"},
+		{"root: /var/lib/maestro-agent/workspaces", "root: /tmp/elsewhere"},
 		{"repo: your-account/your-repo\nhooks:", "repo: other-account/other-repo\nhooks:"},
 		{"backend: systemd", "backend: macos-user"},
-		{"state_dir: /var/lib/symphony/state", "state_dir: /tmp/state"},
+		{"state_dir: /var/lib/maestro/state", "state_dir: /tmp/state"},
 		{"name: linux", "name: mac"},
 		{"budget:\n", "server:\n  port: 8080\nbudget:\n  max_failure_attempts: 9\n"},
 	} {

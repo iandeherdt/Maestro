@@ -171,7 +171,7 @@ func TestWithoutPlansAnIdeaIsLeftAlone(t *testing.T) {
 func TestApprovedPlanBecomesTasksOnlyForOwnRoutableIdeas(t *testing.T) {
 	mine, other, stranger := idea(1), idea(2), idea(3)
 	mine.State, other.State, stranger.State = "Planned", "Planned", "Planned"
-	other.Labels = []string{"symphony", "run:mac"}
+	other.Labels = []string{"maestro", "run:mac"}
 	stranger.Dispatchable = false
 	e, p := planEnv(t, mine, other, stranger)
 	p.summary = "The plan was approved. 2 task(s) were created."

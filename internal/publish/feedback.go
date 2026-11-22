@@ -26,7 +26,7 @@ const (
 	maxNoteRunes = 4000
 )
 
-var markRE = regexp.MustCompile(`<!-- symphony:feedback-through (\S+) -->`)
+var markRE = regexp.MustCompile(`<!-- (?:maestro|symphony):feedback-through (\S+) -->`)
 
 // note is one thing a person wrote on the pull request.
 type note struct {
@@ -158,7 +158,7 @@ func (p *Publisher) markTaken(ctx context.Context, a *api, prefix string, number
 		what = fmt.Sprintf("the %d new comments", count)
 	}
 	body := fmt.Sprintf("Picking up %s on this pull request. The ticket is back in work, and the changes will arrive here as a new commit.\n\n"+
-		"<!-- symphony:feedback-through %s -->", what, through.UTC().Format(time.RFC3339))
+		"<!-- maestro:feedback-through %s -->", what, through.UTC().Format(time.RFC3339))
 	return a.do(ctx, http.MethodPost, prefix+"/issues/"+strconv.Itoa(number)+"/comments", nil, map[string]string{"body": body}, nil)
 }
 

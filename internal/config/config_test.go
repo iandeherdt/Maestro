@@ -24,7 +24,7 @@ sandbox:
 verify:
   command: make test
 budget:
-  state_dir: /srv/symphony/state
+  state_dir: /srv/maestro/state
 worker:
   name: linux
 `
@@ -35,7 +35,7 @@ func build(t *testing.T, front string, env map[string]string) (*Config, error) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	def.Path = "/etc/symphony/WORKFLOW.md"
+	def.Path = "/etc/maestro/WORKFLOW.md"
 	return Build(def, Options{Env: func(k string) string { return env[k] }, HomeDir: "/home/op"})
 }
 
@@ -110,7 +110,7 @@ func TestDefaults(t *testing.T) {
 	eq("sandbox.tasks_max", c.Sandbox.TasksMax, int64(2048))
 	eq("verify.timeout_ms", c.Verify.TimeoutMS, int64(1800000))
 	eq("verify.network", c.Verify.Network, false)
-	eq("publish.branch_prefix", c.Publish.BranchPrefix, "symphony/")
+	eq("publish.branch_prefix", c.Publish.BranchPrefix, "maestro/")
 	eq("publish.draft_until_green", c.Publish.DraftUntilGreen, true)
 	eq("publish.required_checks from protection", c.Publish.RequiredChecksFromBranchProtection, true)
 	eq("publish.rework_on_changes_requested", c.Publish.ReworkOnChangesRequested, true)
@@ -154,9 +154,9 @@ func TestDefaults(t *testing.T) {
 
 func TestRoutingLabelAppended(t *testing.T) {
 	c := mustBuild(t, with("allowed_authors: [owner]",
-		"allowed_authors: [owner]\n  required_labels: [' Symphony ', symphony, 'RUN:linux']", ""))
-	if got := strings.Join(c.Tracker.RequiredLabels, ","); got != "symphony,run:linux" {
-		t.Errorf("required labels = %q, want symphony,run:linux", got)
+		"allowed_authors: [owner]\n  required_labels: [' Maestro ', maestro, 'RUN:linux']", ""))
+	if got := strings.Join(c.Tracker.RequiredLabels, ","); got != "maestro,run:linux" {
+		t.Errorf("required labels = %q, want maestro,run:linux", got)
 	}
 
 	c = mustBuild(t, with("name: linux", "name: linux\n  require_routing_label: false", ""))
@@ -183,7 +183,7 @@ func TestPathResolution(t *testing.T) {
 		t.Errorf("root = %q, want /data/ws", c.Workspace.Root)
 	}
 
-	c = mustBuild(t, with("state_dir: /srv/symphony/state", "state_dir: ~/state", ""))
+	c = mustBuild(t, with("state_dir: /srv/maestro/state", "state_dir: ~/state", ""))
 	if c.Budget.StateDir != "/home/op/state" {
 		t.Errorf("state_dir = %q, want /home/op/state", c.Budget.StateDir)
 	}
@@ -276,13 +276,13 @@ func TestInvalid(t *testing.T) {
 		{"url in allowlist", with("proxy: 127.0.0.1:3128", "proxy: 127.0.0.1:3128\n    allow_agent: ['https://a.example/x']", ""), "sandbox.network.allow_agent"},
 		{"bad memory size", with("backend: systemd", "backend: systemd\n  memory_max: lots", ""), "sandbox.memory_max"},
 		{"missing verify command", with("command: make test", "command: '  '", ""), "verify.command"},
-		{"branch prefix without slash", minimal + "publish:\n  branch_prefix: symphony\n", "publish.branch_prefix"},
+		{"branch prefix without slash", minimal + "publish:\n  branch_prefix: maestro\n", "publish.branch_prefix"},
 		{"branch prefix matches base branch", with("repo: owner/repo", "repo: owner/repo\n  base_branch: main", "publish:\n  branch_prefix: main/\n"), "publish.branch_prefix"},
 		{"bad required checks string", minimal + "publish:\n  required_checks: all\n", "publish.required_checks"},
-		{"zero failure attempts", with("state_dir: /srv/symphony/state", "state_dir: /srv/symphony/state\n  max_failure_attempts: 0", ""), "budget.max_failure_attempts"},
-		{"missing state dir", with("  state_dir: /srv/symphony/state\n", "  max_runs_per_day: 5\n", ""), "budget.state_dir"},
-		{"state dir inside workspace root", with("state_dir: /srv/symphony/state", "state_dir: /srv/agent/workspaces/state", ""), "budget.state_dir"},
-		{"workspace root inside state dir", with("root: /srv/agent/workspaces", "root: /srv/symphony/state/ws", ""), "budget.state_dir"},
+		{"zero failure attempts", with("state_dir: /srv/maestro/state", "state_dir: /srv/maestro/state\n  max_failure_attempts: 0", ""), "budget.max_failure_attempts"},
+		{"missing state dir", with("  state_dir: /srv/maestro/state\n", "  max_runs_per_day: 5\n", ""), "budget.state_dir"},
+		{"state dir inside workspace root", with("state_dir: /srv/maestro/state", "state_dir: /srv/agent/workspaces/state", ""), "budget.state_dir"},
+		{"workspace root inside state dir", with("root: /srv/agent/workspaces", "root: /srv/maestro/state/ws", ""), "budget.state_dir"},
 		{"missing worker name", with("  name: linux\n", "  require_routing_label: true\n", ""), "worker.name"},
 		{"bad worker name", with("name: linux", "name: 'Linux Box'", ""), "worker.name"},
 		{"port out of range", minimal + "server:\n  port: 70000\n", "server.port"},
@@ -324,7 +324,7 @@ func TestWorkflowPathMustNotBeInsideWorkspaceRoot(t *testing.T) {
 		"/srv/agent/workspaces/GH-1/WORKFLOW.md":    true,
 		"/srv/agent/workspaces/WORKFLOW.md":         true,
 		"/srv/agent/workspaces-other/WORKFLOW.md":   false, // string prefix, different directory
-		"/etc/symphony/WORKFLOW.md":                 false,
+		"/etc/maestro/WORKFLOW.md":                  false,
 		"/srv/agent/workspaces/../conf/WORKFLOW.md": false,
 	} {
 		def.Path = path
@@ -378,8 +378,8 @@ func TestRequiredChecks(t *testing.T) {
 }
 
 func TestNullableBudgets(t *testing.T) {
-	c := mustBuild(t, with("state_dir: /srv/symphony/state",
-		"state_dir: /srv/symphony/state\n  max_agent_seconds_per_day: null\n  max_tokens_per_day: 5000000", ""))
+	c := mustBuild(t, with("state_dir: /srv/maestro/state",
+		"state_dir: /srv/maestro/state\n  max_agent_seconds_per_day: null\n  max_tokens_per_day: 5000000", ""))
 	if c.Budget.MaxAgentSecondsPerDay != nil {
 		t.Errorf("explicit null not honoured: %d", *c.Budget.MaxAgentSecondsPerDay)
 	}
@@ -409,7 +409,7 @@ func TestStallTimeoutMayBeDisabled(t *testing.T) {
 func TestDockerBackend(t *testing.T) {
 	docker := strings.Replace(with("backend: systemd", "backend: docker", ""), "  network:\n    proxy: 127.0.0.1:3128\n", "", 1)
 	c := mustBuild(t, docker)
-	if c.Sandbox.Backend != "docker" || c.Sandbox.Image != "symphony-sandbox:latest" || c.Sandbox.Proxy != "" {
+	if c.Sandbox.Backend != "docker" || c.Sandbox.Image != "maestro-sandbox:latest" || c.Sandbox.Proxy != "" {
 		t.Errorf("%+v", c.Sandbox)
 	}
 	c = mustBuild(t, strings.Replace(docker, "backend: docker", "backend: docker\n  image: ghcr.io/me/box:1.2", 1))

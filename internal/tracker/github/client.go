@@ -104,7 +104,7 @@ func (c *client) do(ctx context.Context, method, fullURL string, body any, out a
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", apiVersion)
-	req.Header.Set("User-Agent", "symphony-orchestrator")
+	req.Header.Set("User-Agent", "maestro-orchestrator")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

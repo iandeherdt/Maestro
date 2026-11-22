@@ -203,7 +203,7 @@ func reason(cfg config.Screenshots, res sandbox.Result) string {
 	}
 	switch word {
 	case "NO_BROWSER":
-		return "the sandbox image has no browser. Run `symphony image` again; it adds one when screenshots.pages is set."
+		return "the sandbox image has no browser. Run `maestro image` again; it adds one when screenshots.pages is set."
 	case "NO_ANSWER":
 		return "nothing answered at " + page + " within 90 seconds. Check screenshots.start."
 	case "NO_FILE":

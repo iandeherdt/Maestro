@@ -20,7 +20,7 @@ var (
 const twoTasks = "Here is the plan.\n\n```json\n" + `{"tasks": [
   {"title": "Add the model", "description": "Create it.", "worker": "MAC"},
   {"title": "Add the screen", "description": "Show it.", "worker": "server", "depends_on": [1]}
-]}` + "\n```\n\nSYMPHONY_PLAN: tasks\n"
+]}` + "\n```\n\nMAESTRO_PLAN: tasks\n"
 
 func TestParse(t *testing.T) {
 	p, err := Parse(twoTasks, workers)
@@ -31,18 +31,18 @@ func TestParse(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 
-	q, err := Parse("Which database?\nAnd which screen?\n\nSYMPHONY_PLAN: questions", workers)
+	q, err := Parse("Which database?\nAnd which screen?\n\nMAESTRO_PLAN: questions", workers)
 	if err != nil || q.Questions != "Which database?\nAnd which screen?" || len(q.Tasks) != 0 {
 		t.Fatalf("%+v %v", q, err)
 	}
 	// The last marker counts, and with one worker it need not be named.
-	one, err := Parse("SYMPHONY_PLAN: questions\n```json\n{\"tasks\":[{\"title\":\"T\",\"description\":\"D\"}]}\n```\nSYMPHONY_PLAN: tasks", []string{"mac"})
+	one, err := Parse("MAESTRO_PLAN: questions\n```json\n{\"tasks\":[{\"title\":\"T\",\"description\":\"D\"}]}\n```\nMAESTRO_PLAN: tasks", []string{"mac"})
 	if err != nil || len(one.Tasks) != 1 || one.Tasks[0].Worker != "mac" {
 		t.Fatalf("%+v %v", one, err)
 	}
 
 	task := func(fields string) string {
-		return "```json\n{\"tasks\":[{\"title\":\"A\",\"description\":\"B\",\"worker\":\"mac\"}," + fields + "]}\n```\nSYMPHONY_PLAN: tasks"
+		return "```json\n{\"tasks\":[{\"title\":\"A\",\"description\":\"B\",\"worker\":\"mac\"}," + fields + "]}\n```\nMAESTRO_PLAN: tasks"
 	}
 	long := strings.Repeat("x", MaxBodyChars+1)
 	var many []string
@@ -52,16 +52,16 @@ func TestParse(t *testing.T) {
 	big := `{"title":"T","description":"` + strings.Repeat("y", MaxBodyChars) + `","worker":"mac"}`
 	for name, text := range map[string]string{
 		"no marker":         "A plan.",
-		"marker in a line":  "see SYMPHONY_PLAN: tasks here",
-		"empty questions":   "\n\nSYMPHONY_PLAN: questions",
-		"long questions":    strings.Repeat("q", MaxQuestions+1) + "\nSYMPHONY_PLAN: questions",
-		"no json":           "Tasks: one, two.\nSYMPHONY_PLAN: tasks",
-		"broken json":       "```json\n{\"tasks\": [\n```\nSYMPHONY_PLAN: tasks",
-		"two objects":       "```json\n{\"tasks\":[]} {\"tasks\":[]}\n```\nSYMPHONY_PLAN: tasks",
-		"no tasks":          "```json\n{\"tasks\":[]}\n```\nSYMPHONY_PLAN: tasks",
-		"too many":          "```json\n{\"tasks\":[" + strings.Join(many, ",") + "]}\n```\nSYMPHONY_PLAN: tasks",
+		"marker in a line":  "see MAESTRO_PLAN: tasks here",
+		"empty questions":   "\n\nMAESTRO_PLAN: questions",
+		"long questions":    strings.Repeat("q", MaxQuestions+1) + "\nMAESTRO_PLAN: questions",
+		"no json":           "Tasks: one, two.\nMAESTRO_PLAN: tasks",
+		"broken json":       "```json\n{\"tasks\": [\n```\nMAESTRO_PLAN: tasks",
+		"two objects":       "```json\n{\"tasks\":[]} {\"tasks\":[]}\n```\nMAESTRO_PLAN: tasks",
+		"no tasks":          "```json\n{\"tasks\":[]}\n```\nMAESTRO_PLAN: tasks",
+		"too many":          "```json\n{\"tasks\":[" + strings.Join(many, ",") + "]}\n```\nMAESTRO_PLAN: tasks",
 		"unknown field":     task(`{"title":"T","description":"D","worker":"mac","labels":["x"]}`),
-		"top level field":   "```json\n{\"tasks\":[{\"title\":\"T\",\"description\":\"D\",\"worker\":\"mac\"}],\"state\":\"Todo\"}\n```\nSYMPHONY_PLAN: tasks",
+		"top level field":   "```json\n{\"tasks\":[{\"title\":\"T\",\"description\":\"D\",\"worker\":\"mac\"}],\"state\":\"Todo\"}\n```\nMAESTRO_PLAN: tasks",
 		"no title":          task(`{"title":" ","description":"D","worker":"mac"}`),
 		"two line title":    task(`{"title":"a\nb","description":"D","worker":"mac"}`),
 		"long title":        task(`{"title":"` + strings.Repeat("t", MaxTitleChars+1) + `","description":"D","worker":"mac"}`),

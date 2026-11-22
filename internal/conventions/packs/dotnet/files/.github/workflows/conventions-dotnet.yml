@@ -1,4 +1,4 @@
-# The same checks the Symphony service runs before it pushes, plus the
+# The same checks the Maestro service runs before it pushes, plus the
 # package audit, which needs the network. Make this check required in the
 # branch protection of the main branch.
 name: conventions-dotnet

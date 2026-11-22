@@ -596,7 +596,7 @@ func (b *builder) claude(s *section) {
 func (b *builder) sandbox(s *section) {
 	sb := &b.cfg.Sandbox
 	sb.Backend = s.str("backend", "")
-	sb.Image = s.str("image", "symphony-sandbox:latest")
+	sb.Image = s.str("image", "maestro-sandbox:latest")
 	sb.MemoryMax = s.str("memory_max", "6G")
 	sb.CPUQuota = s.str("cpu_quota", "300%")
 	sb.TasksMax = b.positive("sandbox.tasks_max", s.integer("tasks_max", 2048))
@@ -626,7 +626,7 @@ func (b *builder) sandbox(s *section) {
 		b.fail("sandbox.cpu_quota", "must be a percentage such as 300%%")
 	}
 	if !imageRE.MatchString(sb.Image) {
-		b.fail("sandbox.image", "must be an image name such as symphony-sandbox:latest")
+		b.fail("sandbox.image", "must be an image name such as maestro-sandbox:latest")
 	}
 	// The docker backend runs its own proxy next to the containers.
 	if sb.Proxy == "" && (sb.Backend == "docker" || sb.Backend == "podman") {
@@ -720,7 +720,7 @@ func (b *builder) screenshots(s *section) {
 
 func (b *builder) publish(s *section) {
 	p := &b.cfg.Publish
-	p.BranchPrefix = s.str("branch_prefix", "symphony/")
+	p.BranchPrefix = s.str("branch_prefix", "maestro/")
 	p.DraftUntilGreen = s.boolean("draft_until_green", true)
 	p.ChecksTimeoutMS = b.positive("publish.checks_timeout_ms", s.integer("checks_timeout_ms", 3600000))
 	p.ChecksPollIntervalMS = b.positive("publish.checks_poll_interval_ms", s.integer("checks_poll_interval_ms", 60000))

@@ -180,7 +180,7 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	if err != nil {
 		return err
 	}
-	name := "symphony-" + strings.ToLower(owner)
+	name := "maestro-" + strings.ToLower(owner)
 	if len(name) > 27 {
 		name = name[:27]
 	}
@@ -233,7 +233,7 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 	}
 	manifest, err := json.Marshal(map[string]any{
 		"name": name, "url": homepage, "redirect_url": local + "/callback", "public": false,
-		"description":         "Opens pull requests for approved tickets. Created by symphony setup.",
+		"description":         "Opens pull requests for approved tickets. Created by maestro setup.",
 		"default_permissions": perms, "default_events": []string{},
 	})
 	if err != nil {
@@ -263,7 +263,7 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		fmt.Fprintf(w, `<!doctype html><title>Symphony setup</title>
+		fmt.Fprintf(w, `<!doctype html><title>Maestro setup</title>
 <body style="font-family:sans-serif;max-width:36em;margin:3em auto">
 <h1>Create the GitHub App</h1>
 <p>The next page is on github.com. Check the name and press <b>Create GitHub App</b>.</p>
@@ -282,7 +282,7 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 		case codes <- q.Get("code"):
 		default:
 		}
-		io.WriteString(w, `<!doctype html><title>Symphony setup</title><body style="font-family:sans-serif;max-width:36em;margin:3em auto"><h1>Done</h1><p>Go back to the terminal. You can close this tab.</p></body>`)
+		io.WriteString(w, `<!doctype html><title>Maestro setup</title><body style="font-family:sans-serif;max-width:36em;margin:3em auto"><h1>Done</h1><p>Go back to the terminal. You can close this tab.</p></body>`)
 	}))
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go srv.Serve(ln)

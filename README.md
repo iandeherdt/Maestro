@@ -20,7 +20,7 @@ What sets it apart:
   analyzers and coverage, in places the agent cannot edit.
 - **Your machines.** A Mac and a home server can share one board, and each card says which one
   does the work.
-- **One guided setup.** `symphony setup` walks you through every step.
+- **One guided setup.** `maestro setup` walks you through every step.
 
 It follows the [Symphony specification](https://github.com/openai/symphony) published by OpenAI,
 whose reference setup pairs Linear with Codex. Maestro is a separate implementation for GitHub and
@@ -91,23 +91,23 @@ curl -fsSL https://raw.githubusercontent.com/iandeherdt/Maestro/main/install.sh 
 ```
 
 The script downloads the latest release for your machine, checks it against the release's
-checksum file, and puts `symphony` in `~/.local/bin`. It does not use `sudo`. To read it before
+checksum file, and puts `maestro` in `~/.local/bin`. It does not use `sudo`. To read it before
 running it, open [install.sh](install.sh). To choose a version or a directory, set
-`SYMPHONY_VERSION=v0.1.0` or `SYMPHONY_INSTALL_DIR=/some/dir` before `sh`.
+`MAESTRO_VERSION=v0.1.0` or `MAESTRO_INSTALL_DIR=/some/dir` before `sh`.
 
 Or build it yourself with Go 1.26 or newer:
 
 ```sh
 git clone https://github.com/iandeherdt/Maestro.git
 cd Maestro
-go build -o ~/.local/bin/symphony ./cmd/symphony
+go build -o ~/.local/bin/maestro ./cmd/maestro
 ```
 
 Then run the guided setup. It explains each step, waits for you before it changes anything, and
 can be stopped and run again at any time:
 
 ```sh
-symphony setup
+maestro setup
 ```
 
 In a terminal it shows each step with its progress, answers yes and no with one key, and lets you
@@ -127,7 +127,7 @@ What the setup does:
 4. **Sets up the board**, for a repository in an organization: it asks what this machine is
    called and what your GitHub user name is. GitHub lets only a person create a board, so setup
    asks you to make an empty one (open the organization's Projects page, press New project, pick
-   Board, name it Symphony) and waits. Then it gives the board the columns
+   Board, name it Maestro) and waits. Then it gives the board the columns
    Backlog, Idea, Planned, Todo, In Progress, Human Review, Rework, Blocked and Done, and a field named Worker
    that says which machine takes a card. If the organization already has a board you can pick
    that one. For a repository on a personal account this step creates the labels instead.
@@ -140,18 +140,18 @@ that the page opens there.
 Three commands are left, in this order, with Docker running:
 
 ```sh
-symphony image    # builds the container the agent works in. A few minutes, once.
-symphony login    # signs Claude Code in inside that container. Once.
-symphony run      # starts the service. Stop it with Ctrl-C.
+maestro image    # builds the container the agent works in. A few minutes, once.
+maestro login    # signs Claude Code in inside that container. Once.
+maestro run      # starts the service. Stop it with Ctrl-C.
 ```
 
-`symphony login` shows a link. Open it in your browser, approve, and paste the code it gives you
+`maestro login` shows a link. Open it in your browser, approve, and paste the code it gives you
 back into the terminal. The login is kept in a Docker volume that only the agent's containers
 get. It is not written to your files or your keychain, and no API key is involved.
 
 ## Use
 
-While `symphony run` is running, it looks at the board every 30 seconds.
+While `maestro run` is running, it looks at the board every 30 seconds.
 
 If the board opens as a table, click the small arrow next to the name of the view and choose
 **Board** under Layout. You do that once. The board has nine columns, so some are off the right
@@ -212,7 +212,7 @@ screenshots:
 and build the sandbox image again, because it needs a browser now:
 
 ```sh
-symphony image
+maestro image
 ```
 
 From then on every pull request has a **Screenshots** section with a picture of each page, taken
@@ -232,7 +232,7 @@ Things to know:
 - At most 6 pages. Each picture is 1280 by 800 pixels unless you set `width` and `height`.
 - The pictures are taken without network, like the checks. A font or script that the page
   loads from another site is missing in the picture.
-- The pictures are stored in your repository on a branch called `symphony/screenshots`, because
+- The pictures are stored in your repository on a branch called `maestro/screenshots`, because
   GitHub gives a service no other place for them. That branch holds nothing else and you can
   delete it whenever you like.
 - When a picture cannot be taken, the pull request is opened anyway and says why.
@@ -268,7 +268,7 @@ With labels instead of a board (a repository on a personal account), approve an 
 would move.
 
 What happens to a ticket, step by step: the service clones the repository into a fresh
-container, runs Claude Code there on a branch named `symphony/GH-<number>`, runs your test
+container, runs Claude Code there on a branch named `maestro/GH-<number>`, runs your test
 command itself, checks the changes against its rules, pushes the branch and opens a pull request.
 The agent's container has no GitHub token and can reach only the Claude service. Merging is
 always yours: merge the pull request and the ticket is closed, or request changes and the agent
@@ -279,22 +279,22 @@ If something goes wrong, the service writes why in a comment on the issue and in
 Day to day, from any terminal:
 
 ```sh
-symphony status              # what is being worked on, what is waiting, today's usage
-symphony pause on holiday    # finish what is running, start nothing new
-symphony resume
+maestro status              # what is being worked on, what is waiting, today's usage
+maestro pause on holiday    # finish what is running, start nothing new
+maestro resume
 ```
 
 To stop needing a terminal window:
 
 ```sh
-symphony service install     # run in the background, start when you log in
-symphony service uninstall   # back to running it by hand
+maestro service install     # run in the background, start when you log in
+maestro service uninstall   # back to running it by hand
 ```
 
 It shows the file it will write and asks before it does. The background service runs as you, and
 the agent still works in Docker, so Docker has to be running.
 
-Not built yet: `symphony unblock` and `symphony doctor`. To give a blocked ticket another
+Not built yet: `maestro unblock` and `maestro doctor`. To give a blocked ticket another
 chance, drag its card back to Todo (or put `status:todo` back on it).
 
 ## Conventions that tools enforce
@@ -304,8 +304,8 @@ project hold: every rule in a pack names the tool that checks it, and the checks
 agent cannot skip them.
 
 ```sh
-symphony conventions                 # the packs: dotnet, typescript
-symphony conventions show dotnet     # every rule, and the tool that enforces it
+maestro conventions                 # the packs: dotnet, typescript
+maestro conventions show dotnet     # every rule, and the tool that enforces it
 ```
 
 | Pack | For | Rules, in short |
@@ -329,7 +329,7 @@ To add a pack to a project:
 
 ```sh
 git clone <the project's address> && cd <the project>
-symphony conventions apply typescript
+maestro conventions apply typescript
 ```
 
 It writes the files and then lists what is left, step by step: install the tools, check that the
@@ -337,8 +337,8 @@ project passes, commit and push yourself, make the CI check required on GitHub, 
 pack on for the service:
 
 ```sh
-symphony conventions enable typescript    # on every machine that runs agents for the project
-symphony image                            # once more, when the pack needs tools in the sandbox
+maestro conventions enable typescript    # on every machine that runs agents for the project
+maestro image                            # once more, when the pack needs tools in the sandbox
 ```
 
 The rules end up in the repository as `conventions/<pack>/RULES.md`, so the agent can read what
@@ -367,7 +367,7 @@ tracker:
     bot_login: your-app[bot]
   allowed_authors: [your-user-name]
 workspace:
-  root: "/home/you/.config/symphony/workspaces"
+  root: "/home/you/.config/maestro/workspaces"
   repo: your-organization/your-repo
 sandbox:
   backend: docker
@@ -376,7 +376,7 @@ verify:
     npm run lint
     npm test
 budget:
-  state_dir: "/home/you/.config/symphony/state"
+  state_dir: "/home/you/.config/maestro/state"
 worker:
   name: linux
 ---
@@ -389,7 +389,7 @@ Follow the conventions in CLAUDE.md. Add or update tests for every behaviour you
 Check a workflow file without starting anything:
 
 ```sh
-symphony check examples/WORKFLOW.example.md
+maestro check examples/WORKFLOW.example.md
 ```
 
 Every setting, with its default, is listed in [docs/SPEC.md](docs/SPEC.md), section 5. Commonly
@@ -397,7 +397,7 @@ changed ones:
 
 | Setting | Default | What it does |
 |---|---|---|
-| `conventions` | none | Rule packs that are switched on, for example `[typescript]`. Set it with `symphony conventions enable` |
+| `conventions` | none | Rule packs that are switched on, for example `[typescript]`. Set it with `maestro conventions enable` |
 | `verify.command` | none | What the service runs to decide whether the work is acceptable. With a rule pack, the pack's checks run first and this may be left out |
 | `screenshots.pages` | none | Pages the service takes a picture of for the pull request, see [Screenshots on the pull request](#screenshots-on-the-pull-request) |
 | `publish.required_checks` | the repository's checks | `none` hands a pull request to you without waiting for CI. A list of names waits for exactly those. |
@@ -412,7 +412,7 @@ changed ones:
 
 ## Project status
 
-Last updated 2026-11-21.
+Last updated 2026-11-22.
 
 | Part | State |
 |---|---|
@@ -433,14 +433,14 @@ Last updated 2026-11-21.
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Comments on a pull request send the card back to work | Written, tested against a fake GitHub API. Not yet run against github.com. |
-| Screenshots on the pull request | Written. Taking the pictures is tested here with a real Chromium, storing them against a stand-in for GitHub. Not yet run through the service on a real project: the image with the browser has not been built with `symphony image`, and the pictures have not been seen in a pull request on github.com. |
+| Screenshots on the pull request | Written. Taking the pictures is tested here with a real Chromium, storing them against a stand-in for GitHub. Not yet run through the service on a real project: the image with the browser has not been built with `maestro image`, and the pictures have not been seen in a pull request on github.com. |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
-| `symphony image`, `symphony login`, `symphony run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
-| `symphony status`, `pause`, `resume` | Done, tested against the running service |
+| `maestro image`, `maestro login`, `maestro run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
+| `maestro status`, `pause`, `resume` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
-| Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `symphony image` yet. |
-| Running in the background (`symphony service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
-| `symphony unblock`, `doctor`, start-up self-test | Not started |
+| Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
+| Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
+| `maestro unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
@@ -467,7 +467,27 @@ The design follows the specification of OpenAI's Symphony, adapted for Claude Co
 for a setup where the board is reachable from the internet and the worker sits on a home network.
 [docs/SPEC.md](docs/SPEC.md), Appendix D, lists the differences.
 
-The project was first called Symphony-beads. The command is still `symphony`.
+The project was first called Symphony-beads and its command `symphony`. [Coming from `symphony`](#coming-from-symphony) says what changes for an installation made under that name.
+
+### Coming from `symphony`
+
+Until release 0.4.0 the command was called `symphony`. An installation made under that name keeps
+working: its settings, its GitHub App, its board and its tickets stay as they are. Do this once:
+
+1. Stop the old service: Ctrl-C in its terminal, or `symphony service uninstall` if it runs in the
+   background.
+2. Install again with the command under [Install](#install). It puts `maestro` next to the old
+   `symphony` and tells you how to remove the old copy.
+3. `maestro image`, then `maestro login`. The container and the place that holds the Claude Code
+   sign-in have new names, so both are made again.
+4. `maestro run`, or `maestro service install`.
+
+Two things to know:
+
+- New branches start with `maestro/` and no longer with `symphony/`. A ticket that already has a
+  pull request on a `symphony/` branch is not followed any more. Merge or close those first, or
+  keep the old name with `publish: {branch_prefix: symphony/}` in the settings file.
+- Setup keeps using the old settings directory when it exists, so nothing has to be moved.
 
 ## License
 

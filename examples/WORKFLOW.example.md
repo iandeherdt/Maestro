@@ -8,7 +8,7 @@ tracker:
     bot_login: your-app[bot]
   allowed_authors: [your-account]
 workspace:
-  root: /var/lib/symphony-agent/workspaces
+  root: /var/lib/maestro-agent/workspaces
   repo: your-account/your-repo
 hooks:
   after_create: |
@@ -23,7 +23,7 @@ verify:
     npm run lint
     npm test
 budget:
-  state_dir: /var/lib/symphony/state
+  state_dir: /var/lib/maestro/state
 worker:
   name: linux
 ---

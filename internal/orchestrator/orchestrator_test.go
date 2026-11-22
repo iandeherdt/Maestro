@@ -73,7 +73,7 @@ type env struct {
 func testConfig() *config.Config {
 	return &config.Config{
 		Tracker: config.Tracker{
-			RequiredLabels:  []string{"symphony", "run:linux"},
+			RequiredLabels:  []string{"maestro", "run:linux"},
 			ActiveStates:    []string{"Todo", "Rework", "In Progress"},
 			TerminalStates:  []string{"Done", "Cancelled"},
 			HandoffState:    "Human Review",
@@ -144,7 +144,7 @@ func todo(n int) issue.Issue {
 	return issue.Issue{
 		ID: fmt.Sprintf("id-%d", n), Identifier: fmt.Sprintf("GH-%d", n),
 		Title: fmt.Sprintf("Task %d", n), State: "Todo",
-		Labels: []string{"symphony", "run:linux"}, Dispatchable: true,
+		Labels: []string{"maestro", "run:linux"}, Dispatchable: true,
 		CreatedAt: time.Date(2026, 11, 1, 0, 0, n, 0, time.UTC),
 	}
 }
@@ -169,7 +169,7 @@ func TestDispatchClaimsAndMovesToInProgress(t *testing.T) {
 
 func TestEligibilityFilters(t *testing.T) {
 	noLabel := todo(1)
-	noLabel.Labels = []string{"symphony"} // routing label missing
+	noLabel.Labels = []string{"maestro"} // routing label missing
 	notApproved := todo(2)
 	notApproved.Dispatchable = false
 	badKey := todo(3)
@@ -254,7 +254,7 @@ func TestReconcileNonActiveStopsWithoutCleanup(t *testing.T) {
 		"missing":          func(e *env) { e.tr.Delete("id-1") },
 		"label removed": func(e *env) {
 			i := e.tr.Get("id-1")
-			i.Labels = []string{"symphony"}
+			i.Labels = []string{"maestro"}
 			e.tr.Put(i)
 		},
 		"approval withdrawn": func(e *env) {
@@ -445,7 +445,7 @@ func TestFailureBudgetBlocksAndSurvivesRestart(t *testing.T) {
 	}
 	e.tick()
 	e.wantStarts(3)
-	e.exit(Outcome{Kind: Failed, Category: "turn_failed", Message: "@everyone see <!-- symphony-status:linux -->"})
+	e.exit(Outcome{Kind: Failed, Category: "turn_failed", Message: "@everyone see <!-- maestro-status:linux -->"})
 	if got := e.tr.Get("id-1").State; got != "Blocked" {
 		t.Fatalf("state = %q, want Blocked", got)
 	}
@@ -454,7 +454,7 @@ func TestFailureBudgetBlocksAndSurvivesRestart(t *testing.T) {
 	}
 	ws := e.tr.Writes()
 	body := ws[len(ws)-1].Value
-	if strings.Contains(body, "@everyone") || strings.Contains(body, "<!-- symphony-status") {
+	if strings.Contains(body, "@everyone") || strings.Contains(body, "<!-- maestro-status") {
 		t.Fatalf("untrusted text not neutralized: %q", body)
 	}
 	e.tick()

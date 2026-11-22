@@ -3,8 +3,8 @@
 // The live test runs the adapter against a real scratch repository. It is
 // excluded from normal builds. Run it with:
 //
-//	SYMPHONY_LIVE_REPO=owner/scratch SYMPHONY_LIVE_LOGIN=owner \
-//	SYMPHONY_LIVE_TOKEN_VAR=GH_TOKEN go test -tags live -run TestLive ./internal/tracker/github
+//	MAESTRO_LIVE_REPO=owner/scratch MAESTRO_LIVE_LOGIN=owner \
+//	MAESTRO_LIVE_TOKEN_VAR=GH_TOKEN go test -tags live -run TestLive ./internal/tracker/github
 //
 // It creates three issues and closes them again. The token's account acts
 // as both the owner and the service, which is not the deployed setup, so
@@ -24,9 +24,9 @@ import (
 )
 
 func TestLive(t *testing.T) {
-	repo, login, tokenVar := os.Getenv("SYMPHONY_LIVE_REPO"), os.Getenv("SYMPHONY_LIVE_LOGIN"), os.Getenv("SYMPHONY_LIVE_TOKEN_VAR")
+	repo, login, tokenVar := os.Getenv("MAESTRO_LIVE_REPO"), os.Getenv("MAESTRO_LIVE_LOGIN"), os.Getenv("MAESTRO_LIVE_TOKEN_VAR")
 	if repo == "" || login == "" || tokenVar == "" {
-		t.Skip("SYMPHONY_LIVE_REPO, SYMPHONY_LIVE_LOGIN and SYMPHONY_LIVE_TOKEN_VAR are not set")
+		t.Skip("MAESTRO_LIVE_REPO, MAESTRO_LIVE_LOGIN and MAESTRO_LIVE_TOKEN_VAR are not set")
 	}
 	cfg := &config.Config{
 		Tracker: config.Tracker{

@@ -73,7 +73,7 @@ func (g *github) graphql(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(in.Query, "createProjectV2("):
 		g.mutations = append(g.mutations, "board")
-		if str("owner") != "O_org" || str("repo") != "R_repo" || str("title") != "Symphony" {
+		if str("owner") != "O_org" || str("repo") != "R_repo" || str("title") != "Maestro" {
 			fail("bad input")
 			return
 		}
@@ -277,7 +277,7 @@ func TestBoardStepExplainsRefusals(t *testing.T) {
 	if !errors.Is(err, ErrAborted) || strings.Contains(out.String(), "\x1b") || st.Board != 0 {
 		t.Fatalf("a refused creation: %v", err)
 	}
-	g.boards = []*fakeBoard{{number: 6, title: "Symphony", status: []option{{"Todo", "GREEN", "x"}}}}
+	g.boards = []*fakeBoard{{number: 6, title: "Maestro", status: []option{{"Todo", "GREEN", "x"}}}}
 	u, out = ui("\nian\n\ny\n\n6\n")
 	if err := Run(ctx, u, st, []Step{step}); err != nil || st.Board != 6 || names(g.boards[0].status) != allColumns {
 		t.Fatalf("after creating it by hand: board %d, %v\n%s", st.Board, err, out)

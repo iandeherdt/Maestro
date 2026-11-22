@@ -131,9 +131,9 @@ func TestSuccessfulTurn(t *testing.T) {
 		`{"type":"system","subtype":"hook_started"}`,
 		`not json`,
 		`{"type":"assistant","message":{"id":"m2","usage":{"input_tokens":20,"output_tokens":7},"content":[]}}`,
-		result("success", "All done.\nSYMPHONY_STATUS: done", `,"usage":{"input_tokens":40,"output_tokens":15,"cache_read_input_tokens":100,"cache_creation_input_tokens":1}`))
+		result("success", "All done.\nMAESTRO_STATUS: done", `,"usage":{"input_tokens":40,"output_tokens":15,"cache_read_input_tokens":100,"cache_creation_input_tokens":1}`))
 	res, err := g.turn("")
-	if err != nil || res.SessionID != sid || res.ResultText != "All done.\nSYMPHONY_STATUS: done" {
+	if err != nil || res.SessionID != sid || res.ResultText != "All done.\nMAESTRO_STATUS: done" {
 		t.Fatalf("result %+v, error %v", res, err)
 	}
 	if got := g.kinds(); got != "session_started notification tool_call tool_result permission_denied other_message malformed notification turn_completed" {

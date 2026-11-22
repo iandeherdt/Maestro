@@ -288,7 +288,7 @@ func TestImportRejections(t *testing.T) {
 		_, err := l.mirror.Import(ctx, l.bundle("HEAD"), "k", l.base)
 		wantRejected(t, err, "do not build on the base")
 		// The rejected head is not left in the mirror's refs.
-		if out, _ := exec.Command("git", "--git-dir="+l.mirror.Dir, "for-each-ref", "refs/symphony").Output(); len(out) != 0 {
+		if out, _ := exec.Command("git", "--git-dir="+l.mirror.Dir, "for-each-ref", "refs/maestro").Output(); len(out) != 0 {
 			t.Errorf("refs left behind: %s", out)
 		}
 	})
@@ -475,38 +475,38 @@ func TestPush(t *testing.T) {
 	l := newLab(t)
 	remote := l.remote()
 	first := l.importNew("a")
-	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if got := l.run(remote, "rev-parse", "refs/heads/symphony/gh-1"); got != first {
+	if got := l.run(remote, "rev-parse", "refs/heads/maestro/gh-1"); got != first {
 		t.Fatalf("remote branch at %s", got)
 	}
 	if got := l.run(remote, "rev-parse", "refs/heads/main"); got != l.base {
 		t.Fatalf("the base branch moved to %s", got)
 	}
 	// Pushing the same head again is a no-op.
-	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
 		t.Fatal(err)
 	}
 
 	// A new attempt that rewrote its history replaces the branch.
 	l.run(l.work, "reset", "-q", "--hard", l.base)
 	second := l.importNew("b")
-	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if got := l.run(remote, "rev-parse", "refs/heads/symphony/gh-1"); got != second {
+	if got := l.run(remote, "rev-parse", "refs/heads/maestro/gh-1"); got != second {
 		t.Fatalf("remote branch at %s after the second push", got)
 	}
 
 	// Someone else pushes to the branch. The service must not overwrite it.
-	l.run(remote, "update-ref", "refs/heads/symphony/gh-1", first)
+	l.run(remote, "update-ref", "refs/heads/maestro/gh-1", first)
 	l.run(l.work, "reset", "-q", "--hard", l.base)
 	l.importNew("c")
-	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); !errors.Is(err, ErrBranchMoved) {
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); !errors.Is(err, ErrBranchMoved) {
 		t.Fatalf("got %v", err)
 	}
-	if got := l.run(remote, "rev-parse", "refs/heads/symphony/gh-1"); got != first {
+	if got := l.run(remote, "rev-parse", "refs/heads/maestro/gh-1"); got != first {
 		t.Fatalf("someone else's commits were overwritten: %s", got)
 	}
 }
@@ -514,17 +514,17 @@ func TestPush(t *testing.T) {
 func TestFirstPushRefusesAnExistingBranch(t *testing.T) {
 	l := newLab(t)
 	remote := l.remote()
-	l.run(remote, "update-ref", "refs/heads/symphony/gh-1", l.base)
+	l.run(remote, "update-ref", "refs/heads/maestro/gh-1", l.base)
 	l.importNew("a")
-	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); !errors.Is(err, ErrBranchMoved) {
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); !errors.Is(err, ErrBranchMoved) {
 		t.Fatalf("got %v", err)
 	}
 	// After the record is dropped and the remote branch is gone, a push works again.
-	l.run(remote, "update-ref", "-d", "refs/heads/symphony/gh-1")
+	l.run(remote, "update-ref", "-d", "refs/heads/maestro/gh-1")
 	if err := l.mirror.ForgetPush(ctx, "k"); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.mirror.Push(ctx, remote, "k", "symphony/gh-1", "tok"); err != nil {
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -540,11 +540,11 @@ func TestPushArguments(t *testing.T) {
 	}
 	l.mirror.AllowFileRemote = false
 	for _, u := range []string{remote, "http://github.com/a/b.git", "https://user:pw@github.com/a/b.git", "ssh://git@github.com/a/b", "ext::sh -c x", "git@github.com:a/b.git"} {
-		if err := l.mirror.Push(ctx, u, "k", "symphony/x", "tok"); err == nil || !strings.Contains(err.Error(), "https URL") {
+		if err := l.mirror.Push(ctx, u, "k", "maestro/x", "tok"); err == nil || !strings.Contains(err.Error(), "https URL") {
 			t.Errorf("remote %q: %v", u, err)
 		}
 	}
-	if err := l.mirror.Push(ctx, "https://example.invalid/a/b.git", "other", "symphony/x", "tok"); err == nil || !strings.Contains(err.Error(), "nothing was imported") {
+	if err := l.mirror.Push(ctx, "https://example.invalid/a/b.git", "other", "maestro/x", "tok"); err == nil || !strings.Contains(err.Error(), "nothing was imported") {
 		t.Errorf("push without an import: %v", err)
 	}
 }
@@ -555,7 +555,7 @@ func TestAskpassHelperHoldsNoSecret(t *testing.T) {
 	os.WriteFile(helper, []byte(askpass), 0o700)
 	ask := func(prompt string) string {
 		cmd := exec.Command(helper, prompt)
-		cmd.Env = []string{"SYMPHONY_PUSH_TOKEN=tok$en`x`'\""}
+		cmd.Env = []string{"MAESTRO_PUSH_TOKEN=tok$en`x`'\""}
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatal(err)
@@ -617,14 +617,14 @@ func TestSync(t *testing.T) {
 	}
 	// A branch that is to be skipped is not fetched, and one fetched by an
 	// earlier version goes. A skipped branch the remote does not have is fine.
-	l.run(seed, "push", "-q", remote, "HEAD:refs/heads/symphony/screenshots", "HEAD:refs/heads/symphony/GH-1")
+	l.run(seed, "push", "-q", remote, "HEAD:refs/heads/maestro/screenshots", "HEAD:refs/heads/maestro/GH-1")
 	if err := fresh.Sync(ctx, remote, "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if err := fresh.Sync(ctx, remote, "tok", "symphony/screenshots", "symphony/absent"); err != nil {
+	if err := fresh.Sync(ctx, remote, "tok", "maestro/screenshots", "maestro/absent"); err != nil {
 		t.Fatal(err)
 	}
-	if fresh.HasBranch(ctx, "symphony/screenshots") || !fresh.HasBranch(ctx, "symphony/GH-1") {
+	if fresh.HasBranch(ctx, "maestro/screenshots") || !fresh.HasBranch(ctx, "maestro/GH-1") {
 		t.Fatalf("refs with a skipped branch:\n%s", l.run(fresh.Dir, "for-each-ref", "--format=%(refname)"))
 	}
 	if err := fresh.Sync(ctx, remote, "tok", "--upload-pack=x"); err == nil {

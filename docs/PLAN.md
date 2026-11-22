@@ -1,4 +1,4 @@
-# Symphony for Claude: plan
+# Maestro: plan
 
 This is the roadmap. The design itself is specified in [SPEC.md](SPEC.md), which is normative and
 written at the level of detail of OpenAI's Symphony specification, from which it is derived.
@@ -55,7 +55,7 @@ the result itself, and opens a pull request for the owner to review and merge.
    real machine. It is not a documented automation path and Anthropic may change how such
    sessions are treated, so it is the owner's choice per workflow, not the default.
 
-9. Installation: one guided command, `symphony setup`, that explains each step, asks before it
+9. Installation: one guided command, `maestro setup`, that explains each step, asks before it
    changes anything and can be run again at any point (SPEC 16.8). It replaces a manual runbook
    as the way to install. The binary itself will be a single download with a checksum.
 
@@ -78,7 +78,7 @@ against the real CLI. The sandbox launcher and everything on the Mac need the ow
 | 3. Sandbox, Linux | 11, launcher, proxy | Test matrix 20.6 on a RHEL 9 compatible VM |
 | 4. Claude runner | 10, 13 | Test matrix 20.5. A real ticket produces commits on a scratch repository. |
 | 5. Verify and publish | 14, 15, 17 | Test matrix 20.7 |
-| 6. Linux deployment | Appendix A, `doctor`, `symphony setup` (16.8) | A fresh VM reaches a running service through `symphony setup` alone |
+| 6. Linux deployment | Appendix A, `doctor`, `maestro setup` (16.8) | A fresh VM reaches a running service through `maestro setup` alone |
 | 7. Linux pilot | Appendix C, 20.9 | The adversarial tickets end harmlessly. Two weeks at concurrency 1. |
 | 8. Linear adapter | 12.6 | Test matrix 20.3 for Linear |
 | 9. Mac worker | Appendix B | Test matrix 20.6 and 20.9 on the Mac with an Xcode and a Unity sample |

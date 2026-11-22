@@ -528,7 +528,7 @@ func (a *Adapter) moveCard(ctx context.Context, is issue.Issue, on *card, state 
 			return err
 		}
 		if option = m.options[norm(state)]; option == "" {
-			return terr(tracker.WriteRejected, "%s has no column %q. Add it to the field %q, or run `symphony setup` again",
+			return terr(tracker.WriteRejected, "%s has no column %q. Add it to the field %q, or run `maestro setup` again",
 				a.boardName(), state, a.board.statusField)
 		}
 	}

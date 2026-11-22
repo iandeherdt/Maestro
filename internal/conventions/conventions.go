@@ -7,7 +7,7 @@
 // network. And the diff policy refuses any change to the rule files, so
 // the cheapest way to pass a rule, weakening it, is closed.
 //
-// The packs are part of the binary. `symphony conventions apply` writes a
+// The packs are part of the binary. `maestro conventions apply` writes a
 // pack's files into a checkout for the owner to commit; the settings file
 // then names the pack, and the configuration derives the rest from it.
 package conventions
@@ -183,7 +183,7 @@ func (p *Pack) Guide() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Conventions: %s\n\n", p.Title)
 	b.WriteString("Every rule below is checked by a tool, not by reading. The checks run in two places:\n" +
-		"the Symphony service runs `" + p.Verify + "` itself before it pushes a change, and CI runs the\n" +
+		"the Maestro service runs `" + p.Verify + "` itself before it pushes a change, and CI runs the\n" +
 		"same script on the pull request (check `" + p.Check + "`).\n\n" +
 		"To see what the checks say about your work, run the same command:\n\n" +
 		"```sh\n" + p.Verify + "\n```\n\n" +
@@ -377,7 +377,7 @@ func Derive(list []*Pack) Settings {
 		// A pack that is switched on while its files are not in the
 		// repository must fail with words, not with "No such file".
 		guard := fmt.Sprintf("[ -f %s ] || { echo 'The conventions pack %s is switched on in the settings file, "+
-			"but its files are not in this repository. Run `symphony conventions apply %s` in a checkout, "+
+			"but its files are not in this repository. Run `maestro conventions apply %s` in a checkout, "+
 			"commit and push.' >&2; exit 1; }", p.GuidePath(), p.Name, p.Name)
 		prep = append(prep, guard, p.Prepare+" || exit $?")
 		ver = append(ver, guard, p.Verify+" || exit $?")

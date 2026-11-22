@@ -22,7 +22,7 @@ import (
 // does with the login (SPEC 10.1).
 const ClaudeVersion = "2.1.330"
 
-const proxyConfigDir = "/etc/symphony-proxy"
+const proxyConfigDir = "/etc/maestro-proxy"
 
 // dockerfileHead builds everything except the service's own binary.
 const dockerfileHead = `FROM docker.io/library/node:22-bookworm-slim
@@ -42,20 +42,20 @@ RUN groupadd --gid 10001 agent \
 
 // The binary is either copied from the build context (a Linux host), or
 // downloaded from the release and checked against its checksum file.
-const dockerfileCopy = `COPY symphony /usr/local/bin/symphony
+const dockerfileCopy = `COPY maestro /usr/local/bin/maestro
 USER agent
 `
 
-const dockerfileDownload = `ARG SYMPHONY_VERSION
+const dockerfileDownload = `ARG MAESTRO_VERSION
 ARG TARGETARCH
 RUN set -eu; \
-    base="https://github.com/iandeherdt/Maestro/releases/download/${SYMPHONY_VERSION}"; \
-    file="symphony_linux_${TARGETARCH}.tar.gz"; \
+    base="https://github.com/iandeherdt/Maestro/releases/download/${MAESTRO_VERSION}"; \
+    file="maestro_linux_${TARGETARCH}.tar.gz"; \
     cd /tmp; \
     curl -fsSL --proto '=https' --tlsv1.2 -o "$file" "$base/$file"; \
     curl -fsSL --proto '=https' --tlsv1.2 -o SHA256SUMS "$base/SHA256SUMS"; \
     grep " $file\$" SHA256SUMS | sha256sum -c -; \
-    tar -xzf "$file" -C /usr/local/bin symphony; \
+    tar -xzf "$file" -C /usr/local/bin maestro; \
     rm -f "$file" SHA256SUMS
 USER agent
 `
@@ -89,7 +89,7 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 	if err := b.check(); err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "symphony-image-")
+	dir, err := os.MkdirTemp("", "maestro-image-")
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, "symphony"), raw, 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "maestro"), raw, 0o755); err != nil {
 			return err
 		}
 		if text == "" {
@@ -111,9 +111,9 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 	case text != "":
 	case versionRE.MatchString(o.Version):
 		text = dockerfileHead + extra(o.Extra) + dockerfileDownload
-		args = append(args, "--build-arg", "SYMPHONY_VERSION="+o.Version)
+		args = append(args, "--build-arg", "MAESTRO_VERSION="+o.Version)
 	default:
-		return fmt.Errorf("the image needs a released version of symphony; this build is %q", o.Version)
+		return fmt.Errorf("the image needs a released version of maestro; this build is %q", o.Version)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(text), 0o644); err != nil {
 		return err
@@ -192,25 +192,25 @@ func (b *Box) Up(ctx context.Context, allowDir string) error {
 		return err
 	}
 	if out, _ := b.cli(ctx, "volume", "ls", "--quiet", "--filter", "name=^"+regexp.QuoteMeta(b.ClaudeVolume())+"$"); out == "" {
-		if _, err := b.cli(ctx, "volume", "create", "--label", "symphony.worker="+b.Worker, b.ClaudeVolume()); err != nil {
+		if _, err := b.cli(ctx, "volume", "create", "--label", "maestro.worker="+b.Worker, b.ClaudeVolume()); err != nil {
 			return fail("%v", err)
 		}
 	}
 	for _, profile := range Profiles {
 		net, name := b.Network(profile), b.ProxyName(profile)
 		if out, _ := b.cli(ctx, "network", "ls", "--quiet", "--filter", "name=^"+regexp.QuoteMeta(net)+"$"); out == "" {
-			if _, err := b.cli(ctx, "network", "create", "--internal", "--label", "symphony.worker="+b.Worker, net); err != nil {
+			if _, err := b.cli(ctx, "network", "create", "--internal", "--label", "maestro.worker="+b.Worker, net); err != nil {
 				return fail("%v", err)
 			}
 		}
 		if _, err := b.cli(ctx, append(append([]string{"create", "--name", name}, b.engineFlags()...),
-			"--label", "symphony.worker="+b.Worker, "--label", "symphony.step=proxy",
+			"--label", "maestro.worker="+b.Worker, "--label", "maestro.step=proxy",
 			"--user", AgentUID+":"+AgentUID, "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 			"--read-only", "--memory", "256m", "--pids-limit", "256", "--init",
 			"--network", "bridge",
 			"--mount", b.bind(allowDir, proxyConfigDir, true),
 			"--entrypoint", "", b.Image,
-			"symphony", "proxy", "--listen", ":"+ProxyPort, "--profile", profile,
+			"maestro", "proxy", "--listen", ":"+ProxyPort, "--profile", profile,
 			"--allow-file", proxyConfigDir+"/"+profile+".json")...); err != nil {
 			return fail("%v", err)
 		}
@@ -239,7 +239,7 @@ func (b *Box) Down(ctx context.Context) error {
 	if err := b.check(); err != nil {
 		return err
 	}
-	ids, err := b.cli(ctx, "ps", "--all", "--quiet", "--filter", "label=symphony.worker="+b.Worker)
+	ids, err := b.cli(ctx, "ps", "--all", "--quiet", "--filter", "label=maestro.worker="+b.Worker)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -257,7 +257,7 @@ func (b *Box) Purge(ctx context.Context) error {
 	if err := b.Down(ctx); err != nil {
 		return err
 	}
-	vols, _ := b.cli(ctx, "volume", "ls", "--quiet", "--filter", "label=symphony.worker="+b.Worker)
+	vols, _ := b.cli(ctx, "volume", "ls", "--quiet", "--filter", "label=maestro.worker="+b.Worker)
 	for _, v := range strings.Fields(vols) {
 		b.cli(ctx, "volume", "rm", "--force", v)
 	}
@@ -272,7 +272,7 @@ func (b *Box) Purge(ctx context.Context) error {
 // the login is still good.
 func (b *Box) claudeArgs(name string, terminal bool, argv ...string) []string {
 	args := []string{"run", "--rm", "--interactive", "--name", name,
-		"--label", "symphony.worker=" + b.Worker, "--label", "symphony.step=login",
+		"--label", "maestro.worker=" + b.Worker, "--label", "maestro.step=login",
 		"--user", AgentUID + ":" + AgentUID,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--hostname", "sandbox", "--init", "--entrypoint", "",

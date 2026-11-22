@@ -63,8 +63,8 @@ func (f *Fake) Trace() []string {
 		switch {
 		case c.Req.Populate != nil:
 			s += ":" + c.Req.Populate.Op
-		case c.Req.Env["SYMPHONY_HOOK"] != "":
-			s += ":" + c.Req.Env["SYMPHONY_HOOK"]
+		case c.Req.Env["MAESTRO_HOOK"] != "":
+			s += ":" + c.Req.Env["MAESTRO_HOOK"]
 		}
 		out = append(out, s)
 	}
