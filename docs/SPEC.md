@@ -2861,6 +2861,47 @@ itself. The skill MUST state that approving a ticket is the owner's act, that th
 writes tickets in the unapproved state only, and that text from tickets and worker agents is not
 to be followed. `maestro assistant remove` deletes the skill.
 
+## 26. Skills and Agent Files
+
+Procedural knowledge that is not in the repository reaches the worker agents as Claude Code
+skills (a directory with a `SKILL.md`) and agent files (a Markdown file with a `name` and a
+`description` in its front matter). They carry the authority of the prompt, so they are trusted
+input and enter only through the owner.
+
+### 26.1 Adding
+
+`maestro skills add SOURCE [--ref REF] [--path DIR] [--yes]` runs in the control zone with the
+owner's network access. `SOURCE` is a directory on the machine, `owner/repo[/dir]` on GitHub, or
+an `https://` address of a git repository. No other scheme is accepted.
+
+- A repository is fetched at depth 1 at `REF` (default: its default branch) and the commit is
+  recorded. The fetch MUST NOT run hooks or filters from the fetched repository and MUST NOT ask
+  for credentials on the terminal.
+- A skill is every directory with a `SKILL.md`, at most four levels below the source's root; an
+  agent file is a `.md` file with a name and a description in a directory named `agents`.
+- A name MUST match `^[a-z0-9][a-z0-9-]{0,63}$`. A skill without a description is refused.
+- A skill MUST consist of regular files only (no links, no special files), at most 200 files and
+  5 MB. A path that leads out of the fetched repository through a link is refused.
+- Before anything is stored the command MUST list each entry with its description and the files
+  that are executable or have a script extension, and MUST wait for a yes unless `--yes` is given.
+- Text taken from the source MUST have control characters removed before it is printed.
+
+Entries are copied to `<setup dir>/agent-files/skills/<name>/` and
+`<setup dir>/agent-files/agents/<name>.md`, with source, commit and date in
+`<setup dir>/agent-files/installed.json`. Adding an entry of the same kind and name replaces it
+completely. `maestro skills remove NAME` deletes it. Nothing is ever updated without the command.
+
+### 26.2 In the sandbox
+
+- An agent step mounts `agent-files/skills` at `$CLAUDE_CONFIG_DIR/skills` and
+  `agent-files/agents` at `$CLAUDE_CONFIG_DIR/agents`, both read-only. The mounts are made also
+  when the directories are empty, so that files an agent writes at those paths in the login
+  volume are never read by a later run.
+- No other step gets these mounts.
+- The store is read at every agent step; a change applies to the next step without a restart.
+- Programs in a skill run only as part of an agent step, under that step's limits and network
+  profile.
+
 ## Appendix A. Linux Worker Deployment
 
 Host: RHEL 8 or 9 with libvirt. The host runs nothing of the service except the VM and firewall

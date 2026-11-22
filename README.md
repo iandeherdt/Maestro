@@ -337,6 +337,46 @@ moving a card to Todo to you. Text that tickets and working agents wrote is mark
 answer as information, not instructions. To undo: `maestro assistant remove` and
 `claude mcp remove maestro`.
 
+## Give the agents skills
+
+The agents read the repository they work in, including its `CLAUDE.md`. Knowledge that is not
+in the repository, such as how your team reviews code, cuts a release or uses an internal tool,
+can be given to them as **skills** and **agent files**. These are Claude Code's own formats: a
+skill is a directory with a `SKILL.md`, an agent file is a Markdown file in a directory called
+`agents`. Many are published as git repositories, and you can write your own.
+
+```sh
+maestro skills add owner/repo            # a repository on GitHub
+maestro skills add owner/repo/skills/pdf # only one directory of it
+maestro skills add owner/repo --ref v1.2 # a branch, a tag or a commit
+maestro skills add https://git.example.com/team/skills.git
+maestro skills add ./my-skills           # a directory on this machine
+```
+
+The command downloads the source, lists every skill and agent file it found with its description
+and the programs it contains, and waits for your yes. Then:
+
+- Every agent that starts from then on has them. The service does not need a restart.
+- `maestro skills` lists what is installed, from where and at which commit.
+- `maestro skills remove NAME` takes one away.
+- Nothing updates by itself. To get a newer version, add the source again; you are shown what
+  you get before it replaces the old one.
+
+A skill is followed like your own instructions, so this is the one place where text from
+outside gets that weight. That is why it works this way:
+
+- Only you add skills, with a command on the machine. A ticket, a comment or an agent cannot.
+- What you approved is copied and kept at that commit. A later change to the repository it came
+  from does not reach your agents.
+- The agents get the skills read-only, and what an agent writes into that place itself is never
+  seen by a later run.
+- A program that comes with a skill runs inside the agent's container, with the same limits as
+  everything else the agent does. It never runs on your machine.
+- A skill may only hold ordinary files, at most 200 of them and 5 MB.
+
+A private repository works when `git` on this machine can already fetch it without asking for a
+password.
+
 ## Conventions that tools enforce
 
 A prompt that says "follow our conventions" is a wish. A rule pack makes the conventions of a
@@ -479,6 +519,7 @@ Last updated 2026-11-22.
 | `maestro status`, `pause`, `resume` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
 | Tools and a skill for your own Claude Code (`maestro assistant`, `maestro mcp`) | Written. The server is tested here by speaking the protocol to it against a stand-in for the running service. Not yet added to a real Claude Code. |
+| Skills and agent files for the agents (`maestro skills`) | Written. Finding, checking, storing and removing them is tested, also fetching from a git repository. The read-only mount is tested with a real container in CI. Not yet tried with a real Claude Code run: that the agent picks a skill up from that place is taken from Claude Code's documentation. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |
