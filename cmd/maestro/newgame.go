@@ -809,9 +809,52 @@ func (s *gameGitHub) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 	if err := s.access(ui); err != nil {
 		return err
 	}
+	if err := s.mergeRemote(ui); err != nil {
+		return err
+	}
 	ui.Say("  Pushing to %s:", s.origin())
 	if err := s.interactive("git", "push", "-u", "origin", "HEAD"); err != nil {
 		return explain("the push did not succeed. Fix what Git said above and run `maestro new` again")
+	}
+	return nil
+}
+
+// mergeRemote takes in what the repository on GitHub already holds, such
+// as the README GitHub adds when it makes a repository, so the push is
+// not refused.
+func (s *gameGitHub) mergeRemote(ui *setup.UI) error {
+	branch, err := s.git("symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return nil
+	}
+	if out, err := s.git("fetch", "origin", branch); err != nil {
+		if strings.Contains(out, "couldn't find remote ref") {
+			return nil // an empty repository
+		}
+		return fmt.Errorf("git fetch: %s", out)
+	}
+	if _, err := s.git("merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"); err == nil {
+		return nil
+	}
+	files, _ := s.git("ls-tree", "-r", "--name-only", "FETCH_HEAD")
+	ui.Say("  The repository on GitHub already holds commits, with these files:")
+	for i, f := range strings.Split(files, "\n") {
+		if i == 8 {
+			ui.Say("    and more")
+			break
+		}
+		ui.Show("    %s", f)
+	}
+	ok, err := ui.Confirm("  Merge them into the project, keeping the project's own version of a file both have?")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return setup.ErrAborted
+	}
+	if out, err := s.git("merge", "--allow-unrelated-histories", "--no-edit", "-X", "ours", "FETCH_HEAD"); err != nil {
+		s.git("merge", "--abort")
+		return explain("the merge did not succeed: %s\nMerge by hand (git pull --allow-unrelated-histories origin %s) and run `maestro new` again", out, branch)
 	}
 	return nil
 }
