@@ -146,6 +146,8 @@ func unityActivate(dir, settings string, store unity.Store, mode int, stdin io.R
 		fmt.Fprintln(stdout, "password; the licence Unity gives back is kept on this machine. The checks run code the")
 		fmt.Fprintln(stdout, "agent wrote and can read the licence.")
 		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Starting the container and installing Unity's command-line tool in it. That takes a")
+		fmt.Fprintln(stdout, "minute or two, longer on a Mac with Apple silicon; then a sign-in link appears here.")
 		files, err := in.box.SignInUnity(ctx, stderr)
 		if err != nil {
 			fmt.Fprintln(stderr, "If the sign-in does not work, `maestro unity activate --password` uses the email and")
