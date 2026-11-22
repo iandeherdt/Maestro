@@ -38,6 +38,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/publish"
 	"github.com/iandeherdt/Maestro/internal/reload"
 	"github.com/iandeherdt/Maestro/internal/setup"
+	"github.com/iandeherdt/Maestro/internal/skills"
 	"github.com/iandeherdt/Maestro/internal/tracker/github"
 	"github.com/iandeherdt/Maestro/internal/worker"
 	"github.com/iandeherdt/Maestro/internal/workspace"
@@ -51,6 +52,7 @@ type install struct {
 	cfg    *config.Config
 	state  *setup.State
 	box    *dockerbox.Box
+	skills skills.Store
 	// Directories of the control zone.
 	mirrorDir, handoffDir, allowDir, auditDir string
 }
@@ -134,7 +136,12 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	in.auditDir = filepath.Join(stateDir, "audit")
 	in.handoffDir = filepath.Join(in.cfg.Workspace.Root, ".handoff")
 	bot := st.AppSlug + "[bot]"
+	in.skills = skills.Store{Dir: filepath.Join(dir, "agent-files")}
+	if err := in.skills.Ensure(); err != nil {
+		return nil, err
+	}
 	in.box = &dockerbox.Box{
+		SkillsDir: in.skills.SkillsDir(), AgentsDir: in.skills.AgentsDir(),
 		Podman: in.cfg.Sandbox.Backend == "podman",
 		Worker: in.cfg.Worker.Name, Image: in.cfg.Sandbox.Image,
 		MirrorDir: in.mirrorDir, HandoffDir: in.handoffDir,
@@ -595,6 +602,13 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	} else {
 		fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
 		fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))
+	}
+	if es, _ := in.skills.List(); len(es) > 0 {
+		names := make([]string, len(es))
+		for i, e := range es {
+			names[i] = e.Name
+		}
+		fmt.Fprintf(stdout, "The agents have these extra skills and agent files: %s (maestro skills)\n", strings.Join(names, ", "))
 	}
 	fmt.Fprintln(stdout, "From another terminal: maestro status, maestro pause, maestro resume.")
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())

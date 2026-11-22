@@ -370,6 +370,39 @@ func TestAgentStepGetsTheLoginAndItsOwnNetwork(t *testing.T) {
 	}
 }
 
+// The owner's skills and agent files are where Claude Code looks for them,
+// the agent cannot change them, and no other step sees them.
+func TestAgentStepGetsTheSkillsReadOnly(t *testing.T) {
+	shared := box(t)
+	b := *shared
+	dir := t.TempDir()
+	os.Chmod(dir, 0o755)
+	b.SkillsDir, b.AgentsDir = filepath.Join(dir, "skills"), filepath.Join(dir, "agents")
+	os.MkdirAll(filepath.Join(b.SkillsDir, "house-style"), 0o755)
+	os.MkdirAll(b.AgentsDir, 0o755)
+	os.WriteFile(filepath.Join(b.SkillsDir, "house-style", "SKILL.md"), []byte("use tabs\n"), 0o644)
+	os.WriteFile(filepath.Join(b.AgentsDir, "reviewer.md"), []byte("review\n"), 0o644)
+	key := workspace(t, &b)
+	res, err := b.Run(ctx, sandbox.Request{Step: sandbox.StepAgent, WorkspaceKey: key, NetworkProfile: sandbox.NetAgent,
+		Argv: []string{"sh", "-c", `cat /claude/skills/house-style/SKILL.md /claude/agents/reviewer.md
+echo x > /claude/skills/planted.md 2>/dev/null && echo planted
+echo x >> /claude/skills/house-style/SKILL.md 2>/dev/null && echo changed
+mkdir /claude/agents/mine 2>/dev/null && echo made
+echo ok > /claude/login-check && echo volume-writable`}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(res.Stdout); got != "use tabs\nreview\nvolume-writable\n" {
+		t.Fatalf("stdout %q, stderr %q", got, res.Stderr)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(b.SkillsDir, "house-style", "SKILL.md")); string(raw) != "use tabs\n" {
+		t.Errorf("the skill on the machine was changed: %q", raw)
+	}
+	if o, _ := sh(t, &b, key, sandbox.NetNone, `ls /claude 2>/dev/null`); o != "" {
+		t.Errorf("a hook sees the skills: %q", o)
+	}
+}
+
 func TestStepIsKilledWhenItsTimeIsUp(t *testing.T) {
 	b := box(t)
 	key := workspace(t, b)

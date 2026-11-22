@@ -67,6 +67,11 @@ type Box struct {
 	Image string
 	// MirrorDir and HandoffDir are directories of the control zone.
 	MirrorDir, HandoffDir string
+	// SkillsDir and AgentsDir hold the skills and agent files the owner
+	// added. The agent gets them read-only, in the place Claude Code looks
+	// for them. Mounting them, also when empty, means that what an agent
+	// writes there itself is never seen by a later run.
+	SkillsDir, AgentsDir string
 	// Memory ("6g"), CPUs ("3.0") and PIDs bound every step.
 	Memory, CPUs string
 	PIDs         int64
@@ -250,6 +255,12 @@ func (b *Box) runArgs(name string, s spec) []string {
 	}
 	if s.claude {
 		args = append(args, "--mount", "type=volume,src="+b.ClaudeVolume()+",dst="+claudeDir)
+		if b.SkillsDir != "" {
+			args = append(args, "--mount", b.bind(b.SkillsDir, claudeDir+"/skills", true))
+		}
+		if b.AgentsDir != "" {
+			args = append(args, "--mount", b.bind(b.AgentsDir, claudeDir+"/agents", true))
+		}
 	}
 	if s.handoff != "" {
 		args = append(args, "--mount", b.bind(s.handoff, handoffDir, false))
