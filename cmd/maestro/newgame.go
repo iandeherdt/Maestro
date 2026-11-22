@@ -733,7 +733,7 @@ type gameGitHub struct{ *game }
 
 func (*gameGitHub) Title() string { return "Put it on GitHub" }
 
-var remoteRE = regexp.MustCompile(`github\.com[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(\.git)?/?$`)
+var remoteRE = regexp.MustCompile(`github\.com(?::443)?[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(\.git)?/?$`)
 
 // origin is the GitHub repository the project is pushed to.
 func (s *gameGitHub) origin() string {
@@ -802,8 +802,12 @@ func (s *gameGitHub) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 		if _, err := ui.Ask("  Press Enter when it exists", "", nil); err != nil {
 			return err
 		}
-		if out, err := s.git("remote", "add", "origin", "https://github.com/"+repo+".git"); err != nil {
-			return fmt.Errorf("git remote add: %v: %s", err, out)
+		verb := "add"
+		if _, err := s.git("config", "--get", "remote.origin.url"); err == nil {
+			verb = "set-url" // an origin the guide cannot read
+		}
+		if out, err := s.git("remote", verb, "origin", "https://github.com/"+repo+".git"); err != nil {
+			return fmt.Errorf("git remote %s: %v: %s", verb, err, out)
 		}
 	}
 	if err := s.access(ui); err != nil {

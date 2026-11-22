@@ -132,3 +132,18 @@ func TestUnityFolderInsideAndNewProject(t *testing.T) {
 		t.Errorf("project %q:\n%s", g.dir, out.String())
 	}
 }
+
+func TestRemoteRE(t *testing.T) {
+	for _, url := range []string{
+		"https://github.com/me/game.git",
+		"https://github.com/me/game",
+		"git@github.com:me/game.git",
+		"ssh://git@github.com/me/game.git",
+		"ssh://git@ssh.github.com:443/me/game.git",
+	} {
+		m := remoteRE.FindStringSubmatch(url)
+		if m == nil || m[1]+"/"+m[2] != "me/game" {
+			t.Errorf("%s: got %v", url, m)
+		}
+	}
+}
