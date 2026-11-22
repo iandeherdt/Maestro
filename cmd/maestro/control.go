@@ -195,7 +195,7 @@ func runControl(cmd string, args []string, stdout, stderr io.Writer) int {
 			return report(stderr, err)
 		}
 		fmt.Fprintln(stdout, "Paused. Tickets that are running finish; no new ones are started.")
-		fmt.Fprintln(stdout, "The pause stays, also after a restart, until you run: maestro resume")
+		fmt.Fprintln(stdout, "The pause stays, also after a restart, until you run: "+mention("maestro resume"))
 	case "resume":
 		if err := reach(ctx, stateDir, http.MethodPost, "/api/v1/resume", nil, nil); err != nil {
 			return report(stderr, err)
@@ -313,7 +313,7 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		ui.Say("  Its log:        journalctl --user -u %s -f", u.Label())
 		ui.Say("  To keep it running while you are logged out: sudo loginctl enable-linger $USER")
 	}
-	ui.Say("  What it does:   maestro status")
-	ui.Say("  To remove it:   maestro service uninstall")
+	ui.Say("  What it does:   %s", mention("maestro status"))
+	ui.Say("  To remove it:   %s", mention("maestro service uninstall"))
 	return 0
 }

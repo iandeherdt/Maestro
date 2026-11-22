@@ -46,17 +46,32 @@ const usage = `usage:
   maestro skills                         give the agents extra skills and agent files
   maestro unity                          the Unity licence the checks of a Unity project use
   maestro assistant                      let Claude Code on this machine ask and pause the service
+  maestro projects                       the projects on this machine; add and remove them
   maestro version                        print the version
+
+Several projects on one machine: name one with --project NAME on any command.
+With several and no name, maestro asks which one.
 
 The usual order the first time: setup, image, login, run.`
 
 func run(args []string, stdout, stderr io.Writer) int {
+	chosen = selection{}
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		fmt.Fprintln(stdout, "maestro", version)
 		return 0
 	}
 	if len(args) > 0 && args[0] == "proxy" {
 		return runProxy(args[1:], stderr)
+	}
+	if len(args) > 0 && (args[0] == "projects" || args[0] == "project") {
+		return runProjects(args[1:], os.Stdin, stdout, stderr)
+	}
+	if len(args) > 0 {
+		rest, code, done := selectProject(args[0], args[1:], os.Stdin, stdout, stderr)
+		if done {
+			return code
+		}
+		args = append([]string{args[0]}, rest...)
 	}
 	if len(args) > 0 {
 		switch args[0] {
@@ -139,22 +154,44 @@ func workflowPath(explicit string) string {
 	if explicit != "" {
 		return path
 	}
+	// A project named on the command line or picked from the list uses
+	// its own settings, never a WORKFLOW.md that happens to be in the
+	// current directory.
+	if chosen.named {
+		return filepath.Join(chosen.dir, workflow.DefaultFileName)
+	}
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
 	if dir, err := configDir(); err == nil {
 		fromSetup := filepath.Join(dir, workflow.DefaultFileName)
-		if _, err := os.Stat(fromSetup); err == nil {
+		if _, err := os.Stat(fromSetup); err == nil || chosen.named {
 			return fromSetup
 		}
 	}
 	return path
 }
 
-// configDir is where setup keeps its state: "maestro" in the user's
+// workflowIn is workflowPath for the project in dir: its own settings file
+// when neither the command line nor the current directory names one.
+func workflowIn(dir, explicit string) string {
+	path := workflow.ResolvePath(explicit)
+	if explicit != "" {
+		return path
+	}
+	if _, err := os.Stat(path); err == nil && !chosen.named {
+		return path
+	}
+	return filepath.Join(dir, workflow.DefaultFileName)
+}
+
+// maestroHome is where Maestro keeps its files: "maestro" in the user's
 // configuration directory. An installation made when the command was called
 // symphony keeps its directory, so its App key and settings are found.
-func configDir() (string, error) {
+//
+// It holds the first project's setup itself and the other projects under
+// projects/ (see projects.go).
+func maestroHome() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -225,10 +262,17 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if ps, err := listProjects(); err == nil {
+		st.TakenWorkers = workersOf(ps, abs)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ui := setup.Terminal(stdin, stdout)
-	ui.Banner("Maestro setup", "Every step says what it will do and waits for you.",
+	title := "Maestro setup"
+	if chosen.named {
+		title += ": " + chosen.name
+	}
+	ui.Banner(title, "Every step says what it will do and waits for you.",
 		"You can stop with Ctrl-C and run this command again; finished steps are skipped.",
 		fmt.Sprintf("State and the App key are kept in %s", abs))
 	steps := []setup.Step{
@@ -273,11 +317,11 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
 	ui.Say("Three commands are left. Run them in this order, with Docker running:")
 	ui.Commands([][2]string{
-		{"maestro image", "builds the container the agent works in (a few minutes, once)"},
-		{"maestro login", "signs Claude Code in inside that container (once)"},
-		{"maestro run", "starts the service; it then picks up " + pickup},
+		{mention("maestro image"), "builds the container the agent works in (a few minutes, once)"},
+		{mention("maestro login"), "signs Claude Code in inside that container (once)"},
+		{mention("maestro run"), "starts the service; it then picks up " + pickup},
 	})
 	ui.Say("Your settings: %s", st.WorkflowFile)
-	ui.Say("To check them at any time: `maestro check`")
+	ui.Say("To check them at any time: `%s`", mention("maestro check"))
 	return 0
 }

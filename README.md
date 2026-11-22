@@ -359,6 +359,34 @@ the agent still works in Docker, so Docker has to be running.
 Not built yet: `maestro unblock` and `maestro doctor`. To give a blocked ticket another
 chance, drag its card back to Todo (or put `status:todo` back on it).
 
+## Several projects on one machine
+
+One machine can run agents for several projects, for example a web app and a Unity game. Each
+project has its own repository, board or labels, settings file, rule packs, skills, sandbox image,
+Claude login, background service and worker name. A secret of one project, such as the Unity
+licence, is only given to that project's checks and never to another project's.
+
+```sh
+maestro projects              # the projects on this machine and whether they run
+maestro projects add game     # make a new project and walk through its setup
+maestro image --project game  # every command takes --project
+maestro login --project game
+maestro service install --project game
+maestro status                # with several projects: all of them
+```
+
+With several projects and no `--project`, a command asks which one at the terminal; in a script,
+set `MAESTRO_PROJECT=game` or pass `--project`. `maestro setup` and `maestro new` also offer to
+make a new project. When another project already has a GitHub App for the same owner, the new
+project can use it instead of making a second one; every token the service takes stays limited
+to the one repository of the project it works for.
+
+The first project stays where an installation always was (`~/Library/Application Support/maestro`
+on a Mac, `~/.config/maestro` on Linux), so an installation from before projects keeps working
+as it is. It is named after its worker. Further projects live in `projects/NAME` next to it and
+build their own image, `maestro-sandbox-NAME`. `maestro projects remove NAME` stops a project's
+background service and moves its files to `removed/`; nothing is deleted.
+
 ## Let your own Claude Code talk to it
 
 Your own Claude Code on the same machine (the one you chat with, not the agents in the
@@ -530,9 +558,10 @@ or klad art, and then:
    licence Unity 6's Hub keeps on a Mac or PC is bound to that machine and does not work there.
 
 Every step says what it will do and waits for you. Stop it at any point and run `maestro new`
-again: finished steps are skipped. `maestro new --another` starts another game. One machine
-runs agents for one repository; when Maestro already works on another one of the same owner,
-`maestro new` switches it and keeps the old settings file.
+again: finished steps are skipped. `maestro new --another` starts another game. When Maestro
+already works on a project on this machine, `maestro new` first asks whether the game is a new
+project (see [Several projects on one machine](#several-projects-on-one-machine)), so your web
+app keeps running next to it.
 
 The steps one by one, for a script or for an existing project:
 

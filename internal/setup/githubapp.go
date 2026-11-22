@@ -424,3 +424,6 @@ func (i *InstallApp) Run(ctx context.Context, ui *UI, st *State) error {
 		}
 	}
 }
+
+// KeyFileName is the name of the App's key in a setup directory.
+const KeyFileName = keyFileName

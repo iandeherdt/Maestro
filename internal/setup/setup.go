@@ -147,7 +147,26 @@ type State struct {
 	Author string `json:"author,omitempty"`
 	Board  int    `json:"board,omitempty"`
 
+	// TakenWorkers are the worker names of the other projects on this
+	// machine. Every worker has its own containers, volumes and service, so
+	// two projects may not share one. They are not saved.
+	TakenWorkers []string `json:"-"`
+
 	path string
+}
+
+// checkWorker is validWorker that also refuses the names of the other
+// projects on this machine.
+func (s *State) checkWorker(name string) error {
+	if err := validWorker(name); err != nil {
+		return err
+	}
+	for _, t := range s.TakenWorkers {
+		if t == name {
+			return fmt.Errorf("another project on this machine already uses %s; each project needs its own name", name)
+		}
+	}
+	return nil
 }
 
 // LoadState reads the state from dir, which is created if needed. A
@@ -323,7 +342,7 @@ func SwitchRepo(st *State, repo string) (kept string, err error) {
 		was, now := repoRE.FindStringSubmatch(st.Repo), repoRE.FindStringSubmatch(repo)
 		if !strings.EqualFold(was[1], now[1]) {
 			return "", fmt.Errorf("the App on this machine belongs to %s, and %s belongs to %s. "+
-				"Put the repository under %s, or set up a second installation with `maestro setup --dir` and another folder", was[1], repo, now[1], was[1])
+				"Put the repository under %s, or give it a project of its own: maestro projects add", was[1], repo, now[1], was[1])
 		}
 	}
 	if st.WorkflowFile != "" {

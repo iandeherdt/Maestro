@@ -95,9 +95,18 @@ func parseWords(name string, args []string, stderr io.Writer, words bool) (dir, 
 // open loads the workflow and the setup state and describes the sandbox.
 // It starts nothing.
 func open(dir, explicit string, log *slog.Logger) (*install, error) {
-	in := &install{path: workflowPath(explicit)}
+	var err error
+	if dir == "" {
+		if dir, err = configDir(); err != nil {
+			return nil, explain("%v", err)
+		}
+	}
+	if dir, err = filepath.Abs(dir); err != nil {
+		return nil, err
+	}
+	in := &install{path: workflowIn(dir, explicit)}
 	home, _ := os.UserHomeDir()
-	src, err := reload.Open(in.path, config.Options{Env: os.Getenv, HomeDir: home}, log)
+	src, err := reload.Open(in.path, config.Options{Env: os.Getenv, HomeDir: home, DefaultImage: defaultImage(dir)}, log)
 	if err != nil {
 		return nil, explain("%v\nThe settings file is %s. Run `maestro setup` if you have not yet.", err, in.path)
 	}
@@ -112,12 +121,7 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	if in.cfg.Tracker.Kind != "github" {
 		return nil, explain("only the github tracker is built so far")
 	}
-	if dir == "" {
-		if dir, err = configDir(); err != nil {
-			return nil, explain("no configuration directory was found for this user, pass --dir: %v", err)
-		}
-	}
-	if dir, err = filepath.Abs(dir); err != nil {
+	if err := clash(dir, in.cfg.Worker.Name); err != nil {
 		return nil, err
 	}
 	st, err := setup.LoadState(dir)
@@ -299,14 +303,14 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	fmt.Fprintln(stdout, "\nThe image is ready.")
-	fmt.Fprintln(stdout, "Next: maestro login    (sign Claude Code in inside the sandbox, once)")
+	fmt.Fprintf(stdout, "Next: %s    (sign Claude Code in inside the sandbox, once)\n", mention("maestro login"))
 	return 0
 }
 
 // image explains what to do when the image is missing.
 func (in *install) image(ctx context.Context) error {
 	if !in.box.ImageExists(ctx) {
-		return explain("the sandbox image %s does not exist yet. Build it with: maestro image", in.cfg.Sandbox.Image)
+		return explain("the sandbox image %s does not exist yet. Build it with: %s", in.cfg.Sandbox.Image, mention("maestro image"))
 	}
 	return nil
 }
@@ -354,7 +358,7 @@ func runLogin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "Claude Code is signed in inside the sandbox.")
-	fmt.Fprintln(stdout, "Next: maestro run")
+	fmt.Fprintln(stdout, "Next: "+mention("maestro run"))
 	return 0
 }
 
@@ -525,7 +529,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		return err
 	}
 	if !yes {
-		return explain("Claude Code is not signed in inside the sandbox. Sign in with: maestro login")
+		return explain("Claude Code is not signed in inside the sandbox. Sign in with: %s", mention("maestro login"))
 	}
 
 	mir := &mirror.Mirror{Dir: in.mirrorDir, OwnerUID: -1, MaxBundleBytes: cfg.Publish.MaxBundleBytes, AllowFileRemote: gh.fileRemote}
@@ -647,7 +651,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		}
 		fmt.Fprintf(stdout, "The agents have these extra skills and agent files: %s (maestro skills)\n", strings.Join(names, ", "))
 	}
-	fmt.Fprintln(stdout, "From another terminal: maestro status, maestro pause, maestro resume.")
+	fmt.Fprintf(stdout, "From another terminal: %s, %s, %s.\n", mention("maestro status"), mention("maestro pause"), mention("maestro resume"))
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
 	orch.Run(ctx)

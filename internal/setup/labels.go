@@ -149,7 +149,7 @@ func (l *Labels) Run(ctx context.Context, ui *UI, st *State) error {
 		def = defaultWorker(goos)
 	}
 	ui.Say("  Each machine that runs agents has a name. Tickets are sent to it with the label run:<name>.")
-	name, err := ui.Ask("  What should this machine be called?", def, validWorker)
+	name, err := ui.Ask("  What should this machine be called?", def, st.checkWorker)
 	if err != nil {
 		return err
 	}
@@ -188,3 +188,6 @@ func (l *Labels) Run(ctx context.Context, ui *UI, st *State) error {
 	}
 	return nil
 }
+
+// DefaultWorker is the name a machine is offered when it has none yet.
+func DefaultWorker(goos string) string { return defaultWorker(goos) }

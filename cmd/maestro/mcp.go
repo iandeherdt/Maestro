@@ -385,9 +385,17 @@ func runAssistant(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		self = "maestro"
 	}
-	words := []string{self, "mcp"}
+	words, server := []string{self, "mcp"}, "maestro"
 	if dir != "" {
 		words = append(words, "--dir", dir)
+	}
+	// With several projects, each gets its own tools, named after it.
+	if ps, _ := listProjects(); dir == "" && explicit == "" && len(ps) > 1 {
+		if _, err := configDir(); err != nil {
+			return report(stderr, err)
+		}
+		words = append(words, "--project", chosen.name)
+		server = "maestro-" + chosen.name
 	}
 	if explicit != "" {
 		words = append(words, "--file", explicit)
@@ -396,15 +404,15 @@ func runAssistant(args []string, stdout, stderr io.Writer) int {
 	for i, w := range words {
 		quoted[i] = shellQuote(w)
 	}
-	server, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"maestro": map[string]any{"command": words[0], "args": words[1:]}}})
+	config, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{server: map[string]any{"command": words[0], "args": words[1:]}}})
 	fmt.Fprintf(stdout, "Wrote the skill for Claude Code: %s\n", skill)
 	fmt.Fprintln(stdout, "It tells Claude Code what Maestro is, how to write a ticket for it and that approving work stays with you.")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "One command is left, to give Claude Code the tools (status, pause, resume, check):")
-	fmt.Fprintf(stdout, "  claude mcp add --scope user maestro -- %s\n", strings.Join(quoted, " "))
+	fmt.Fprintf(stdout, "  claude mcp add --scope user %s -- %s\n", server, strings.Join(quoted, " "))
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "For another assistant that speaks MCP, this is the server to add to its settings:")
-	fmt.Fprintf(stdout, "  %s\n", server)
+	fmt.Fprintf(stdout, "  %s\n", config)
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "The tools can read the status and pause or resume the service. They cannot approve a ticket,")
 	fmt.Fprintln(stdout, "merge anything or reach GitHub. To undo: maestro assistant remove")
