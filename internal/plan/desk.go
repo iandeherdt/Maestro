@@ -35,7 +35,11 @@ type Desk struct {
 	Planner tracker.Planner
 	// The names of the states, for the comments and for new tasks.
 	PlanningState, PlannedState, TaskState string
-	Now                                    func() time.Time
+	// DesignState and DesignFolder are set when the design stage is on
+	// (SPEC 27). Designs reads the design pull requests.
+	DesignState, DesignFolder string
+	Designs                   DesignReviews
+	Now                       func() time.Time
 }
 
 func (d *Desk) now() time.Time {
@@ -111,7 +115,8 @@ func (d *Desk) Propose(ctx context.Context, is issue.Issue, p *Plan) error {
 	}
 	rec.Identifier, rec.ContentHash = is.Identifier, is.ContentHash
 	rec.Rounds = append(rec.Rounds, Round{At: d.now().UTC(), Plan: *p})
-	rec.Progress, rec.Done = nil, false
+	// A design belongs to the plan it was made for.
+	rec.Progress, rec.Done, rec.Design = nil, false, nil
 	if err := d.Store.Save(rec); err != nil {
 		return err
 	}
@@ -152,11 +157,15 @@ func (d *Desk) Materialize(ctx context.Context, is issue.Issue) (string, error) 
 	if len(rec.Progress) != len(tasks) {
 		rec.Progress = make([]Progress, len(tasks))
 	}
+	note, err := d.designDecision(ctx, is, rec)
+	if err != nil {
+		return "", err
+	}
 	for i, t := range tasks {
 		if rec.Progress[i].Ref.ID != "" {
 			continue
 		}
-		body := tracker.Neutral(t.Body, MaxBodyChars) +
+		body := tracker.Neutral(t.Body, MaxBodyChars) + note +
 			fmt.Sprintf("\n\n---\nTask %d of %d from the approved plan of %s.", i+1, len(tasks), is.Identifier)
 		ref, err := d.Planner.CreateTask(ctx, tracker.Task{Title: tracker.Neutral(t.Title, MaxTitleChars), Body: body, Worker: t.Worker})
 		if err != nil {
@@ -200,5 +209,9 @@ func (d *Desk) Materialize(ctx context.Context, is issue.Issue) (string, error) 
 	if err := d.Store.Save(rec); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("The plan was approved. %d task(s) were created and placed in %s: %s.", len(tasks), d.TaskState, strings.Join(names, ", ")), nil
+	with := ""
+	if note != "" {
+		with = fmt.Sprintf(" They follow the design of pull request #%d.", rec.Design.Design.PRNumber)
+	}
+	return fmt.Sprintf("The plan was approved. %d task(s) were created and placed in %s: %s.%s", len(tasks), d.TaskState, strings.Join(names, ", "), with), nil
 }

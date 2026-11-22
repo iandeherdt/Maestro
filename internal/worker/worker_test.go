@@ -13,6 +13,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/config"
 	"github.com/iandeherdt/Maestro/internal/issue"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
+	"github.com/iandeherdt/Maestro/internal/plan"
 	"github.com/iandeherdt/Maestro/internal/prompt"
 	"github.com/iandeherdt/Maestro/internal/sandbox"
 	"github.com/iandeherdt/Maestro/internal/sandbox/sandboxtest"
@@ -38,6 +39,7 @@ type fakes struct {
 	prompts   []Turn
 	verifies  int
 	publishes int
+	designs   []string // workspace key and folder of each design publish
 	reject    *Rejection
 	pubErr    error
 	hang      chan struct{} // when set, RunTurn blocks until ctx ends
@@ -94,6 +96,17 @@ func (f *fakes) Publish(_ context.Context, is issue.Issue, ws workspace.Workspac
 		return nil, f.reject, nil
 	}
 	return &orchestrator.PublishRecord{IssueID: is.ID, Identifier: is.Identifier, Branch: ws.Branch, HeadSHA: sha, PRNumber: 42}, nil, nil
+}
+
+func (f *fakes) Design(_ context.Context, is issue.Issue, ws workspace.Workspace, folder string) (*plan.Design, *Rejection, error) {
+	f.designs = append(f.designs, ws.Key+" "+ws.Branch+" "+folder)
+	if f.pubErr != nil {
+		return nil, nil, f.pubErr
+	}
+	if f.reject != nil {
+		return nil, f.reject, nil
+	}
+	return &plan.Design{PRNumber: 7, Branch: ws.Branch, HeadSHA: sha, Folder: folder, Pictures: 2}, nil, nil
 }
 
 type collector struct {

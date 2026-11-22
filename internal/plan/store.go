@@ -38,6 +38,8 @@ type Record struct {
 	// Progress and Done belong to the latest round, once it is approved.
 	Progress []Progress `json:"progress,omitempty"`
 	Done     bool       `json:"done,omitempty"`
+	// Design is the latest design, when the owner asked for one (SPEC 27).
+	Design *DesignRound `json:"design,omitempty"`
 }
 
 // Store keeps one file per idea in a directory only the service uses.
