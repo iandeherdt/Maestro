@@ -300,6 +300,43 @@ the agent still works in Docker, so Docker has to be running.
 Not built yet: `maestro unblock` and `maestro doctor`. To give a blocked ticket another
 chance, drag its card back to Todo (or put `status:todo` back on it).
 
+## Let your own Claude Code talk to it
+
+Your own Claude Code on the same machine (the one you chat with, not the agents in the
+container) can ask Maestro what it is doing and pause it. Run:
+
+```sh
+maestro assistant
+```
+
+It does two things and says what is left:
+
+1. It writes a skill to `~/.claude/skills/maestro/SKILL.md`. The skill tells Claude Code what
+   Maestro is, how to write a ticket an agent can finish, what to look at when a ticket is stuck,
+   and that approving work stays with you.
+2. It prints one command for you to run, `claude mcp add --scope user maestro -- … mcp`, which
+   gives Claude Code the tools. It also prints the same server as JSON, for another assistant
+   that speaks MCP.
+
+After that you can ask things like "what is Maestro doing?", "why is GH-12 stuck?", "pause
+Maestro while I rebase" or "write a ticket for the login bug".
+
+| Tool | What it does |
+|---|---|
+| `maestro_info` | The repository, the name of this machine, how tickets are approved, the column names |
+| `maestro_status` | The same as `maestro status` |
+| `maestro_ticket` | More about one ticket that is being worked on |
+| `maestro_pause`, `maestro_resume` | The same as the commands |
+| `maestro_refresh` | Look at the board now |
+| `maestro_check` | Validate the settings file |
+
+The tools talk to the running service on this machine only. They hold no GitHub token and there
+is no tool that approves a ticket, merges a pull request or changes the settings. Tickets are
+written with `gh` under your own account, in Backlog, and the skill tells the assistant to leave
+moving a card to Todo to you. Text that tickets and working agents wrote is marked in every
+answer as information, not instructions. To undo: `maestro assistant remove` and
+`claude mcp remove maestro`.
+
 ## Conventions that tools enforce
 
 A prompt that says "follow our conventions" is a wish. A rule pack makes the conventions of a
@@ -441,6 +478,7 @@ Last updated 2026-11-22.
 | `maestro image`, `maestro login`, `maestro run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `maestro status`, `pause`, `resume` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
+| Tools and a skill for your own Claude Code (`maestro assistant`, `maestro mcp`) | Written. The server is tested here by speaking the protocol to it against a stand-in for the running service. Not yet added to a real Claude Code. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |
