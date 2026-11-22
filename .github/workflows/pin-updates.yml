@@ -1,0 +1,71 @@
+name: Pin updates
+
+# Once a week, checks whether a newer release exists of a tool the sandbox
+# image or a convention pack pins: Claude Code, the Node.js base image, the
+# .NET SDK, the Unity Editor, Blender, klad and the rest that
+# tools/pincheck finds. Dependabot is not asked: these versions live in Go
+# constants and pack files it does not read.
+#
+# When a pin is behind, one issue labelled pin-updates lists each newer
+# release and every file to change. The issue is updated on the next run
+# and closed once every pin is current. Nothing is changed by itself:
+# moving a pin is a decision, since a new release may behave differently
+# in the sandbox.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pin-updates
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check the pins
+        id: check
+        # A failed lookup still writes the report; the job fails at the end
+        # so the run shows red.
+        continue-on-error: true
+        run: go run ./tools/pincheck -report "$RUNNER_TEMP/report.md"
+      - name: Update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OUTDATED: ${{ steps.check.outputs.outdated }}
+          FAILED: ${{ steps.check.outputs.failed }}
+        run: |
+          set -eu
+          report="$RUNNER_TEMP/report.md"
+          test -s "$report" || { echo "no report was written"; exit 1; }
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          gh label create pin-updates --color FBCA04 \
+            --description "A pinned sandbox tool has a newer release" 2>/dev/null || true
+          number="$(gh issue list --label pin-updates --state open --limit 1 --json number --jq '.[0].number // empty')"
+          if [ "${OUTDATED:-0}" -gt 0 ]; then
+            if [ -n "$number" ]; then
+              gh issue edit "$number" --body-file "$report"
+            else
+              gh issue create --title "Newer releases of pinned sandbox tools" \
+                --label pin-updates --body-file "$report"
+            fi
+          elif [ -n "$number" ] && [ "${FAILED:-0}" -eq 0 ]; then
+            gh issue close "$number" --reason completed \
+              --comment "Every pin is on its newest release now."
+          fi
+      - name: Fail on a lookup that got no answer
+        if: steps.check.outcome == 'failure'
+        run: exit 1
