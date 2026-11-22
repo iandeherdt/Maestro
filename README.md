@@ -482,6 +482,7 @@ agent cannot skip them.
 ```sh
 maestro conventions                 # the packs: blender, dotnet, godot, klad, typescript, unity
 maestro conventions show dotnet     # every rule, and the tool that enforces it
+maestro conventions check           # in a checkout: the quick checks of the packs in it
 ```
 
 | Pack | For | Rules, in short |
@@ -627,6 +628,9 @@ repositories that have the `unity` pack enabled. The secret scan of a pull reque
 the licence's serial and signature, so an agent cannot copy it into a change it sends. Your password
 is not kept. The checks do run code the agent wrote, and that code can read the licence: use a
 Unity account that holds nothing else, such as a free Personal account made for this.
+
+On your own Mac, `maestro conventions check` in the project runs the same quick checks with the
+Editor that Unity Hub installed for the project's version; the scripts find it themselves.
 
 The agent has no licence, but it has the quick checks: `sh conventions/unity/check.sh` checks the
 `.meta` files and compiles every script with the compiler that comes with the Editor, and

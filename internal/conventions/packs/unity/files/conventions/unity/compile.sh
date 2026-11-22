@@ -50,6 +50,11 @@ if ! grep -q '\.cs$' "$rsp"; then
 fi
 [ -d Library/ScriptAssemblies ] || echo "compile: the packages are not resolved yet, so only Unity's own assemblies are referenced." >&2
 echo "== compile, without Unity =="
+if [ ! -x "$UNITY_DATA/NetCoreRuntime/dotnet" ] || [ ! -f "$UNITY_DATA/DotNetSdkRoslyn/csc.dll" ]; then
+    echo "conventions: the Editor in $UNITY_EDITOR has no C# compiler where it is expected ($UNITY_DATA/DotNetSdkRoslyn)." >&2
+    rm -rf "$out"
+    exit 1
+fi
 status=0
 "$UNITY_DATA/NetCoreRuntime/dotnet" "$UNITY_DATA/DotNetSdkRoslyn/csc.dll" "@$rsp" > "$out/log" 2>&1 || status=$?
 grep -E ': error ' "$out/log" >&2 || true
