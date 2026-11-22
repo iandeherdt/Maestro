@@ -24,7 +24,8 @@ What sets it apart:
 
 It follows the [Symphony specification](https://github.com/openai/symphony) published by OpenAI,
 whose reference setup pairs Linear with Codex. Maestro is a separate implementation for GitHub and
-Claude Code, built for one person running agents on their own hardware.
+Claude Code, built for one person or a small team that trusts each other, running agents on their
+own hardware. Each machine works under the Claude subscription of the person who signed it in.
 
 > **Status: early.** The service has taken a real ticket to a merged pull request on a Mac, with
 > labels. The board and the planning stage described below have had one real run on a Mac: setup,
@@ -78,7 +79,8 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 - A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
   installed on the machine itself.
 - A GitHub repository you own. Private repositories work. For the board, the repository has to
-  be in a GitHub organization that only you are a member of. Creating one is free: on github.com
+  be in a GitHub organization. Everyone who can edit its board can approve work, so keep that to
+  people you trust with it. Creating an organization is free: on github.com
   press **+** at the top right, **New organization**, and pick the Free plan. Then create the
   repository there, or move an existing one with Settings, **Transfer ownership**.
 
@@ -260,7 +262,8 @@ then goes through the same steps as a ticket you wrote yourself and ends as a pu
 you to review.
 
 Anyone who can change the board can approve work, because GitHub does not record who moved a
-card. Keep the organization to yourself, or give other members read access to the board only.
+card. Give edit access to the board only to people who may approve work, and read access to
+everyone else.
 Do not switch on a board automation that puts new cards in Todo by itself.
 
 With labels instead of a board (a repository on a personal account), approve an issue by adding
