@@ -1099,8 +1099,9 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 				return nil
 			}
 		}
+		// Unity 6's Hub keeps an entitlement licence bound to this machine,
+		// which a Linux container cannot use, so Hub is no way in.
 		i, err := ui.Choose("How should the checks get a licence?", []string{
-			"With Unity Hub: I will sign in there and add a licence, then come back",
 			"With my Unity account, here in the terminal (maestro unity activate)",
 			"From a licence file I have (Unity_lic.ulf)",
 		})
@@ -1109,17 +1110,17 @@ func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) erro
 		}
 		switch i {
 		case 0:
-			ui.Say("  In Unity Hub: sign in, open Preferences (or Settings), Licenses, Add, and pick")
-			ui.Say("  Get a free personal license (or the licence you have).")
-			if _, err := ui.Ask("  Press Enter when Hub shows the licence", "", nil); err != nil {
-				return err
+			ui.Say("  Unity activates inside the sandbox image, so the image is built first: about 8 GB.")
+			if s.arch == "arm64" {
+				ui.Say("  On this Mac it runs emulated. In Docker Desktop, switch on Settings, General, \"Use Rosetta")
+				ui.Say("  for x86_64/amd64 emulation on Apple Silicon\" first; it is much faster.")
 			}
-		case 1:
+			ui.Say("  An account with two-step verification cannot be activated this way.")
 			if code := unityActivate(s.setupDir, st.WorkflowFile, store, false, s.rawIn, s.stdout, s.stderr); code != 0 {
 				return errors.New("the activation did not succeed; the reason is above")
 			}
 			return nil
-		case 2:
+		case 1:
 			ans, err := ui.Ask("  The licence file", "", nil)
 			if err != nil {
 				return err
