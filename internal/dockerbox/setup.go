@@ -150,7 +150,8 @@ func (b *Box) ImageState(ctx context.Context) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "no such image") {
+	if low := strings.ToLower(err.Error()); strings.Contains(low, "no such image") ||
+		strings.Contains(low, "image not known") { // Docker, Podman
 		return false, nil
 	}
 	return false, err

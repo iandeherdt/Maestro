@@ -78,6 +78,8 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 - A container engine. The agent works inside containers. On a Mac:
   [Docker Desktop](https://www.docker.com/products/docker-desktop/). On Linux: Podman
   (`sudo dnf install podman` on RHEL and Fedora; it needs no root daemon) or Docker Engine.
+  On RHEL 8, also switch Podman to its netavark network backend (`maestro login` says how):
+  the older CNI backend has no DNS on the sandbox's internal networks.
 - A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
   installed on the machine itself.
 - A GitHub repository you own. Private repositories work. For the board, the repository has to

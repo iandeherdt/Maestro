@@ -645,7 +645,7 @@ func TestPlatformGoesToEveryContainer(t *testing.T) {
 		t.Errorf("docker: %q", f)
 	}
 	b.Podman = true
-	if f := strings.Join(b.engineFlags(), " "); f != "--http-proxy=false --platform linux/amd64" {
+	if f := strings.Join(b.engineFlags(), " "); f != "--http-proxy=false --pull=never --platform linux/amd64" {
 		t.Errorf("podman: %q", f)
 	}
 }

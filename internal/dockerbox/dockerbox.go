@@ -119,6 +119,11 @@ func (b *Box) engineFlags() []string {
 		// Podman copies the proxy variables of whoever starts it into
 		// the container unless told not to.
 		f = append(f, "--http-proxy=false")
+		// The sandbox image is built here and never comes from a
+		// registry. Without this, Podman treats a short name it cannot
+		// match locally (with --platform, for one) as a pull and asks at
+		// the terminal which registry to take it from.
+		f = append(f, "--pull=never")
 	}
 	if b.Platform != "" {
 		f = append(f, "--platform", b.Platform)
