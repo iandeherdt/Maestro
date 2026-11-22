@@ -86,50 +86,15 @@ func (p *Publisher) now() time.Time {
 // set when the error is nil.
 func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Workspace, v worker.VerifyResult) (*orchestrator.PublishRecord, *worker.Rejection, error) {
 	cfg := p.Config()
-	m := repoRE.FindStringSubmatch(cfg.Workspace.Repo)
-	if m == nil || strings.HasSuffix(m[2], ".git") || m[2] == "." || m[2] == ".." {
-		return nil, nil, errors.New("workspace.repo must be owner/name")
-	}
-	owner, repo := m[1], m[2]
-	prefix := cfg.Publish.BranchPrefix
-	// The service only ever writes below its own prefix, so no ticket can
-	// steer a push at the base branch or at someone's feature branch.
-	if prefix == "" || !strings.HasPrefix(ws.Branch, prefix) || len(ws.Branch) == len(prefix) || !mirror.ValidBranch(ws.Branch) {
-		return nil, nil, errors.New("the workspace branch is not under publish.branch_prefix")
-	}
-	if ws.Branch == cfg.Workspace.BaseBranch {
-		return nil, nil, errors.New("the workspace branch is the base branch")
-	}
-
-	imp, err := p.Mirror.Import(ctx, filepath.Join(p.HandoffDir, ws.Key+".bundle"), ws.Key, ws.BaseSHA)
-	var rej *mirror.Rejected
-	if errors.As(err, &rej) {
-		return nil, &worker.Rejection{Category: ImportRejected,
-			Feedback: []issue.Feedback{{Source: "policy", Body: "The commits could not be accepted: " + rej.Reason + "."}}}, nil
-	}
+	owner, repo, err := target(cfg, ws)
 	if err != nil {
-		return nil, nil, fmt.Errorf("import: %w", err)
+		return nil, nil, err
 	}
-
-	diff, err := p.Mirror.Diff(ctx, ws.BaseSHA, imp.Head, mirror.Limits{
-		MaxChangedFiles: cfg.Policy.MaxChangedFiles, MaxDiffBytes: cfg.Policy.MaxDiffBytes, MaxFileBytes: cfg.Policy.MaxFileBytes})
-	if err != nil {
-		return nil, nil, fmt.Errorf("diff: %w", err)
+	ad, rej, err := p.admit(ctx, cfg, ws)
+	if err != nil || rej != nil {
+		return nil, rej, err
 	}
-	var held []string
-	if p.HeldSecrets != nil {
-		held = p.HeldSecrets()
-	}
-	res := policy.Evaluate(cfg.Policy, policy.Input{Changes: diff.Changes, Commits: imp.Commits, BasePaths: diff.BasePaths,
-		BotName: p.BotName, BotEmail: p.BotEmail, HeldSecrets: held})
-	if !res.OK() {
-		r := &worker.Rejection{Category: PolicyDenied}
-		for _, line := range res.Feedback() {
-			r.Feedback = append(r.Feedback, issue.Feedback{Source: "policy", Body: line})
-		}
-		return nil, r, nil
-	}
-
+	imp, diff, res := ad.imp, ad.diff, ad.res
 	api, gitURL, err := p.endpoints(owner, repo)
 	if err != nil {
 		return nil, nil, err
@@ -178,6 +143,70 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 		IssueID: is.ID, Identifier: is.Identifier, Branch: ws.Branch, HeadSHA: imp.Head, PRNumber: number,
 		ChecksDeadline: p.now().Add(time.Duration(cfg.Publish.ChecksTimeoutMS) * time.Millisecond), Flags: flagText,
 	}, nil, nil
+}
+
+// target names the repository and checks the branch a workspace is
+// published on.
+func target(cfg *config.Config, ws workspace.Workspace) (owner, repo string, err error) {
+	m := repoRE.FindStringSubmatch(cfg.Workspace.Repo)
+	if m == nil || strings.HasSuffix(m[2], ".git") || m[2] == "." || m[2] == ".." {
+		return "", "", errors.New("workspace.repo must be owner/name")
+	}
+	owner, repo = m[1], m[2]
+	prefix := cfg.Publish.BranchPrefix
+	// The service only ever writes below its own prefix, so no ticket can
+	// steer a push at the base branch or at someone's feature branch.
+	if prefix == "" || !strings.HasPrefix(ws.Branch, prefix) || len(ws.Branch) == len(prefix) || !mirror.ValidBranch(ws.Branch) {
+		return "", "", errors.New("the workspace branch is not under publish.branch_prefix")
+	}
+	if ws.Branch == cfg.Workspace.BaseBranch {
+		return "", "", errors.New("the workspace branch is the base branch")
+	}
+
+	return owner, repo, nil
+}
+
+// admitted is work that passed import, diff policy and secret scan.
+type admitted struct {
+	imp  mirror.Imported
+	diff mirror.Diff
+	res  policy.Result
+}
+
+// admit imports the exported commits and applies the diff policy and the
+// secret scan. Exactly one of the result and the rejection is set when the
+// error is nil.
+func (p *Publisher) admit(ctx context.Context, cfg *config.Config, ws workspace.Workspace) (*admitted, *worker.Rejection, error) {
+	imp, err := p.Mirror.Import(ctx, filepath.Join(p.HandoffDir, ws.Key+".bundle"), ws.Key, ws.BaseSHA)
+	var rej *mirror.Rejected
+	if errors.As(err, &rej) {
+		return nil, &worker.Rejection{Category: ImportRejected,
+			Feedback: []issue.Feedback{{Source: "policy", Body: "The commits could not be accepted: " + rej.Reason + "."}}}, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("import: %w", err)
+	}
+
+	diff, err := p.Mirror.Diff(ctx, ws.BaseSHA, imp.Head, mirror.Limits{
+		MaxChangedFiles: cfg.Policy.MaxChangedFiles, MaxDiffBytes: cfg.Policy.MaxDiffBytes, MaxFileBytes: cfg.Policy.MaxFileBytes})
+	if err != nil {
+		return nil, nil, fmt.Errorf("diff: %w", err)
+	}
+	var held []string
+	if p.HeldSecrets != nil {
+		held = p.HeldSecrets()
+	}
+	res := policy.Evaluate(cfg.Policy, policy.Input{Changes: diff.Changes, Commits: imp.Commits, BasePaths: diff.BasePaths,
+		BotName: p.BotName, BotEmail: p.BotEmail, HeldSecrets: held})
+	if !res.OK() {
+		r := &worker.Rejection{Category: PolicyDenied}
+		for _, line := range res.Feedback() {
+			r.Feedback = append(r.Feedback, issue.Feedback{Source: "policy", Body: line})
+		}
+		return nil, r, nil
+	}
+
+	return &admitted{imp, diff, res}, nil, nil
 }
 
 func (p *Publisher) endpoints(owner, repo string) (*api, string, error) {

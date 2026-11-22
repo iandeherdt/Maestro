@@ -145,7 +145,7 @@ func onOrg(t *testing.T, g *github) (*State, *Board) {
 	return st, &Board{GitHub: GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}, GOOS: "linux"}
 }
 
-var allColumns = "Backlog,Idea,Planned,Todo,In Progress,Human Review,Rework,Blocked,Done"
+var allColumns = "Backlog,Idea,Design,Planned,Todo,In Progress,Human Review,Rework,Blocked,Done"
 
 func TestBoardStepCreatesTheBoard(t *testing.T) {
 	g := newGitHub(t)
@@ -232,7 +232,7 @@ func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
 		{number: 3, title: "Odd", status: full, hasWorker: true, workerKind: "ProjectV2Field"},
 	}
 	for pick, want := range map[string]string{
-		"1": "Todo, In Progress, Human Review, Rework, Blocked, Done",
+		"1": "Planned, Todo, In Progress, Human Review, Rework, Blocked, Done",
 		"2": "Add the option linux",
 	} {
 		st, step := onOrg(t, g)
@@ -406,5 +406,27 @@ func TestWorkflowFileForABoard(t *testing.T) {
 	}
 	if _, err := tracker.New(cfg, tracker.Options{Token: func(context.Context) (string, error) { return "x", nil }}); err != nil {
 		t.Fatalf("the adapter refuses the file: %v", err)
+	}
+}
+
+func TestABoardWithCardsWorksWithoutTheDesignColumn(t *testing.T) {
+	g := newGitHub(t)
+	var old []option
+	for _, c := range columns {
+		if c.Name != "Design" {
+			old = append(old, option(c))
+		}
+	}
+	g.boards = []*fakeBoard{{number: 1, title: "Old", items: 3, status: old, hasWorker: true, worker: []option{{"linux", "BLUE", "x"}}, hasModel: true}}
+	st, step := onOrg(t, g)
+	u, out := ui("\nian\n1\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil || len(g.mutations) != 0 {
+		t.Fatalf("%v, mutations %v\n%s", err, g.mutations, out)
+	}
+	if !strings.Contains(out.String(), "no column Design yet. It is optional") {
+		t.Errorf("no hint about the Design column:\n%s", out)
+	}
+	if s, _ := step.Check(ctx, st); !s.Done {
+		t.Errorf("not done without the optional column: %s", s.Detail)
 	}
 }

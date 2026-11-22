@@ -115,7 +115,11 @@ var captionRE = regexp.MustCompile(`[^A-Za-z0-9._ -]`)
 // screenshots never fails the work: what goes wrong is told in the note,
 // which ends up in the pull request.
 func (g *Gates) screenshots(ctx context.Context, key string) ([]worker.Screenshot, string) {
-	cfg := g.Config().Screenshots
+	return g.shoot(ctx, key, g.Config().Screenshots)
+}
+
+// shoot takes the pictures that cfg asks for.
+func (g *Gates) shoot(ctx context.Context, key string, cfg config.Screenshots) ([]worker.Screenshot, string) {
 	timeout := time.Duration(cfg.TimeoutMS) * time.Millisecond
 	defer func() {
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collectTime)
@@ -203,7 +207,7 @@ func reason(cfg config.Screenshots, res sandbox.Result) string {
 	}
 	switch word {
 	case "NO_BROWSER":
-		return "the sandbox image has no browser. Run `maestro image` again; it adds one when screenshots.pages is set."
+		return "the sandbox image has no browser. Run `maestro image` again; it adds one when screenshots.pages is set or the design stage is on."
 	case "NO_ANSWER":
 		return "nothing answered at " + page + " within 90 seconds. Check screenshots.start."
 	case "NO_FILE":

@@ -32,6 +32,7 @@ type Config struct {
 	Sandbox     Sandbox
 	Verify      Verify
 	Screenshots Screenshots
+	Design      Design
 	Publish     Publish
 	Policy      Policy
 	Budget      Budget
@@ -57,7 +58,11 @@ type Tracker struct {
 	// rather than work to be done (SPEC 22). Empty switches planning off.
 	PlanningState string
 	// PlannedState is where the owner moves an idea to approve its plan.
-	PlannedState      string
+	PlannedState string
+	// DesignState is where the owner may move an idea with a plan to have
+	// a design made before the tasks are created (SPEC 27). Empty switches
+	// the design stage off.
+	DesignState       string
 	AllowedAuthors    []string
 	AllowedCommenters []string
 }
@@ -134,6 +139,20 @@ type Screenshots struct {
 	TimeoutMS     int64
 	Width, Height int64
 }
+
+// Design is how the design stage works (SPEC 27).
+type Design struct {
+	// Kind tells the design agent what to make: "web" for pages in HTML
+	// and CSS, "game" for a game design with mock screens, or "auto" to
+	// let the agent tell from the repository and the idea.
+	Kind string
+	// Folder is where in the repository designs are kept. Each idea gets
+	// a folder of its own below it, named after the issue.
+	Folder string
+}
+
+// DesignKinds are the values design.kind accepts.
+var DesignKinds = []string{"auto", "web", "game"}
 
 // On reports whether screenshots are taken.
 func (s Screenshots) On() bool { return len(s.Pages) > 0 || s.Command != "" }
@@ -251,6 +270,7 @@ func Build(def *workflow.Definition, opt Options) (*Config, error) {
 	b.sandbox(root.sub("sandbox"))
 	b.verify(root.sub("verify"))
 	b.screenshots(root.sub("screenshots"))
+	b.design(root.sub("design"))
 	b.publish(root.sub("publish"))
 	b.policy(root.sub("policy"))
 	b.budget(root.sub("budget"))
@@ -399,6 +419,11 @@ func (b *builder) tracker(s *section) {
 	}
 	t.PlanningState = strings.TrimSpace(s.str("planning_state", planDefault))
 	t.PlannedState = strings.TrimSpace(s.str("planned_state", "Planned"))
+	designDefault := ""
+	if t.PlanningState != "" {
+		designDefault = "Design"
+	}
+	t.DesignState = strings.TrimSpace(s.str("design_state", designDefault))
 	t.AllowedAuthors = trimAll(s.strList("allowed_authors", nil))
 	t.AllowedCommenters = trimAll(s.strList("allowed_commenters", t.AllowedAuthors))
 	b.lenient(s)
@@ -452,6 +477,16 @@ func (b *builder) tracker(s *section) {
 		default:
 			t.ActiveStates = append(t.ActiveStates, t.PlanningState)
 		}
+		if design := Normalize(t.DesignState); design != "" {
+			taken[plan], taken[planned] = true, true
+			if taken[design] {
+				b.fail("tracker.design_state", "state %q must be a state of its own", t.DesignState)
+			} else {
+				t.ActiveStates = append(t.ActiveStates, t.DesignState)
+			}
+		}
+	} else if t.DesignState != "" {
+		b.fail("tracker.design_state", "needs tracker.planning_state: a design is made for a plan")
 	}
 }
 
@@ -770,6 +805,21 @@ func (b *builder) screenshots(s *section) {
 			page != path.Clean(page) || strings.HasPrefix(page, ".."):
 			b.fail("screenshots.pages", "%q is not a file in the repository, written like docs/index.html", page)
 		}
+	}
+}
+
+var designFolderRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
+
+func (b *builder) design(s *section) {
+	d := &b.cfg.Design
+	d.Kind = strings.ToLower(strings.TrimSpace(s.str("kind", "auto")))
+	d.Folder = strings.TrimRight(strings.TrimSpace(s.str("folder", "design")), "/")
+	b.strict(s)
+	if !slices.Contains(DesignKinds, d.Kind) {
+		b.fail("design.kind", "%q is not one of: %s", d.Kind, strings.Join(DesignKinds, ", "))
+	}
+	if !designFolderRE.MatchString(d.Folder) || d.Folder != path.Clean(d.Folder) || strings.Contains(d.Folder, "..") {
+		b.fail("design.folder", "%q is not a folder in the repository, written like design or docs/design", d.Folder)
 	}
 }
 
