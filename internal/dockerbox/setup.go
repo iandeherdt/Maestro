@@ -139,8 +139,21 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 
 // ImageExists reports whether the sandbox image is present.
 func (b *Box) ImageExists(ctx context.Context) bool {
+	ok, _ := b.ImageState(ctx)
+	return ok
+}
+
+// ImageState says whether the sandbox image exists. err is Docker's own
+// answer when it could not tell, such as a daemon that is still starting.
+func (b *Box) ImageState(ctx context.Context) (bool, error) {
 	_, err := b.cli(ctx, "image", "inspect", "--format", "{{.Id}}", b.Image)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no such image") {
+		return false, nil
+	}
+	return false, err
 }
 
 // ImageLabel is a label of the sandbox image; ok is false when there is no

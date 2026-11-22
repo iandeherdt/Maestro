@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/setup"
 )
 
@@ -170,5 +171,38 @@ func TestWithUnityEditorSetsOneSection(t *testing.T) {
 	}
 	if _, err := withUnityEditor("no settings\n", editor); err == nil {
 		t.Error("a file without settings was accepted")
+	}
+}
+
+func TestPacksOfAnEarlierMaestroAreUpdated(t *testing.T) {
+	dir := t.TempDir()
+	g := &game{engine: "godot", art: []string{"blender"}, dir: dir}
+	s := &gamePacks{g}
+	p, err := conventions.Get("blender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Apply(dir, false); err != nil {
+		t.Fatal(err)
+	}
+	if old := s.outdated(); len(old) != 0 {
+		t.Fatalf("outdated right after apply: %v", old)
+	}
+	env := filepath.Join(dir, "conventions", "blender", "env.sh")
+	settings := filepath.Join(dir, "conventions", "blender", "settings.sh")
+	os.WriteFile(env, []byte("old\n"), 0o755)
+	os.WriteFile(settings, []byte("ART_SOURCE=mine\n"), 0o644)
+	old := s.outdated()
+	if len(old) != 1 || len(old["blender"]) != 1 || old["blender"][0] != "conventions/blender/env.sh" {
+		t.Fatalf("outdated %v", old)
+	}
+	if err := s.update(old); err != nil {
+		t.Fatal(err)
+	}
+	if old := s.outdated(); len(old) != 0 {
+		t.Fatalf("still outdated: %v", old)
+	}
+	if raw, _ := os.ReadFile(settings); string(raw) != "ART_SOURCE=mine\n" {
+		t.Error("the owner's settings were replaced")
 	}
 }

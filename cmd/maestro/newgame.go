@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -624,14 +626,96 @@ func (s *gamePacks) missing() []string {
 	return out
 }
 
+// outdated are the files of packs already in the project that this
+// version of Maestro has changed, or added. The project's own settings
+// of a pack (settings.sh) are the owner's and are left alone.
+func (s *gamePacks) outdated() map[string][]string {
+	out := map[string][]string{}
+	for _, n := range s.packs() {
+		p, err := conventions.Get(n)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(s.dir, filepath.FromSlash(p.GuidePath()))); err != nil {
+			continue // not in the project: missing, not outdated
+		}
+		files, err := p.Files()
+		if err != nil {
+			continue
+		}
+		for name, raw := range files {
+			if path.Base(name) == "settings.sh" {
+				continue
+			}
+			if have, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(name))); err != nil || !bytes.Equal(have, raw) {
+				out[n] = append(out[n], name)
+			}
+		}
+		sort.Strings(out[n])
+	}
+	return out
+}
+
+// update writes this version's files of the packs into the project.
+func (s *gamePacks) update(old map[string][]string) error {
+	for n, names := range old {
+		p, err := conventions.Get(n)
+		if err != nil {
+			return err
+		}
+		files, err := p.Files()
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			target := filepath.Join(s.dir, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			mode := os.FileMode(0o644)
+			if strings.HasSuffix(name, ".sh") {
+				mode = 0o755
+			}
+			if err := os.WriteFile(target, files[name], mode); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *gamePacks) Check(context.Context, *setup.State) (setup.Status, error) {
 	if m := s.missing(); len(m) > 0 {
 		return setup.Status{Detail: "Not in the project yet: " + strings.Join(m, ", ") + "."}, nil
+	}
+	if old := s.outdated(); len(old) > 0 {
+		var names []string
+		for n := range old {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		return setup.Status{Detail: "This version of Maestro has newer files for " + strings.Join(names, ", ") + "; they are updated."}, nil
 	}
 	return setup.Status{Done: true, Detail: "In the project: " + strings.Join(s.packs(), ", ") + "."}, nil
 }
 
 func (s *gamePacks) Run(_ context.Context, ui *setup.UI, _ *setup.State) error {
+	if len(s.missing()) == 0 {
+		old := s.outdated()
+		for _, n := range s.packs() {
+			for _, f := range old[n] {
+				ui.Show("    %s", f)
+			}
+		}
+		ok, err := ui.Confirm("  Update these files of the packs to this version of Maestro? Then they are committed and pushed.")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return setup.ErrAborted
+		}
+		return s.update(old)
+	}
 	var list []*conventions.Pack
 	for _, n := range s.packs() {
 		p, err := conventions.Get(n)
@@ -1102,9 +1186,10 @@ func (s *gameHostUnity) Run(_ context.Context, ui *setup.UI, st *setup.State) er
 		editor = (&gameFolder{s.game}).localEditor(want)
 	}
 	ui.Say("  The service will run Unity's checks with %s.", tildePath(editor, s.home))
-	ui.Say("  They run the agent's code on this Mac, fenced off by macOS's sandbox: no network but Unity's")
-	ui.Say("  hosts, no writes outside their own folder and Unity's, and no reads of Maestro's keys. That fence")
-	ui.Say("  is weaker than the container, so use it for your own projects only.")
+	ui.Say("  They run the agent's code on this Mac, fenced off by macOS's sandbox: no network")
+	ui.Say("  but Unity's hosts, no writes outside their own folder and Unity's, and no reads")
+	ui.Say("  of Maestro's keys. That fence is weaker than the container, so use it for your")
+	ui.Say("  own projects only.")
 	ok, err := ui.Confirm("  Write this into the settings file?")
 	if err != nil {
 		return err
