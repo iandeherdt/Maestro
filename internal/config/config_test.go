@@ -568,21 +568,13 @@ func TestModelFor(t *testing.T) {
 	}
 }
 
-func TestSandboxToolsAndBinaryPaths(t *testing.T) {
-	c := mustBuild(t, with("  backend: systemd\n", "  backend: systemd\n  tools: [blender]\n",
-		"policy:\n  binary_paths: [\"Assets/Art/Kit/**\"]\n  binary_max_file_bytes: 1000\n"))
-	if !slices.Equal(c.Sandbox.Tools, []string{"blender"}) {
-		t.Errorf("tools %v", c.Sandbox.Tools)
-	}
-	if !slices.Equal(c.Policy.BinaryPaths, []string{"Assets/Art/Kit/**"}) || c.Policy.BinaryMaxFileBytes != 1000 {
+func TestBinaryPaths(t *testing.T) {
+	c := mustBuild(t, with("", "", "policy:\n  binary_paths: [\"art/models/**\"]\n  binary_max_file_bytes: 1000\n"))
+	if !slices.Equal(c.Policy.BinaryPaths, []string{"art/models/**"}) || c.Policy.BinaryMaxFileBytes != 1000 {
 		t.Errorf("policy %+v", c.Policy)
 	}
 	c = mustBuild(t, minimal)
 	if len(c.Policy.BinaryPaths) != 0 || c.Policy.BinaryMaxFileBytes != 52428800 {
 		t.Errorf("defaults %+v", c.Policy)
-	}
-	_, err := build(t, with("  backend: systemd\n", "  backend: systemd\n  tools: [maya]\n", ""), nil)
-	if _, ok := keys(err)["sandbox.tools"]; !ok {
-		t.Errorf("an unknown tool: %v", err)
 	}
 }

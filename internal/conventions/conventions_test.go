@@ -14,7 +14,7 @@ import (
 
 func TestEveryPackIsValidAndEveryRuleNamesItsTool(t *testing.T) {
 	names := Names()
-	if !slices.Contains(names, "dotnet") || !slices.Contains(names, "typescript") || !slices.Contains(names, "unity") {
+	if !slices.Contains(names, "dotnet") || !slices.Contains(names, "typescript") || !slices.Contains(names, "unity") || !slices.Contains(names, "blender") || !slices.Contains(names, "klad") {
 		t.Fatalf("packs: %v", names)
 	}
 	for _, n := range names {
@@ -43,7 +43,7 @@ func TestEveryPackIsValidAndEveryRuleNamesItsTool(t *testing.T) {
 			t.Errorf("%s: the workflow has no job named %s", n, p.Check)
 		}
 	}
-	if _, err := Get("cobol"); err == nil || !strings.Contains(err.Error(), "dotnet, typescript, unity") {
+	if _, err := Get("cobol"); err == nil || !strings.Contains(err.Error(), "blender, dotnet, klad, typescript, unity") {
 		t.Errorf("an unknown pack: %v", err)
 	}
 	if _, err := Get("../dotnet"); err == nil {

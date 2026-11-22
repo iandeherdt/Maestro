@@ -416,9 +416,6 @@ Replaces upstream `codex`.
 - `env` (map of string to string): extra environment for sandboxed processes. Values MUST be
   literals. `$VAR` indirection is not resolved here, so that a host secret cannot be passed into
   the sandbox by configuration.
-- `tools` (list of strings): programs `maestro image` adds to the sandbox image by name. The only
-  one is `blender` (Blender 5.0.1 from blender.org, checked against its published checksum,
-  `BLENDER=/opt/blender/blender`). A tool needs no secret and no network.
 
 #### 5.3.8 `verify` (object)
 

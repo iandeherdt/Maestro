@@ -407,14 +407,16 @@ project hold: every rule in a pack names the tool that checks it, and the checks
 agent cannot skip them.
 
 ```sh
-maestro conventions                 # the packs: dotnet, typescript, unity
+maestro conventions                 # the packs: blender, dotnet, klad, typescript, unity
 maestro conventions show dotnet     # every rule, and the tool that enforces it
 ```
 
 | Pack | For | Rules, in short |
 |---|---|---|
+| `blender` | 3D models made by Python scripts that Blender runs without a screen | every generator runs without an error and writes something, every model loads back into Blender, an optional triangle limit. Comes with the skill `blender-art`. See [Generated art](#generated-art-blender-and-klad) |
 | `dotnet` | C# with one solution in the root | `dotnet format`, warnings as errors with the .NET analyzers and SonarAnalyzer, security rules, limits on file and method size, tests, 80% coverage per test project, no vulnerable packages |
 | `unity` | A Unity project in the root, on the Unity version of the image | every asset has its `.meta` file and no GUID is used twice, assets saved as text, the project on the Editor's version, scripts compile in Unity, EditMode and PlayMode tests pass, packages changed by the owner only. Needs a Unity licence: see [Unity projects](#unity-projects) |
+| `klad` | 2D art painted with [klad](https://github.com/klad-app/klad) through its command line | every drawing exports, every committed picture is exactly what its drawing exports to now. Comes with the skill `klad-art`. See [Generated art](#generated-art-blender-and-klad) |
 | `typescript` | TypeScript with React, Next.js or TanStack, npm or pnpm | Prettier, ESLint without warnings (typescript-eslint strict, React, hooks, accessibility, SonarJS, security, the framework's own rules), limits on size and complexity, strict type check, tests with vitest, 80% coverage of all source files, no vulnerable packages |
 
 A rule is enforced in three places:
@@ -476,32 +478,47 @@ Not yet run against Unity's servers: the activation, the package download in `pr
 tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the
 workspace as pointer files.
 
-## Generated art: Blender
+## Generated art: Blender and klad
 
-Models that are made by Python scripts in Blender are code to Maestro: an agent can write a new
-generator, run it, look at the render and try again. Blender goes into the image with one line:
+Art that is made by scripts or by commands is code to Maestro: an agent can make a new piece,
+look at it, and try again. Two packs set this up for any project, each with a skill that teaches
+the agent the way of working, and checks the agent cannot skip:
 
-```yaml
-sandbox:
-  tools: [blender]                  # Blender 5.0.1, runs headless; BLENDER names it
-policy:
-  binary_paths: ["Assets/Art/Kit/**"]   # the only place the agent may commit binary files
-  binary_max_file_bytes: 52428800       # per file there; the default
+- **`blender`**: one Python generator per model, which Blender runs without a screen. The pack
+  adds Blender 5.0.1 to the image (from blender.org, checked against its checksum), the helper
+  module `maestro_art` (export for Unity, a material, a preview render), and the skill
+  `blender-art`.
+- **`klad`**: drawings painted with [klad](https://github.com/klad-app/klad), each exported to a
+  PNG file. The pack builds klad from its source into the image, and adds the skill `klad-art`,
+  which starts the agent on klad's own skills (`klad skill`, `klad skill drawing`).
+
+```sh
+maestro conventions apply blender     # in a checkout of the project; then set the folders in
+                                      # conventions/blender/settings.sh
+maestro conventions enable blender && maestro image
 ```
 
-Everywhere else binary files stay refused. A text file in a binary folder is read and limited
-like any other, so the secret scan still sees it.
+The skills are written into the repository (`.claude/skills/`), so your own Claude Code uses
+them in that project too, not only the agents.
 
-Two things make a build script a good check:
+The models and pictures are binary files, which Maestro refuses by default. Name the one folder
+they go into, and only there may the agent commit them:
 
-- **It fails when Blender fails.** Blender exits with 0 after a Python error unless it is given
-  `--python-exit-code 1`, and a script that pipes each step through `grep` loses the status.
-- **The check builds into a throwaway folder.** An export that carries the time changes the
-  committed file on every build, and Maestro fails a check that changes files. Let the script
-  take its output folder from a variable and give the check a temporary one.
+```yaml
+policy:
+  binary_paths: ["art/models/**", "art/textures/**"]
+  binary_max_file_bytes: 52428800     # per file there; the default
+screenshots:
+  command: sh conventions/blender/previews.sh   # renders of what the change touched, on the pull request
+```
 
-Preview renders go on the pull request with the screenshots command: have it write PNG files to
-`$SCREENSHOT_DIR` (see [Screenshots on the pull request](#screenshots-on-the-pull-request)).
+A text file in such a folder is read and limited like any other, so the secret scan still sees
+it.
+
+The Blender check builds everything into a throwaway folder, because an export carries the time
+it was made and Maestro fails a check that changes files. klad renders the same pixels on every
+machine, so its check compares the committed pictures with a fresh export and fails when one is
+out of date.
 
 ## Configure
 
@@ -600,7 +617,7 @@ Last updated 2026-11-22.
 | Model per card, for planning and by default | Written and tested against stand-ins for the board and for Claude Code. Not yet run with a real card. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
 | Unity (pack `unity`, `maestro unity`) | Written. The `.meta`, version and quick compile checks were run against a sample project in the Unity 6.3 image, and shown to fail on a violation. The Editor was shown to start under the sandbox's settings and stop for want of a licence. The licence is shown to reach the hooks and verify read-only and not the agent. Not yet run with a real licence, against Unity's servers, or in an image built with `maestro image`. |
-| Blender (`sandbox.tools`) and binary folders (`policy.binary_paths`) | Written and tested. Blender 5.0.1 was run headless under the sandbox's settings (models exported, a preview rendered). The image line that downloads it has not been built here. |
+| Packs `blender` and `klad`, binary folders (`policy.binary_paths`) | Written. Both packs were run under the sandbox's settings (no network, its user, no capabilities) against sample projects: Blender 5.0.1 with a good generator, one that raises, one that writes nothing, and a triangle limit; klad v0.4.0 (built from source here) with a missing, a current and an out-of-date picture. The image lines that download Blender and build klad have not been built with `maestro image`. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |

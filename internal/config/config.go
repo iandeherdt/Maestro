@@ -111,14 +111,7 @@ type Sandbox struct {
 	AllowAgent []string
 	AllowHooks []string
 	Env        map[string]string
-	// Tools are programs added to the sandbox image by name, such as
-	// "blender" (see dockerbox.Tools).
-	Tools []string
 }
-
-// SandboxTools are the names sandbox.tools accepts. The Dockerfile lines
-// are in dockerbox.Tools; a test keeps the two lists equal.
-var SandboxTools = []string{"blender"}
 
 type Verify struct {
 	Command         string
@@ -676,12 +669,6 @@ func (b *builder) sandbox(s *section) {
 		}
 	}
 	sb.Env = s.strMap("env")
-	sb.Tools = trimAll(s.strList("tools", nil))
-	for _, t := range sb.Tools {
-		if !slices.Contains(SandboxTools, t) {
-			b.fail("sandbox.tools", "%q is not a tool the image can add. The tools are: %s", t, strings.Join(SandboxTools, ", "))
-		}
-	}
 	b.strict(n)
 	b.strict(s)
 
