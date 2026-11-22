@@ -73,7 +73,7 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
 
 ## Requirements
 
-- macOS or Linux.
+- macOS or Linux, or Windows with WSL 2 (see [Windows](#windows) below).
 - Git 2.31 or newer.
 - A container engine. The agent works inside containers. On a Mac:
   [Docker Desktop](https://www.docker.com/products/docker-desktop/). On Linux: Podman
@@ -152,6 +152,36 @@ maestro run      # starts the service. Stop it with Ctrl-C.
 `maestro login` shows a link. Open it in your browser, approve, and paste the code it gives you
 back into the terminal. The login is kept in a Docker volume that only the agent's containers
 get. It is not written to your files or your keychain, and no API key is involved.
+
+### Windows
+
+On Windows, Maestro runs as its Linux build inside WSL 2. There is no native Windows build: WSL 2
+is a real Linux kernel, so the containers, the proxies and the checks are the same as on a Linux
+machine.
+
+1. In PowerShell: `wsl --install`, then restart Windows and open **Ubuntu** from the Start menu.
+2. A container engine: either Docker Desktop on Windows with Settings, **Resources**, **WSL
+   integration** turned on for Ubuntu, or Podman or Docker Engine installed inside Ubuntu.
+3. systemd, which the background service needs. It is on in new installs. If `ps -p 1 -o comm=`
+   does not print `systemd`, add `[boot]` and `systemd=true` on two lines to `/etc/wsl.conf`, run
+   `wsl --shutdown` in PowerShell and open Ubuntu again.
+4. Inside Ubuntu, run the install command and `maestro setup` as above. Setup keeps its files in
+   `~/.config/maestro`, on Ubuntu's own disk. Keep a game project from `maestro new`, and any
+   `--dir`, there too, in your Linux home rather than under `/mnt/c`: Windows drives are slow from
+   WSL and do not keep the file permissions that keep the App's key private. Setup and
+   `maestro service install` stop and say so when a folder is on a Windows drive.
+
+Windows stops a WSL distribution a few seconds after its last terminal closes, even while a
+service runs in it, and does not start it when Windows starts. So after `maestro service install`
+writes the systemd unit, it asks for `sudo loginctl enable-linger $USER` and offers to create a
+Windows scheduled task, named `Maestro <worker>`, that starts Ubuntu without a window each time
+you log in to Windows and keeps it running. It shows the `schtasks.exe` line first, and if it
+cannot create the task from WSL you paste that line into PowerShell. `maestro service uninstall`
+removes the task again.
+
+Unity's checks run inside the container with the Unity Editor for Linux, as on any Linux machine.
+A Unity Editor installed on Windows is not used: Windows has no sandbox like the one the Mac
+checks run in.
 
 ## Use
 
@@ -793,6 +823,7 @@ Last updated 2026-11-22.
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
+| Windows, through WSL 2 | Written: setup and the service recognise WSL, check systemd and folders on Windows drives, and create the scheduled task that keeps WSL running. Tested against a simulated WSL, not yet run on Windows. |
 | Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. Also run once on an organization, with the board. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |

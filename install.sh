@@ -21,6 +21,8 @@ main() {
   case "$(uname -s)" in
     Darwin) os=darwin ;;
     Linux) os=linux ;;
+    MINGW* | MSYS* | CYGWIN* | Windows*)
+      fail "on Windows, Maestro runs inside WSL 2. Install it (wsl --install in PowerShell), open Ubuntu and run this command there" ;;
     *) fail "this installer supports macOS and Linux only" ;;
   esac
   case "$(uname -m)" in

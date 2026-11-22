@@ -276,7 +276,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"You can stop with Ctrl-C and run this command again; finished steps are skipped.",
 		fmt.Sprintf("State and the App key are kept in %s", abs))
 	steps := []setup.Step{
-		&setup.Machine{},
+		&setup.Machine{Dir: abs},
 		&setup.CreateApp{Port: *port},
 		&setup.InstallApp{},
 		&setup.Tickets{},

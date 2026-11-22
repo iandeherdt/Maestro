@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/iandeherdt/Maestro/internal/wsl"
 )
 
 var ctx = context.Background()
@@ -172,6 +174,7 @@ func machine(missing map[string]bool, gitVersion, goos string, cgroup bool) *Mac
 		},
 		GOOS:   goos,
 		Exists: func(string) bool { return cgroup },
+		WSL:    wsl.Host{ReadFile: func(string) ([]byte, error) { return nil, errors.New("not here") }},
 	}
 }
 
@@ -201,6 +204,46 @@ func TestMachineChecks(t *testing.T) {
 		for _, w := range tc.want {
 			if !strings.Contains(status.Detail, w) {
 				t.Errorf("%s: detail %q lacks %q", name, status.Detail, w)
+			}
+		}
+	}
+}
+
+func TestMachineInWSL(t *testing.T) {
+	files := func(release, init string) func(string) ([]byte, error) {
+		return func(p string) ([]byte, error) {
+			switch p {
+			case "/proc/sys/kernel/osrelease":
+				return []byte(release), nil
+			case "/proc/1/comm":
+				return []byte(init), nil
+			case "/proc/self/mounts":
+				return []byte("/dev/sdc / ext4 rw 0 0\nC:\\134 /mnt/c 9p rw 0 0\n"), nil
+			}
+			return nil, errors.New("no such file")
+		}
+	}
+	const wsl2 = "5.15.153.1-microsoft-standard-WSL2\n"
+	for name, tc := range map[string]struct {
+		release, init, dir string
+		want               []string
+	}{
+		"ready":         {wsl2, "systemd\n", "/home/ian/maestro", nil},
+		"no systemd":    {wsl2, "init\n", "/home/ian/maestro", []string{"systemd is off"}},
+		"windows drive": {wsl2, "systemd\n", "/mnt/c/Users/ian/maestro", []string{"is on a Windows drive"}},
+		"wsl 1":         {"4.4.0-19041-Microsoft\n", "init\n", "/home/ian/maestro", []string{"This is WSL 1"}},
+	} {
+		m := machine(nil, "git version 2.43.0", "linux", true)
+		m.WSL = wsl.Host{ReadFile: files(tc.release, tc.init), Getenv: func(string) string { return "Ubuntu" }}
+		m.Dir = tc.dir
+		got := m.problems(ctx)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: problems %q", name, got)
+			continue
+		}
+		for i, w := range tc.want {
+			if !strings.Contains(got[i], w) {
+				t.Errorf("%s: %q lacks %q", name, got[i], w)
 			}
 		}
 	}
