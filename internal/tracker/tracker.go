@@ -69,6 +69,17 @@ type Tracker interface {
 	FetchFeedback(ctx context.Context, is issue.Issue, since time.Time) ([]Feedback, error)
 }
 
+// Activity is implemented by adapters that can show on the board that an
+// agent is working on an idea, which stays in its own column meanwhile
+// (SPEC 22 and 27). Both calls are idempotent and best effort.
+type Activity interface {
+	// MarkWorking puts the label on the ticket.
+	MarkWorking(ctx context.Context, is issue.Issue, label string) error
+	// UnmarkWorking takes it off again. A label that is not there is not
+	// an error.
+	UnmarkWorking(ctx context.Context, is issue.Issue, label string) error
+}
+
 // Task is one piece of work from an approved plan (SPEC 22).
 type Task struct {
 	Title  string

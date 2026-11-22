@@ -79,6 +79,8 @@ type runEntry struct {
 	lastMessage   string
 	usage         Usage
 	turnCount     int
+	// label is the working label the idea carries while this run lasts.
+	label string
 }
 
 // Orchestrator holds the runtime state of SPEC 4.1.10.
@@ -506,10 +508,61 @@ func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int
 		return
 	}
 	o.spawnFailures = 0
-	o.running[is.ID] = &runEntry{
+	e := &runEntry{
 		gen: o.gen, handle: h, issue: is, dispatchState: dispatchState,
 		dispatchHash: is.ContentHash, attempt: attempt, startedAt: o.now(),
 		phase: PreparingWorkspace,
+	}
+	o.running[is.ID] = e
+	switch {
+	case designing:
+		o.working(ctx, e, DesigningLabel, "An agent is making a design for the plan on worker `"+o.cfg.Worker.Name+"`"+attemptSuffix(attempt)+
+			". The card stays in "+o.cfg.Tracker.DesignState+" while it works and carries the label `"+DesigningLabel+
+			"`. When the design is ready, its pull request is linked here and the card moves to "+o.cfg.Tracker.HandoffState+".")
+	case planning:
+		o.working(ctx, e, PlanningLabel, "An agent is planning this idea on worker `"+o.cfg.Worker.Name+"`"+attemptSuffix(attempt)+
+			". The card stays in "+o.cfg.Tracker.PlanningState+" while it works and carries the label `"+PlanningLabel+
+			"`. Its questions or its plan follow here, and the card moves to "+o.cfg.Tracker.HandoffState+".")
+	}
+}
+
+// The labels an idea carries while an agent plans it or makes its design.
+// The card stays in its column meanwhile, so the label is what the board
+// shows (SPEC 22 and 27).
+const (
+	PlanningLabel  = "maestro:planning"
+	DesigningLabel = "maestro:designing"
+)
+
+// working tells the owner that an agent started on an idea: a new comment,
+// which shows on the issue below the earlier ones, and a label, which
+// shows on the card. Both are best effort.
+func (o *Orchestrator) working(ctx context.Context, e *runEntry, label, text string) {
+	if p, ok := o.d.Tracker.(interface {
+		PostComment(context.Context, issue.Issue, string) error
+	}); ok {
+		if err := p.PostComment(ctx, e.issue, text); err != nil {
+			o.d.Log.Warn("start note not posted", "issue", e.issue.Identifier, "error", err)
+		}
+	}
+	if a, ok := o.d.Tracker.(tracker.Activity); ok {
+		if err := a.MarkWorking(ctx, e.issue, label); err != nil {
+			o.d.Log.Warn("working label not set", "issue", e.issue.Identifier, "error", err)
+			return
+		}
+		e.label = label
+	}
+}
+
+// stopped takes the working label off an idea whose run ended.
+func (o *Orchestrator) stopped(ctx context.Context, e *runEntry) {
+	if e.label == "" {
+		return
+	}
+	if a, ok := o.d.Tracker.(tracker.Activity); ok {
+		if err := a.UnmarkWorking(ctx, e.issue, e.label); err != nil {
+			o.d.Log.Warn("working label not removed", "issue", e.issue.Identifier, "error", err)
+		}
 	}
 }
 
@@ -727,6 +780,7 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 	}
 	delete(o.running, id)
 	o.account(e)
+	o.stopped(ctx, e)
 	is := e.issue
 
 	switch out.Kind {
@@ -1226,6 +1280,7 @@ func (o *Orchestrator) reconcile(ctx context.Context) {
 				e.handle.Terminate()
 				delete(o.running, id)
 				o.account(e)
+				o.stopped(ctx, e)
 				o.failed(ctx, e, KindFailure, "stalled", "", nil)
 			}
 		}
@@ -1285,6 +1340,7 @@ func (o *Orchestrator) terminate(ctx context.Context, id string, cleanupWorkspac
 	e.handle.Terminate()
 	delete(o.running, id)
 	o.account(e)
+	o.stopped(ctx, e)
 	o.release(id)
 	if cleanupWorkspace {
 		o.cleanup(ctx, e.issue)

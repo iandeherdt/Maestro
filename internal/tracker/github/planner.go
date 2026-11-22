@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -170,3 +171,36 @@ func (a *Adapter) AddBlocker(ctx context.Context, task, blocker tracker.TaskRef)
 	}
 	return err
 }
+
+// MarkWorking adds a label to the issue. GitHub creates a label that does
+// not exist yet.
+func (a *Adapter) MarkWorking(ctx context.Context, is issue.Issue, label string) error {
+	n, err := numberOf(is)
+	if err != nil {
+		return err
+	}
+	_, err = a.c.do(ctx, http.MethodPost, a.c.url(a.path("/issues/%d/labels", n), nil), map[string][]string{"labels": {label}}, nil, true)
+	a.mu.Lock()
+	delete(a.cache, n)
+	a.mu.Unlock()
+	return err
+}
+
+// UnmarkWorking removes the label from the issue.
+func (a *Adapter) UnmarkWorking(ctx context.Context, is issue.Issue, label string) error {
+	n, err := numberOf(is)
+	if err != nil {
+		return err
+	}
+	u := a.c.url(a.path("/issues/%d/labels/", n), nil) + url.PathEscape(label)
+	_, err = a.c.do(ctx, http.MethodDelete, u, nil, nil, true)
+	a.mu.Lock()
+	delete(a.cache, n)
+	a.mu.Unlock()
+	if errors.Is(err, errNotFound) {
+		return nil
+	}
+	return err
+}
+
+var _ tracker.Activity = (*Adapter)(nil)
