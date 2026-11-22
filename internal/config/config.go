@@ -608,7 +608,7 @@ func (c Claude) ModelFor(labels []string, planning bool) (model, refused string)
 func (b *builder) claude(s *section) {
 	c := &b.cfg.Claude
 	c.Command = strings.TrimSpace(s.str("command", "claude"))
-	c.Model = strings.TrimSpace(s.str("model", ""))
+	c.Model = strings.TrimSpace(s.str("model", "opus"))
 	c.PlanningModel = strings.TrimSpace(s.str("planning_model", ""))
 	c.CardModels = trimAll(s.strList("card_models", nil))
 	c.MaxStepsPerTurn = b.positive("claude.max_steps_per_turn", s.integer("max_steps_per_turn", 150))

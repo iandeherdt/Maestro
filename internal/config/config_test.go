@@ -98,6 +98,8 @@ func TestDefaults(t *testing.T) {
 	eq("agent.max_turns", c.Agent.MaxTurns, int64(8))
 	eq("agent.max_retry_backoff_ms", c.Agent.MaxRetryBackoffMS, int64(300000))
 	eq("claude.command", c.Claude.Command, "claude")
+	eq("claude.model", c.Claude.Model, "opus")
+	eq("claude.planning_model", c.Claude.PlanningModel, "")
 	eq("claude.max_steps_per_turn", c.Claude.MaxStepsPerTurn, int64(150))
 	eq("claude.permission_mode", c.Claude.PermissionMode, "bypassPermissions")
 	eq("claude.turn_timeout_ms", c.Claude.TurnTimeoutMS, int64(3600000))

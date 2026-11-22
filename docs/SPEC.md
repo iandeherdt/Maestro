@@ -372,7 +372,7 @@ Replaces upstream `codex`.
 
 - `command` (string): default `claude`. An executable name or absolute path. Not a shell string.
   The service builds the argument vector itself (Section 10.1).
-- `model` (string or null): default null (CLI default).
+- `model` (string): default `opus`. An empty string leaves the choice to the CLI.
 - `planning_model` (string or null): default null. The model for planning attempts (Section 22);
   null means `model`.
 - `card_models` (list of strings): default empty. The models an issue may ask for. Empty allows
@@ -628,7 +628,7 @@ skip dispatch for that tick and keep reconciling.
 - `agent.max_retry_backoff_ms`: default `300000`
 - `agent.max_concurrent_agents_by_state`: default `{}`
 - `claude.command`: default `claude`
-- `claude.model`: default null
+- `claude.model`: default `opus`
 - `claude.planning_model`: default null
 - `claude.card_models`: default `[]`
 - `claude.max_steps_per_turn`: default `150`

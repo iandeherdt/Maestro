@@ -244,18 +244,20 @@ Things to know:
 
 ### Choosing the model
 
-Without any setting, Claude Code picks the model itself. You can decide it in three places, and
-the more specific one wins:
+Without any setting, every ticket is worked on with `opus`. You can decide it in three places,
+and the more specific one wins:
 
-1. **On the card.** The board has a field **Model** with the choices `opus`, `sonnet` and
-   `haiku`. Set it on a card and that ticket is planned and worked on with that model. Leave it
+1. **On the card.** The board has a field **Model** with the choices `fable`, `opus`, `sonnet`
+   and `haiku`. Set it on a card and that ticket is planned and worked on with that model. Leave it
    empty for the default. With labels instead of a board, put a label such as `model:opus` on the
    issue.
 2. **For planning**, in the settings file: `claude: {planning_model: opus}`. Planning is where a
    stronger model pays off most.
-3. **The default**, in the settings file: `claude: {model: sonnet}`.
+3. **The default**, in the settings file: `claude: {model: sonnet}`. It is `opus` when you set
+   nothing.
 
-`opus`, `sonnet` and `haiku` are Claude Code's own names for its newest model of each kind, so
+`fable`, `opus`, `sonnet` and `haiku` are Claude Code's own names for its newest model of each
+kind, so
 they stay right when new models come out. A full model name works too: add it as a choice to the
 Model field on the board (the three dots at the top right, Settings, Model).
 
@@ -505,7 +507,7 @@ changed ones:
 | `publish.rework_on_comments` | `true` | Your comments on a pull request send the card back to work, see [Asking for changes](#asking-for-changes) |
 | `publish.review_quiet_ms` | `120000` | How long you have to be quiet on the pull request before that happens, in milliseconds |
 | `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
-| `claude.model` | Claude Code's choice | The model for every ticket, see [Choosing the model](#choosing-the-model) |
+| `claude.model` | `opus` | The model for every ticket, see [Choosing the model](#choosing-the-model) |
 | `claude.planning_model` | `claude.model` | The model while an idea is planned |
 | `claude.card_models` | any | The models a card may ask for |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |

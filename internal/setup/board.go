@@ -117,7 +117,8 @@ mutation($field: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]) {
 // itself keeps pointing at its newest models. Others can be added on the
 // board.
 var modelOptions = []option{
-	{"opus", "RED", "The most capable model. Uses the most of your subscription."},
+	{"fable", "PURPLE", "The most capable model. Uses the most of your subscription."},
+	{"opus", "RED", "A very capable model, for hard tickets."},
 	{"sonnet", "BLUE", "The everyday model."},
 	{"haiku", "GREEN", "The fastest and lightest model, for small changes."},
 }
@@ -580,7 +581,7 @@ func (b *Board) prepare(ctx context.Context, ui *UI, st *State, board *boardStat
 		if err := b.graphql(ctx, st, createFieldMutation, map[string]any{"project": board.ID, "name": modelField, "options": inputs(modelOptions)}, nil); err != nil {
 			return fmt.Errorf("the field %s could not be created: %w", modelField, err)
 		}
-		ui.Say("  Field %s with the choices opus, sonnet and haiku. Leave it empty on a card for the default.", modelField)
+		ui.Say("  Field %s with the choices fable, opus, sonnet and haiku. Leave it empty on a card for the default.", modelField)
 	case !board.Model.usable():
 		ui.Say("  The board has a field named %s that is not a single-select field, so cards cannot ask for a model.", modelField)
 	}

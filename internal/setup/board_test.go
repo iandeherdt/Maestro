@@ -167,7 +167,7 @@ func TestBoardStepCreatesTheBoard(t *testing.T) {
 	if st.Board != 1 || names(b.status) != allColumns || names(b.worker) != "linux" {
 		t.Fatalf("board %d, columns %q, workers %q", st.Board, names(b.status), names(b.worker))
 	}
-	if strings.Join(g.mutations, ",") != "board,columns,field,field" || names(b.model) != "opus,sonnet,haiku" {
+	if strings.Join(g.mutations, ",") != "board,columns,field,field" || names(b.model) != "fable,opus,sonnet,haiku" {
 		t.Errorf("mutations %v", g.mutations)
 	}
 	for _, want := range []string{"/orgs/ian/projects/1", "Layout choose Board", "Only issues that you wrote"} {
@@ -259,7 +259,7 @@ func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
 	g.boards[1].worker = append(g.boards[1].worker, option{"linux", "BLUE", "x"})
 	st2, step2 := onOrg(t, g)
 	u2, out2 := ui("\nian\n2\n")
-	if err := Run(ctx, u2, st2, []Step{step2}); err != nil || strings.Join(g.mutations, ",") != "field" || names(g.boards[1].model) != "opus,sonnet,haiku" {
+	if err := Run(ctx, u2, st2, []Step{step2}); err != nil || strings.Join(g.mutations, ",") != "field" || names(g.boards[1].model) != "fable,opus,sonnet,haiku" {
 		t.Fatalf("adding the Model field: %v, mutations %v\n%s", err, g.mutations, out2)
 	}
 	if s, _ := step2.Check(ctx, st2); !s.Done {
