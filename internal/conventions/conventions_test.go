@@ -1,6 +1,7 @@
 package conventions_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -188,5 +189,49 @@ func TestSyncSkills(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "godot-dev", "SKILL.md")); err != nil {
 		t.Error("an owner's skill was removed")
+	}
+}
+
+func TestStarterAndRequires(t *testing.T) {
+	dir := t.TempDir()
+	unity, err := Get("unity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing *MissingError
+	if _, err := unity.Apply(dir, false); !errors.As(err, &missing) || missing.Path != "ProjectSettings/ProjectVersion.txt" {
+		t.Fatalf("a folder with no Unity project: %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("something was written: %v", entries)
+	}
+
+	godot, err := Get("godot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := godot.Apply(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(rep.Started, "project.godot") || !slices.Contains(rep.Started, "test/test_project.gd") {
+		t.Fatalf("a new Godot project gets no starter: %+v", rep.Started)
+	}
+	// Once the project exists, the starter is never written again, and
+	// the owner's own files are never touched.
+	os.WriteFile(filepath.Join(dir, "project.godot"), []byte("mine"), 0o644)
+	os.Remove(filepath.Join(dir, "test", "test_project.gd"))
+	rep, err = godot.Apply(dir, false)
+	if err != nil || len(rep.Started) != 0 || len(rep.Conflicts) != 0 {
+		t.Fatalf("an existing project: %+v %v", rep, err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "project.godot")); string(raw) != "mine" {
+		t.Error("project.godot was overwritten")
+	}
+
+	blender, _ := Get("blender")
+	klad, _ := Get("klad")
+	if got := Derive([]*Pack{blender, klad}).BinaryPaths; strings.Join(got, " ") != "art/models/** art/textures/**" {
+		t.Errorf("binary paths: %v", got)
 	}
 }

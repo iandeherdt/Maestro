@@ -76,5 +76,6 @@
     "Set KLAD_SOURCE and KLAD_OUTPUT in conventions/klad/settings.sh to your folders.",
     "Let the agent commit the pictures: in the settings file, policy.binary_paths: [\"<KLAD_OUTPUT>/**\"]. Everywhere else binary files stay refused.",
     "For pictures on the pull request: screenshots.command: sh conventions/klad/previews.sh"
-  ]
+  ],
+  "binary_paths": ["art/textures/**"]
 }

@@ -116,7 +116,8 @@
   ],
   "image_note": "Godot 4.7.2 from its GitHub release, checked against its published checksums, and gdtoolkit 4.5.0 (about 200 MB)",
   "after_apply": [
-    "Add the GUT test framework to addons/gut if the project does not have it yet (https://github.com/bitwes/Gut), and commit it.",
+    "Add the GUT test framework, if the project does not have it yet: sh conventions/godot/get-gut.sh (GUT 9.7.1 into addons/gut, checked by its commit).",
     "Run sh conventions/godot/verify.sh on your machine with GODOT pointing at Godot 4.7, and fix what it finds before switching the pack on."
-  ]
+  ],
+  "starter_unless": "project.godot"
 }

@@ -505,6 +505,25 @@ cannot skip; pick the ones that fit the project.
 | `blender` | 3D models made by Python scripts | No | write a generator, build it, look at its render |
 | `klad` | 2D art painted with klad | No | paint through klad's commands, export, look at the picture |
 
+### Start a game project
+
+Several packs go on in one command. For a new Godot game with art made by scripts:
+
+```sh
+mkdir my-game && cd my-game && git init
+maestro conventions apply godot blender klad   # a new Godot project gets a starter project and test
+sh conventions/godot/get-gut.sh                # the GUT test framework, checked by its commit
+git add -A && git commit -m "Start the game" && git push   # to a new repository on GitHub
+maestro conventions enable godot blender klad && maestro image
+```
+
+For Unity, make the project in Unity Hub first (Editor 6000.3.29f1), run `git init` in its folder,
+and then `maestro conventions apply unity`: the pack adds a first EditMode test, so the project
+passes its checks from its first commit. Then `maestro unity activate` once. `apply` prints
+what is left for the packs you named, in order, and writes nothing when one of them cannot be
+applied. The art packs name their output folders as the only places binary files may go (see
+below), with no settings to write.
+
 What it does not do: play the game, judge how it feels, or run anything that needs a screen or a
 GPU (the sandbox has neither; Blender renders on the CPU). Art drawn by hand stays yours: commit
 it and the agent works with it. Git LFS is not supported yet, so files kept in LFS arrive in the
@@ -534,7 +553,10 @@ is not kept. The checks do run code the agent wrote, and that code can read the 
 Unity account that holds nothing else, such as a free Personal account made for this.
 
 The agent has no licence, but it has the quick checks: `sh conventions/unity/check.sh` checks the
-`.meta` files and compiles every script with the compiler that comes with the Editor. The skill
+`.meta` files and compiles every script with the compiler that comes with the Editor, and
+`sh conventions/unity/new-meta.sh` writes the `.meta` files, with new GUIDs, for scripts, scenes,
+prefabs and folders it adds. Textures, models and audio it leaves to you: their import settings
+are made in the Editor. The skill
 `unity-dev` tells the agent how to work without the editor: scenes and prefabs are edited as
 text, every new asset gets a `.meta` file with a new GUID, packages are left to you.
 
@@ -549,7 +571,7 @@ checksums) and gdtoolkit in the sandbox image. Godot needs no licence and runs w
 so the agent runs everything the checks run:
 
 ```sh
-maestro conventions apply godot      # in a checkout; add GUT to addons/gut if it is not there
+maestro conventions apply godot      # a new project gets a starter; then sh conventions/godot/get-gut.sh
 maestro conventions enable godot && maestro image
 ```
 
@@ -582,12 +604,13 @@ maestro conventions enable blender && maestro image
 As with the other game packs, the agents get the skill from Maestro, and the repository gets a
 copy for your own Claude Code.
 
-The models and pictures are binary files, which Maestro refuses by default. Name the one folder
-they go into, and only there may the agent commit them:
+The models and pictures are binary files, which Maestro refuses by default. The packs allow
+them in their output folders only, `art/models/` and `art/textures/`. When you move those in
+`settings.sh`, name the new folders in the settings file:
 
 ```yaml
 policy:
-  binary_paths: ["art/models/**", "art/textures/**"]
+  binary_paths: ["models/**"]   # in addition to the packs' own folders
   binary_max_file_bytes: 52428800     # per file there; the default
 screenshots:
   command: sh conventions/blender/previews.sh   # renders of what the change touched, on the pull request

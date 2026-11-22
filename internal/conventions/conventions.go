@@ -68,6 +68,33 @@ type Pack struct {
 	ImageNote string   `json:"image_note"`
 	// AfterApply are steps only the owner can do, shown after apply.
 	AfterApply []string `json:"after_apply"`
+	// BinaryPaths are the folders the pack's tools write binary files
+	// into by default; they join policy.binary_paths.
+	BinaryPaths []string `json:"binary_paths"`
+	// Requires is a file the project must have before the pack can be
+	// applied, with what to do when it is missing.
+	Requires *Requirement `json:"requires"`
+	// StarterUnless names a file whose absence marks a new project: then
+	// Apply also writes the pack's starter files (packs/NAME/starter/), so
+	// that a new project passes its checks from the first commit. A
+	// starter file that exists is never touched.
+	StarterUnless string `json:"starter_unless"`
+}
+
+// Requirement is a file the project must have, and how to make it.
+type Requirement struct {
+	Path string `json:"path"`
+	Hint string `json:"hint"`
+}
+
+// MissingError says that the project lacks what the pack requires.
+type MissingError struct {
+	Pack string
+	Requirement
+}
+
+func (e *MissingError) Error() string {
+	return fmt.Sprintf("the %s pack needs %s, which this checkout does not have. %s", e.Pack, e.Path, e.Hint)
 }
 
 var (
@@ -151,12 +178,22 @@ func (p *Pack) valid(name string) error {
 			return fmt.Errorf("host %q is malformed", h)
 		}
 	}
-	for _, g := range p.Protect {
+	for _, g := range append(append([]string{}, p.Protect...), p.BinaryPaths...) {
 		if g == "" || strings.HasPrefix(g, "/") || strings.Contains(g, "..") {
-			return fmt.Errorf("protected path %q is malformed", g)
+			return fmt.Errorf("path %q is malformed", g)
 		}
 	}
+	if p.Requires != nil && (!safeRel(p.Requires.Path) || p.Requires.Hint == "") {
+		return errors.New("requires needs a relative path and a hint")
+	}
+	if p.StarterUnless != "" && !safeRel(p.StarterUnless) {
+		return errors.New("starter_unless must be a relative path")
+	}
 	return nil
+}
+
+func safeRel(p string) bool {
+	return p != "" && !strings.HasPrefix(p, "/") && !strings.Contains(p, "..")
 }
 
 // Resolve returns the packs for a list of names, in the given order.
@@ -227,9 +264,33 @@ func (p *Pack) Files() (map[string][]byte, error) {
 	return out, err
 }
 
+// Starter returns the starter files of the pack: repository path to
+// content. Most packs have none.
+func (p *Pack) Starter() (map[string][]byte, error) {
+	out := map[string][]byte{}
+	root := path.Join("packs", p.Name, "starter")
+	if _, err := fs.Stat(packs, root); err != nil {
+		return out, nil
+	}
+	err := fs.WalkDir(packs, root, func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := packs.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		out[strings.TrimPrefix(name, root+"/")] = raw
+		return nil
+	})
+	return out, err
+}
+
 // Report says what Apply did.
 type Report struct {
-	Written   []string
+	Written []string
+	// Started are the starter files written for a new project.
+	Started   []string
 	Unchanged []string
 	// Conflicts exist with other content and were left alone.
 	Conflicts []string
@@ -244,9 +305,39 @@ type Report struct {
 // carry a link that points outside it.
 func (p *Pack) Apply(dir string, replace bool) (Report, error) {
 	var rep Report
+	if r := p.Requires; r != nil {
+		if err := noLinks(dir, r.Path); err != nil {
+			return rep, err
+		}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(r.Path))); err != nil {
+			return rep, &MissingError{Pack: p.Name, Requirement: *r}
+		}
+	}
 	files, err := p.Files()
 	if err != nil {
 		return rep, err
+	}
+	starter := map[string]bool{}
+	if p.StarterUnless != "" {
+		if err := noLinks(dir, p.StarterUnless); err != nil {
+			return rep, err
+		}
+		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(p.StarterUnless))); errors.Is(err, fs.ErrNotExist) {
+			extra, err := p.Starter()
+			if err != nil {
+				return rep, err
+			}
+			for n, raw := range extra {
+				if err := noLinks(dir, n); err != nil {
+					return rep, err
+				}
+				if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(n))); errors.Is(err, fs.ErrNotExist) {
+					if _, dup := files[n]; !dup {
+						files[n], starter[n] = raw, true
+					}
+				}
+			}
+		}
 	}
 	names := make([]string, 0, len(files))
 	for n := range files {
@@ -292,7 +383,11 @@ func (p *Pack) Apply(dir string, replace bool) (Report, error) {
 		if err := os.WriteFile(target, files[n], mode); err != nil {
 			return rep, err
 		}
-		rep.Written = append(rep.Written, n)
+		if starter[n] {
+			rep.Started = append(rep.Started, n)
+		} else {
+			rep.Written = append(rep.Written, n)
+		}
 	}
 	rep.Ignored, err = ignore(dir, p.Gitignore)
 	return rep, err
@@ -363,6 +458,8 @@ type Settings struct {
 	Image []string
 	// Checks are the CI checks the packs' workflows report.
 	Checks []string
+	// BinaryPaths are the packs' folders for binary files.
+	BinaryPaths []string
 }
 
 // Derive combines packs into settings.
@@ -374,6 +471,7 @@ func Derive(list []*Pack) Settings {
 		s.Hosts = append(s.Hosts, p.Hosts...)
 		s.Image = append(s.Image, p.Image...)
 		s.Checks = append(s.Checks, p.Check)
+		s.BinaryPaths = append(s.BinaryPaths, p.BinaryPaths...)
 		// A pack that is switched on while its files are not in the
 		// repository must fail with words, not with "No such file".
 		guard := fmt.Sprintf("[ -f %s ] || { echo 'The conventions pack %s is switched on in the settings file, "+
