@@ -1,0 +1,122 @@
+{
+  "name": "godot",
+  "title": "Godot 4 (GDScript)",
+  "applies": "A Godot 4 project in the root of the repository (project.godot at the top), written in GDScript, made for the Godot version of the image, with the GUT test framework in addons/gut.",
+  "rules": [
+    {
+      "id": "engine-version",
+      "rule": "The project is made for the Godot version that checks it.",
+      "enforced_by": [
+        "conventions/godot/check.sh",
+        "project.godot (config/features)"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "scripts-parse",
+      "rule": "Every GDScript file parses without an error, with the project's classes known.",
+      "enforced_by": [
+        "godot --check-only",
+        "conventions/godot/check.sh"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "format",
+      "rule": "Every GDScript file is formatted as gdformat formats it.",
+      "enforced_by": [
+        "gdformat --check (gdtoolkit)"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "lint",
+      "rule": "Every GDScript file passes gdlint: naming, order of definitions, size and complexity.",
+      "enforced_by": [
+        "gdlint (gdtoolkit)"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "imported",
+      "rule": "Every asset imports without an error, and the .import and .uid files Godot makes for it are committed with it.",
+      "enforced_by": [
+        "godot --import",
+        "conventions/godot/verify.sh"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "tests",
+      "rule": "All tests under test/ pass, and the project has at least one.",
+      "enforced_by": [
+        "GUT (addons/gut)",
+        "conventions/godot/verify.sh"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "secrets",
+      "rule": "No credentials in the change.",
+      "enforced_by": [
+        "the secret scan of the Maestro service"
+      ],
+      "where": [
+        "service"
+      ]
+    },
+    {
+      "id": "rules-stay",
+      "rule": "The agent cannot change these rules, the scripts that check them, the test framework, the skill, or the CI workflows.",
+      "enforced_by": [
+        "the diff policy of the Maestro service (protected paths)"
+      ],
+      "where": [
+        "service"
+      ]
+    }
+  ],
+  "protect": [
+    "conventions/**",
+    "addons/gut/**",
+    "gdlintrc",
+    ".gdlintrc",
+    "gdformatrc",
+    ".gdformatrc",
+    ".claude/skills/godot-dev/**"
+  ],
+  "hosts": [],
+  "prepare": "sh conventions/godot/prepare.sh",
+  "verify": "sh conventions/godot/verify.sh",
+  "check": "conventions-godot",
+  "gitignore": [
+    ".godot/"
+  ],
+  "image": [
+    "ARG TARGETARCH",
+    "RUN set -eu; \\\n    apt-get update; \\\n    apt-get install -y --no-install-recommends unzip libfontconfig1 python3-venv; \\\n    rm -rf /var/lib/apt/lists/*; \\\n    case \"$TARGETARCH\" in amd64) arch=x86_64 ;; arm64) arch=arm64 ;; *) echo \"Godot has no build for $TARGETARCH\" >&2; exit 1 ;; esac; \\\n    base=https://github.com/godotengine/godot/releases/download/4.7.2-stable; \\\n    file=\"Godot_v4.7.2-stable_linux.$arch.zip\"; \\\n    cd /tmp; \\\n    curl -fsSL --proto '=https' --tlsv1.2 -o \"$file\" \"$base/$file\"; \\\n    curl -fsSL --proto '=https' --tlsv1.2 -o SHA512-SUMS.txt \"$base/SHA512-SUMS.txt\"; \\\n    grep \"  $file\\$\" SHA512-SUMS.txt | sha512sum -c -; \\\n    unzip -q \"$file\" -d /opt/godot; \\\n    mv \"/opt/godot/Godot_v4.7.2-stable_linux.$arch\" /opt/godot/godot; \\\n    ln -s /opt/godot/godot /usr/local/bin/godot; \\\n    rm -f \"$file\" SHA512-SUMS.txt; \\\n    python3 -m venv /opt/gdtoolkit; \\\n    /opt/gdtoolkit/bin/pip install --no-cache-dir --quiet gdtoolkit==4.5.0; \\\n    ln -s /opt/gdtoolkit/bin/gdformat /opt/gdtoolkit/bin/gdlint /usr/local/bin/"
+  ],
+  "image_note": "Godot 4.7.2 from its GitHub release, checked against its published checksums, and gdtoolkit 4.5.0 (about 200 MB)",
+  "after_apply": [
+    "Add the GUT test framework to addons/gut if the project does not have it yet (https://github.com/bitwes/Gut), and commit it.",
+    "Run sh conventions/godot/verify.sh on your machine with GODOT pointing at Godot 4.7, and fix what it finds before switching the pack on."
+  ]
+}
