@@ -23,7 +23,7 @@ const (
 
 var (
 	ctx = context.Background()
-	ws  = workspace.Workspace{Key: "GH-1", Branch: "symphony/GH-1"}
+	ws  = workspace.Workspace{Key: "GH-1", Branch: "maestro/GH-1"}
 )
 
 type rig struct {

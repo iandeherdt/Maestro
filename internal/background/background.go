@@ -65,9 +65,43 @@ func (u *Unit) run(ctx context.Context, name string, args ...string) ([]byte, er
 // Label is the launchd label, and the systemd unit name without ".service".
 func (u *Unit) Label() string {
 	if u.GOOS == "darwin" {
+		return "com.maestro." + u.Worker
+	}
+	return "maestro-" + u.Worker
+}
+
+// oldLabel is the label from when the command was called symphony. A
+// service installed under it is replaced or removed like the current one.
+func (u *Unit) oldLabel() string {
+	if u.GOOS == "darwin" {
 		return "com.symphony-beads." + u.Worker
 	}
 	return "symphony-" + u.Worker
+}
+
+func (u *Unit) pathOf(label string) string {
+	if u.GOOS == "darwin" {
+		return filepath.Join(u.Home, "Library", "LaunchAgents", label+".plist")
+	}
+	return filepath.Join(u.Home, ".config", "systemd", "user", label+".service")
+}
+
+// dropOld stops and removes a service installed under the old name. It
+// reports whether there was one.
+func (u *Unit) dropOld(ctx context.Context) (bool, error) {
+	old := u.pathOf(u.oldLabel())
+	if _, err := os.Stat(old); err != nil {
+		return false, nil
+	}
+	if u.GOOS == "darwin" {
+		u.run(ctx, "launchctl", "bootout", u.domain()+"/"+u.oldLabel())
+	} else {
+		u.run(ctx, "systemctl", "--user", "disable", "--now", u.oldLabel()+".service")
+	}
+	if err := os.Remove(old); err != nil && !os.IsNotExist(err) {
+		return true, err
+	}
+	return true, nil
 }
 
 // Path is the file that describes the service to the system.
@@ -108,7 +142,7 @@ func (u *Unit) Content() (string, error) {
 		for i, a := range args {
 			words[i] = quote(a)
 		}
-		return "[Unit]\nDescription=Symphony (" + u.Worker + ")\nAfter=network-online.target docker.service\n\n" +
+		return "[Unit]\nDescription=Maestro (" + u.Worker + ")\nAfter=network-online.target docker.service\n\n" +
 			"[Service]\nExecStart=" + strings.Join(words, " ") + "\n" +
 			"Restart=always\nRestartSec=30\nEnvironment=PATH=" + strings.TrimSuffix(path, ":/Applications/Docker.app/Contents/Resources/bin") + "\n\n" +
 			"[Install]\nWantedBy=default.target\n", nil
@@ -152,9 +186,13 @@ func (u *Unit) Content() (string, error) {
 
 func (u *Unit) domain() string { return "gui/" + strconv.Itoa(u.UID) }
 
-// Installed reports whether the unit's file exists.
+// Installed reports whether the unit's file exists, under this name or
+// the old one.
 func (u *Unit) Installed() bool {
-	_, err := os.Stat(u.Path())
+	if _, err := os.Stat(u.Path()); err == nil {
+		return true
+	}
+	_, err := os.Stat(u.pathOf(u.oldLabel()))
 	return err == nil
 }
 
@@ -166,6 +204,9 @@ func (u *Unit) Install(ctx context.Context) error {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(u.Path()), 0o755); err != nil {
+		return err
+	}
+	if _, err := u.dropOld(ctx); err != nil {
 		return err
 	}
 	if u.GOOS == "darwin" {
@@ -198,6 +239,9 @@ func (u *Unit) Install(ctx context.Context) error {
 // removed: settings, workspaces and the login stay.
 func (u *Unit) Uninstall(ctx context.Context) error {
 	if err := u.check(); err != nil {
+		return err
+	}
+	if _, err := u.dropOld(ctx); err != nil {
 		return err
 	}
 	if u.GOOS == "darwin" {

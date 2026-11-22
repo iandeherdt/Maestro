@@ -77,7 +77,7 @@ func parseWords(name string, args []string, stderr io.Writer, words bool) (dir, 
 	err := fs.Parse(args)
 	switch {
 	case err != nil, !words && fs.NArg() > 1, !words && fs.NArg() == 1 && *f != "":
-		fmt.Fprintf(stderr, "usage: symphony %s [--dir DIR] [--file WORKFLOW.md]\n", name)
+		fmt.Fprintf(stderr, "usage: maestro %s [--dir DIR] [--file WORKFLOW.md]\n", name)
 		return "", "", nil, false
 	case words:
 		return *d, *f, fs.Args(), true
@@ -94,13 +94,13 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	home, _ := os.UserHomeDir()
 	src, err := reload.Open(in.path, config.Options{Env: os.Getenv, HomeDir: home}, log)
 	if err != nil {
-		return nil, explain("%v\nThe settings file is %s. Run `symphony setup` if you have not yet.", err, in.path)
+		return nil, explain("%v\nThe settings file is %s. Run `maestro setup` if you have not yet.", err, in.path)
 	}
 	in.source, in.cfg = src, src.Current().Config
 	if b := in.cfg.Sandbox.Backend; b != "docker" && b != "podman" {
 		return nil, explain("%s says `sandbox.backend: %s`, which is not built yet. The container sandbox (docker or podman) is.\n"+
 			"If setup wrote this file, the easiest fix is to let it write a new one:\n"+
-			"  mv %q %q\n  symphony setup\n"+
+			"  mv %q %q\n  maestro setup\n"+
 			"Setup skips the steps that are done and only asks the last questions again.",
 			in.path, in.cfg.Sandbox.Backend, in.path, in.path+".old")
 	}
@@ -108,11 +108,9 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		return nil, explain("only the github tracker is built so far")
 	}
 	if dir == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
+		if dir, err = configDir(); err != nil {
 			return nil, explain("no configuration directory was found for this user, pass --dir: %v", err)
 		}
-		dir = filepath.Join(base, "symphony")
 	}
 	if dir, err = filepath.Abs(dir); err != nil {
 		return nil, err
@@ -122,10 +120,10 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		return nil, err
 	}
 	if st.AppID == "" || st.AppKeyFile == "" || st.InstallationID == "" || st.AppSlug == "" {
-		return nil, explain("the GitHub App is not set up in %s. Run `symphony setup` first.", dir)
+		return nil, explain("the GitHub App is not set up in %s. Run `maestro setup` first.", dir)
 	}
 	if !strings.EqualFold(st.Repo, in.cfg.Workspace.Repo) {
-		return nil, explain("setup was done for %s, but %s is about %s. Run `symphony setup` for that repository.",
+		return nil, explain("setup was done for %s, but %s is about %s. Run `maestro setup` for that repository.",
 			st.Repo, in.path, in.cfg.Workspace.Repo)
 	}
 	in.state = st
@@ -269,14 +267,14 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	fmt.Fprintln(stdout, "\nThe image is ready.")
-	fmt.Fprintln(stdout, "Next: symphony login    (sign Claude Code in inside the sandbox, once)")
+	fmt.Fprintln(stdout, "Next: maestro login    (sign Claude Code in inside the sandbox, once)")
 	return 0
 }
 
 // image explains what to do when the image is missing.
 func (in *install) image(ctx context.Context) error {
 	if !in.box.ImageExists(ctx) {
-		return explain("the sandbox image %s does not exist yet. Build it with: symphony image", in.cfg.Sandbox.Image)
+		return explain("the sandbox image %s does not exist yet. Build it with: maestro image", in.cfg.Sandbox.Image)
 	}
 	return nil
 }
@@ -320,11 +318,11 @@ func runLogin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	if !yes {
-		fmt.Fprintln(stderr, "Claude Code is not signed in yet. Run `symphony login` again and finish the sign-in.")
+		fmt.Fprintln(stderr, "Claude Code is not signed in yet. Run `maestro login` again and finish the sign-in.")
 		return 1
 	}
 	fmt.Fprintln(stdout, "Claude Code is signed in inside the sandbox.")
-	fmt.Fprintln(stdout, "Next: symphony run")
+	fmt.Fprintln(stdout, "Next: maestro run")
 	return 0
 }
 
@@ -402,7 +400,7 @@ type endpoints struct {
 
 var gitHub = endpoints{api: "https://api.github.com", git: "https://github.com"}
 
-// runService is `symphony run`.
+// runService is `maestro run`.
 func runService(args []string, stdout, stderr io.Writer) int {
 	dir, explicit, ok := parse("run", args, stderr)
 	if !ok {
@@ -458,7 +456,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	token, err := code.Token(ctx)
 	if err != nil {
-		return explain("GitHub did not give the App a token for %s: %v\nRun `symphony setup` to check the App and its installation.",
+		return explain("GitHub did not give the App a token for %s: %v\nRun `maestro setup` to check the App and its installation.",
 			cfg.Workspace.Repo, err)
 	}
 	base := cfg.Workspace.BaseBranch
@@ -479,8 +477,8 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 
 	// Starting a second service would stop the containers of the first.
 	if alive(ctx, cfg.Budget.StateDir) {
-		return explain("Symphony is already running for this installation, in another terminal or in the background.\n" +
-			"See what it does with `symphony status`. To stop a background service: symphony service uninstall")
+		return explain("Maestro is already running for this installation, in another terminal or in the background.\n" +
+			"See what it does with `maestro status`. To stop a background service: maestro service uninstall")
 	}
 	if err := in.up(ctx); err != nil {
 		return err
@@ -495,7 +493,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		return err
 	}
 	if !yes {
-		return explain("Claude Code is not signed in inside the sandbox. Sign in with: symphony login")
+		return explain("Claude Code is not signed in inside the sandbox. Sign in with: maestro login")
 	}
 
 	mir := &mirror.Mirror{Dir: in.mirrorDir, OwnerUID: -1, MaxBundleBytes: cfg.Publish.MaxBundleBytes, AllowFileRemote: gh.fileRemote}
@@ -512,7 +510,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	if !mir.HasBranch(ctx, base) {
 		return explain("%s has no branch %q yet. An empty repository gives the agent nothing to start from.\n"+
-			"Add a first commit on github.com (the \"Add a README\" button does it), then run `symphony run` again.",
+			"Add a first commit on github.com (the \"Add a README\" button does it), then run `maestro run` again.",
 			cfg.Workspace.Repo, base)
 	}
 
@@ -569,7 +567,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			return l.Config, err
 		},
 	})
-	// The status server is how `symphony status`, `pause` and `resume`
+	// The status server is how `maestro status`, `pause` and `resume`
 	// reach this process. It listens on loopback only; without a
 	// configured port it takes a free one.
 	port := 0
@@ -586,7 +584,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		return err
 	}
 	defer os.Remove(filepath.Join(cfg.Budget.StateDir, serviceFile))
-	fmt.Fprintf(stdout, "Symphony is running for %s (worker %q, base branch %s).\n", cfg.Workspace.Repo, cfg.Worker.Name, base)
+	fmt.Fprintf(stdout, "Maestro is running for %s (worker %q, base branch %s).\n", cfg.Workspace.Repo, cfg.Worker.Name, base)
 	if onBoard {
 		fmt.Fprintf(stdout, "It looks at the board every %d seconds. To give it a ticket: put an issue of %s on the board,\n", cfg.Polling.IntervalMS/1000, cfg.Workspace.Repo)
 		fmt.Fprintf(stdout, "set the card's Worker to %s, and move the card to the column %s.\n", cfg.Worker.Name, cfg.Tracker.ActiveStates[0])
@@ -598,7 +596,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)
 		fmt.Fprintf(stdout, "  status:todo  %s\n", strings.Join(cfg.Tracker.RequiredLabels, "  "))
 	}
-	fmt.Fprintln(stdout, "From another terminal: symphony status, symphony pause, symphony resume.")
+	fmt.Fprintln(stdout, "From another terminal: maestro status, maestro pause, maestro resume.")
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
 	orch.Run(ctx)

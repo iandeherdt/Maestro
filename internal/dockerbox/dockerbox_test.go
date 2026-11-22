@@ -26,13 +26,13 @@ RUN addgroup -g 10001 agent \
  && chown agent:agent /workspace /claude /handoff \
  && git config --system --add safe.directory /mirror \
  && git config --system --add safe.directory /workspace/repo
-COPY symphony /usr/local/bin/symphony
+COPY maestro /usr/local/bin/maestro
 `
 
 // engine is the container command the tests run against: docker, or podman
-// with SYMPHONY_TEST_ENGINE=podman.
+// with MAESTRO_TEST_ENGINE=podman.
 var engine = func() string {
-	if e := os.Getenv("SYMPHONY_TEST_ENGINE"); e != "" {
+	if e := os.Getenv("MAESTRO_TEST_ENGINE"); e != "" {
 		return e
 	}
 	return "docker"
@@ -57,13 +57,13 @@ func TestMain(m *testing.M) {
 		}
 		defer os.RemoveAll(dir)
 		stateDir = dir
-		bin := filepath.Join(dir, "symphony")
-		build := exec.Command("go", "build", "-o", bin, "../../cmd/symphony")
+		bin := filepath.Join(dir, "maestro")
+		build := exec.Command("go", "build", "-o", bin, "../../cmd/maestro")
 		build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
 		if out, err := build.CombinedOutput(); err != nil {
 			panic(string(out))
 		}
-		shared = &Box{Docker: engine, Podman: engine == "podman", Worker: "t" + token()[:6], Image: "symphony-test-sandbox:latest",
+		shared = &Box{Docker: engine, Podman: engine == "podman", Worker: "t" + token()[:6], Image: "maestro-test-sandbox:latest",
 			MirrorDir: filepath.Join(dir, "mirror.git"), HandoffDir: filepath.Join(dir, "handoff"),
 			Memory: "512m", CPUs: "1.0", PIDs: 128, BotName: "sym[bot]", BotEmail: "sym@example.com"}
 		var out bytes.Buffer
@@ -127,7 +127,7 @@ func workspace(t *testing.T, b *Box) string {
 	t.Helper()
 	key := "GH-" + token()[:8]
 	res, err := b.Run(ctx, sandbox.Request{Step: sandbox.StepPopulate, WorkspaceKey: key,
-		Populate: &sandbox.Populate{Op: sandbox.OpClone, Branch: "symphony/" + key, BaseBranch: "main"}}, nil)
+		Populate: &sandbox.Populate{Op: sandbox.OpClone, Branch: "maestro/" + key, BaseBranch: "main"}}, nil)
 	if err != nil || res.ExitStatus != 0 {
 		t.Fatalf("clone: %v, status %d, %s", err, res.ExitStatus, res.Stderr)
 	}
@@ -166,16 +166,16 @@ func TestWorkspaceLifecycle(t *testing.T) {
 		t.Fatalf("probe after: %q, %v", res.Stdout, err)
 	}
 	out, _ := sh(t, b, key, sandbox.NetNone, `git branch --show-current; git config user.name; git config user.email; git remote get-url origin; pwd; id -u`)
-	if out != "symphony/"+key+"\nsym[bot]\nsym@example.com\n/mirror\n/workspace/repo\n10001" {
+	if out != "maestro/"+key+"\nsym[bot]\nsym@example.com\n/mirror\n/workspace/repo\n10001" {
 		t.Fatalf("workspace state:\n%s", out)
 	}
 	// A second clone of the same workspace is refused.
-	if _, err := populate(b, key, sandbox.Populate{Op: sandbox.OpClone, Branch: "symphony/x", BaseBranch: "main"}); err == nil {
+	if _, err := populate(b, key, sandbox.Populate{Op: sandbox.OpClone, Branch: "maestro/x", BaseBranch: "main"}); err == nil {
 		t.Fatal("an existing workspace was cloned over")
 	}
 	// A failed clone leaves nothing behind.
 	bad := "GH-" + token()[:8]
-	if res, err := populate(b, bad, sandbox.Populate{Op: sandbox.OpClone, Branch: "symphony/" + bad, BaseBranch: "no-such-branch"}); err == nil && res.ExitStatus == 0 {
+	if res, err := populate(b, bad, sandbox.Populate{Op: sandbox.OpClone, Branch: "maestro/" + bad, BaseBranch: "no-such-branch"}); err == nil && res.ExitStatus == 0 {
 		t.Fatal("a clone of a missing branch succeeded")
 	}
 	if res, _ := populate(b, bad, sandbox.Populate{Op: sandbox.OpProbe}); strings.TrimSpace(string(res.Stdout)) != "missing" {
@@ -226,7 +226,7 @@ func TestExportProducesABundleTheMirrorCanRead(t *testing.T) {
 	if !strings.HasPrefix(heads, fields[0]) {
 		t.Fatalf("bundle heads %q, exported head %s", heads, fields[0])
 	}
-	if out, _ := sh(t, b, key, sandbox.NetNone, `git status --porcelain; git log -1 --format=%s`); out != "symphony: uncommitted changes at end of turn" {
+	if out, _ := sh(t, b, key, sandbox.NetNone, `git status --porcelain; git log -1 --format=%s`); out != "maestro: uncommitted changes at end of turn" {
 		t.Fatalf("after export: %q", out)
 	}
 	// Exporting again without changes keeps the count and rewrites the bundle.
@@ -244,7 +244,7 @@ func TestExportProducesABundleTheMirrorCanRead(t *testing.T) {
 func TestFastForward(t *testing.T) {
 	b := box(t)
 	key := workspace(t, b)
-	branch := "symphony/" + key
+	branch := "maestro/" + key
 	ff := func() {
 		t.Helper()
 		if res, err := populate(b, key, sandbox.Populate{Op: sandbox.OpFastForward, Branch: branch}); err != nil || res.ExitStatus != 0 {
@@ -337,7 +337,7 @@ func TestNetworkGoesThroughTheProxyOnly(t *testing.T) {
 	// With internet access, an allowed host is tunnelled. Without it (a
 	// build machine behind its own proxy), the proxy still answers.
 	out, _ := sh(t, b, key, sandbox.NetHooks, connect("example.com:443"))
-	if os.Getenv("SYMPHONY_TEST_INTERNET") != "" && !strings.Contains(out, " 200 ") {
+	if os.Getenv("MAESTRO_TEST_INTERNET") != "" && !strings.Contains(out, " 200 ") {
 		t.Errorf("an allowed host was not tunnelled: %q", out)
 	}
 	if !strings.Contains(out, " 200 ") && !strings.Contains(out, " 502 ") {
@@ -381,7 +381,7 @@ func TestStepIsKilledWhenItsTimeIsUp(t *testing.T) {
 	}
 	// Nothing of the step is left running.
 	time.Sleep(500 * time.Millisecond)
-	out, _ := b.cli(ctx, "ps", "--quiet", "--filter", "label=symphony.step=verify", "--filter", "label=symphony.worker="+b.Worker)
+	out, _ := b.cli(ctx, "ps", "--quiet", "--filter", "label=maestro.step=verify", "--filter", "label=maestro.worker="+b.Worker)
 	if out != "" {
 		t.Fatalf("containers left: %s", out)
 	}
@@ -488,13 +488,13 @@ func TestAllowFile(t *testing.T) {
 // TestRealImage builds the image people get, which needs the internet, and
 // checks what the service relies on in it.
 func TestRealImage(t *testing.T) {
-	if os.Getenv("SYMPHONY_TEST_INTERNET") == "" {
-		t.Skip("set SYMPHONY_TEST_INTERNET=1 to build the real image")
+	if os.Getenv("MAESTRO_TEST_INTERNET") == "" {
+		t.Skip("set MAESTRO_TEST_INTERNET=1 to build the real image")
 	}
 	b := *box(t)
-	b.Image = "symphony-test-real:latest"
+	b.Image = "maestro-test-real:latest"
 	var out bytes.Buffer
-	if err := b.BuildImage(ctx, Build{Binary: filepath.Join(stateDir, "symphony"), Out: &out}); err != nil {
+	if err := b.BuildImage(ctx, Build{Binary: filepath.Join(stateDir, "maestro"), Out: &out}); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	run := func(args ...string) string {
@@ -509,8 +509,8 @@ func TestRealImage(t *testing.T) {
 	if got := run("claude", "--version"); !strings.HasPrefix(got, ClaudeVersion+" ") {
 		t.Errorf("claude --version = %q, want %s", got, ClaudeVersion)
 	}
-	if got := run("symphony", "version"); !strings.HasPrefix(got, "symphony ") {
-		t.Errorf("symphony version = %q", got)
+	if got := run("maestro", "version"); !strings.HasPrefix(got, "maestro ") {
+		t.Errorf("maestro version = %q", got)
 	}
 	if got := run("sh", "-c", "git --version && id -u && test -w /workspace -a -w /claude -a -w /handoff && echo writable"); !strings.Contains(got, "10001\nwritable") {
 		t.Errorf("image contents: %q", got)

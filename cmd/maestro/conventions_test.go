@@ -63,7 +63,7 @@ func TestConventionsCommand(t *testing.T) {
 	if code := run([]string{"conventions", "apply", "dotnet", "--to", dir}, &out, &errOut); code != 0 {
 		t.Fatalf("apply: %d %s", code, errOut.String())
 	}
-	for _, want := range []string{"wrote  Directory.Build.props", "git push", "conventions-dotnet", "symphony conventions enable dotnet", "1. Check that the project", "4. Switch the pack on"} {
+	for _, want := range []string{"wrote  Directory.Build.props", "git push", "conventions-dotnet", "maestro conventions enable dotnet", "1. Check that the project", "4. Switch the pack on"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("apply output lacks %q:\n%s", want, out.String())
 		}
@@ -93,7 +93,7 @@ func TestConventionsEnableChangesTheSettingsFileSafely(t *testing.T) {
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", info.Mode())
 	}
-	if !strings.Contains(out.String(), "symphony image") || !strings.Contains(out.String(), ".NET SDK") {
+	if !strings.Contains(out.String(), "maestro image") || !strings.Contains(out.String(), ".NET SDK") {
 		t.Errorf("output:\n%s", out.String())
 	}
 	out.Reset()

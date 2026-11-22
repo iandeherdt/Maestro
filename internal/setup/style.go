@@ -45,7 +45,7 @@ func Terminal(in io.Reader, out io.Writer) *UI {
 	if !okIn || !okOut || !term.IsTerminal(int(fin.Fd())) || !term.IsTerminal(int(fout.Fd())) {
 		return u
 	}
-	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" || os.Getenv("SYMPHONY_PLAIN") != "" {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" || os.Getenv("MAESTRO_PLAIN") != "" {
 		return u
 	}
 	u.Styled = true

@@ -78,7 +78,7 @@ func TestCheckRejectsBadTemplate(t *testing.T) {
 
 func TestVersion(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := run([]string{"version"}, &out, &errOut); code != 0 || out.String() != "symphony dev\n" {
+	if code := run([]string{"version"}, &out, &errOut); code != 0 || out.String() != "maestro dev\n" {
 		t.Fatalf("exit %d, output %q", code, out.String())
 	}
 }
@@ -94,7 +94,7 @@ func TestCheckFindsTheFileSetupWrote(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
-	fromSetup := filepath.Join(dir, "config", "symphony", "WORKFLOW.md")
+	fromSetup := filepath.Join(dir, "config", "maestro", "WORKFLOW.md")
 	if err := os.MkdirAll(filepath.Dir(fromSetup), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -112,5 +112,30 @@ func TestCheckFindsTheFileSetupWrote(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"check"}, &out, &errOut); code != 1 {
 		t.Fatalf("the local file was not used: exit %d, output %q", code, out.String())
+	}
+}
+
+// An installation made when the command was called symphony keeps its
+// directory; a new one gets "maestro", and "maestro" wins when both exist.
+func TestConfigDirKeepsAnOldInstallation(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the configuration directory is redirected through XDG_CONFIG_HOME")
+	}
+	base := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", base)
+	if got, err := configDir(); err != nil || got != filepath.Join(base, "maestro") {
+		t.Fatalf("fresh: %q, %v", got, err)
+	}
+	if err := os.Mkdir(filepath.Join(base, "symphony"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := configDir(); got != filepath.Join(base, "symphony") {
+		t.Fatalf("old installation: %q", got)
+	}
+	if err := os.Mkdir(filepath.Join(base, "maestro"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := configDir(); got != filepath.Join(base, "maestro") {
+		t.Fatalf("both: %q", got)
 	}
 }

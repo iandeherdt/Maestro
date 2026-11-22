@@ -1,5 +1,5 @@
 # Shared by the scripts next to it. Not a rule by itself.
-# Inside the Symphony sandbox the home directory does not survive a step,
+# Inside the Maestro sandbox the home directory does not survive a step,
 # so packages and the SDK's own files are kept in the workspace.
 if [ -d /workspace ] && [ -w /workspace ]; then
     export NUGET_PACKAGES=/workspace/.cache/nuget
@@ -12,7 +12,7 @@ export MSBUILDDISABLENODEREUSE=1
 
 if ! command -v dotnet >/dev/null 2>&1; then
     echo "conventions: the dotnet command is missing." >&2
-    echo "In the Symphony sandbox: run \`symphony image\` again, it adds the .NET SDK when this pack is switched on." >&2
+    echo "In the Maestro sandbox: run \`maestro image\` again, it adds the .NET SDK when this pack is switched on." >&2
     exit 1
 fi
 

@@ -142,7 +142,7 @@ func testConfig() *config.Config {
 		Hooks:     config.Hooks{BeforeRun: "make gen", AfterRun: "make clean", TimeoutMS: 60000},
 		Agent:     config.Agent{MaxConcurrentAgents: 2, MaxTurns: 3, MaxRetryBackoffMS: 300000},
 		Claude:    config.Claude{StallTimeoutMS: 300000},
-		Publish:   config.Publish{BranchPrefix: "symphony/"},
+		Publish:   config.Publish{BranchPrefix: "maestro/"},
 		Budget:    config.Budget{MaxFailureAttempts: 3, MaxRunsPerDay: 50, QuotaBackoffMS: 1800000},
 		Worker:    config.Worker{Name: "linux"},
 	}
@@ -200,9 +200,9 @@ func (r *rig) lastSandboxStep() string {
 }
 
 func TestHappyPathPublishes(t *testing.T) {
-	r := newRig(t, script{text: "All done.\nSYMPHONY_STATUS: done\nImplemented.", verifyOK: true})
+	r := newRig(t, script{text: "All done.\nMAESTRO_STATUS: done\nImplemented.", verifyOK: true})
 	out := r.run(orchestrator.Attempt{})
-	if out.Kind != orchestrator.Published || out.Publish.PRNumber != 42 || out.Publish.Branch != "symphony/GH-1" {
+	if out.Kind != orchestrator.Published || out.Publish.PRNumber != 42 || out.Publish.Branch != "maestro/GH-1" {
 		t.Fatalf("outcome = %+v", out)
 	}
 	want := "PreparingWorkspace,BuildingPrompt,LaunchingAgentProcess,Exporting,Verifying,Publishing,Finishing"
@@ -221,7 +221,7 @@ func TestHappyPathPublishes(t *testing.T) {
 
 func TestAgentCannotSkipTheVerifyGate(t *testing.T) {
 	// The agent claims success every time. Verify disagrees every time.
-	claim := script{text: "Tests pass, verified, safe to publish.\nSYMPHONY_STATUS: done"}
+	claim := script{text: "Tests pass, verified, safe to publish.\nMAESTRO_STATUS: done"}
 	r := newRig(t, claim, claim, claim)
 	out := r.run(orchestrator.Attempt{})
 	if out.Kind != orchestrator.Rejected || out.Category != VerifyFailed {
@@ -255,12 +255,12 @@ func TestDeclaredStatuses(t *testing.T) {
 		cat      string
 		turnsRun int
 	}{
-		"blocked":               {[]script{{text: "Cannot.\nSYMPHONY_STATUS: blocked\nNo access."}}, orchestrator.Failed, DeclaredBlocked, 1},
+		"blocked":               {[]script{{text: "Cannot.\nMAESTRO_STATUS: blocked\nNo access."}}, orchestrator.Failed, DeclaredBlocked, 1},
 		"no changes and done":   {[]script{{text: "Nothing to do.", noChanges: true}}, orchestrator.Failed, NoChanges, 1},
-		"continue then publish": {[]script{{text: "SYMPHONY_STATUS: continue"}, {text: "SYMPHONY_STATUS: done", verifyOK: true}}, orchestrator.Published, "", 2},
-		"continue forever": {[]script{{text: "SYMPHONY_STATUS: continue"}, {text: "SYMPHONY_STATUS: continue"}, {text: "SYMPHONY_STATUS: continue"}},
+		"continue then publish": {[]script{{text: "MAESTRO_STATUS: continue"}, {text: "MAESTRO_STATUS: done", verifyOK: true}}, orchestrator.Published, "", 2},
+		"continue forever": {[]script{{text: "MAESTRO_STATUS: continue"}, {text: "MAESTRO_STATUS: continue"}, {text: "MAESTRO_STATUS: continue"}},
 			orchestrator.Failed, MaxTurnsExhausted, 3},
-		"no changes, continue, then work": {[]script{{text: "SYMPHONY_STATUS: continue", noChanges: true}, {text: "ok", verifyOK: true}},
+		"no changes, continue, then work": {[]script{{text: "MAESTRO_STATUS: continue", noChanges: true}, {text: "ok", verifyOK: true}},
 			orchestrator.Published, "", 2},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -278,14 +278,14 @@ func TestDeclaredStatuses(t *testing.T) {
 
 func TestDeclaredStatusParsing(t *testing.T) {
 	for text, want := range map[string]string{
-		"":                                   "done",
-		"no marker":                          "done",
-		"SYMPHONY_STATUS: continue":          "continue",
-		"x\n  SYMPHONY_STATUS: blocked  \ny": "blocked",
-		"SYMPHONY_STATUS: continue\nlater\nSYMPHONY_STATUS: done": "done",
-		"I would say SYMPHONY_STATUS: blocked here":               "done", // not on its own line
-		"SYMPHONY_STATUS: published":                              "done", // not a known value
-		"SYMPHONY_STATUS: done\r\n":                               "done",
+		"":                                  "done",
+		"no marker":                         "done",
+		"MAESTRO_STATUS: continue":          "continue",
+		"x\n  MAESTRO_STATUS: blocked  \ny": "blocked",
+		"MAESTRO_STATUS: continue\nlater\nMAESTRO_STATUS: done": "done",
+		"I would say MAESTRO_STATUS: blocked here":              "done", // not on its own line
+		"MAESTRO_STATUS: published":                             "done", // not a known value
+		"MAESTRO_STATUS: done\r\n":                              "done",
 	} {
 		if got := DeclaredStatus(text); got != want {
 			t.Errorf("%q: %s, want %s", text, got, want)
@@ -387,7 +387,7 @@ func TestWorkspaceAndHookFailures(t *testing.T) {
 
 	r = newRig(t, script{text: "done", verifyOK: true})
 	r.sb.Handler = func(_ context.Context, req sandbox.Request) (sandbox.Result, error) {
-		if req.Env["SYMPHONY_HOOK"] == workspace.BeforeRun {
+		if req.Env["MAESTRO_HOOK"] == workspace.BeforeRun {
 			return sandbox.Result{ExitStatus: 1}, nil
 		}
 		return sandboxHandler(context.Background(), req)
@@ -444,8 +444,8 @@ func TestUnconfiguredWorkerRefusesToStart(t *testing.T) {
 
 func TestEndToEndWithScheduler(t *testing.T) {
 	r := newRig(t,
-		script{text: "first try\nSYMPHONY_STATUS: done"},                  // verify fails, turn 2
-		script{text: "second try\nSYMPHONY_STATUS: done", verifyOK: true}, // publishes
+		script{text: "first try\nMAESTRO_STATUS: done"},                  // verify fails, turn 2
+		script{text: "second try\nMAESTRO_STATUS: done", verifyOK: true}, // publishes
 	)
 	todo := r.is
 	todo.State = "Todo"
@@ -496,9 +496,9 @@ func TestEndToEndWithScheduler(t *testing.T) {
 func TestLostSessionRestartsOnceWithTheFullPrompt(t *testing.T) {
 	lost := &AgentError{Category: SessionUnknown, Msg: "gone"}
 	r := newRig(t,
-		script{text: "SYMPHONY_STATUS: continue"},
+		script{text: "MAESTRO_STATUS: continue"},
 		script{err: lost},
-		script{text: "SYMPHONY_STATUS: done", verifyOK: true})
+		script{text: "MAESTRO_STATUS: done", verifyOK: true})
 	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published {
 		t.Fatalf("outcome = %+v", out)
 	}
@@ -516,7 +516,7 @@ func TestLostSessionRestartsOnceWithTheFullPrompt(t *testing.T) {
 	}
 
 	// A second loss in the same attempt, and a loss on a first turn, fail.
-	r = newRig(t, script{text: "SYMPHONY_STATUS: continue"}, script{err: lost}, script{err: lost})
+	r = newRig(t, script{text: "MAESTRO_STATUS: continue"}, script{err: lost}, script{err: lost})
 	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || out.Category != SessionUnknown || len(r.f.prompts) != 3 {
 		t.Fatalf("outcome = %+v after %d turns", out, len(r.f.prompts))
 	}

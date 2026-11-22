@@ -1,4 +1,4 @@
-// Conventions of this repository. Written by `symphony conventions apply typescript`.
+// Conventions of this repository. Written by `maestro conventions apply typescript`.
 // The agent may not change this file; change it by hand when a rule has to change.
 import js from "@eslint/js";
 import jsxA11y from "eslint-plugin-jsx-a11y";

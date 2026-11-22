@@ -33,7 +33,7 @@ func writeServiceInfo(stateDir string, addr net.Addr) error {
 }
 
 // notRunning is the answer when no service can be reached.
-const notRunning = "Symphony is not running on this machine. Start it with: symphony run"
+const notRunning = "Maestro is not running on this machine. Start it with: maestro run"
 
 // reach calls the running service. Only a loopback address from the
 // service's own file is ever contacted.
@@ -133,10 +133,10 @@ func since(stamp *string, now time.Time) string {
 }
 
 func printStatus(w io.Writer, s statusJSON, now time.Time) {
-	fmt.Fprintf(w, "Symphony is running (worker %q).\n", plain(s.Worker, 40))
+	fmt.Fprintf(w, "Maestro is running (worker %q).\n", plain(s.Worker, 40))
 	switch {
 	case s.Paused:
-		fmt.Fprintf(w, "PAUSED: %s\n  No new tickets are started. Continue with: symphony resume\n", plain(s.PauseReason, 200))
+		fmt.Fprintf(w, "PAUSED: %s\n  No new tickets are started. Continue with: maestro resume\n", plain(s.PauseReason, 200))
 	case s.QuotaUntil != nil:
 		fmt.Fprintf(w, "Waiting for the Claude usage limit to reset (%s).\n", since(s.QuotaUntil, now))
 	}
@@ -166,7 +166,7 @@ func printStatus(w io.Writer, s statusJSON, now time.Time) {
 		(time.Duration(s.Budget.Seconds) * time.Second).String())
 }
 
-// runControl is `symphony status`, `pause` and `resume`.
+// runControl is `maestro status`, `pause` and `resume`.
 func runControl(cmd string, args []string, stdout, stderr io.Writer) int {
 	// For pause, the words after the flags are the reason, so the settings
 	// file can only be named with --file there.
@@ -195,7 +195,7 @@ func runControl(cmd string, args []string, stdout, stderr io.Writer) int {
 			return report(stderr, err)
 		}
 		fmt.Fprintln(stdout, "Paused. Tickets that are running finish; no new ones are started.")
-		fmt.Fprintln(stdout, "The pause stays, also after a restart, until you run: symphony resume")
+		fmt.Fprintln(stdout, "The pause stays, also after a restart, until you run: maestro resume")
 	case "resume":
 		if err := reach(ctx, stateDir, http.MethodPost, "/api/v1/resume", nil, nil); err != nil {
 			return report(stderr, err)
@@ -232,10 +232,10 @@ func unitFor(in *install) (*background.Unit, error) {
 		WorkflowFile: file, LogFile: filepath.Join(in.cfg.Budget.StateDir, "service.log"), Home: home, UID: os.Getuid()}, nil
 }
 
-// runBackground is `symphony service install` and `symphony service uninstall`.
+// runBackground is `maestro service install` and `maestro service uninstall`.
 func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (args[0] != "install" && args[0] != "uninstall") {
-		fmt.Fprintln(stderr, "usage: symphony service install|uninstall [--dir DIR] [--file WORKFLOW.md]")
+		fmt.Fprintln(stderr, "usage: maestro service install|uninstall [--dir DIR] [--file WORKFLOW.md]")
 		return 2
 	}
 	dir, explicit, ok := parse("service "+args[0], args[1:], stderr)
@@ -262,7 +262,7 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 			return report(stderr, err)
 		}
 		fmt.Fprintf(stdout, "The background service is stopped and %s is removed.\n", u.Path())
-		fmt.Fprintln(stdout, "Your settings, the workspaces and the Claude login are untouched. `symphony run` still works.")
+		fmt.Fprintln(stdout, "Your settings, the workspaces and the Claude login are untouched. `maestro run` still works.")
 		return 0
 	}
 	if err := in.docker(ctx); err != nil {
@@ -272,14 +272,14 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		return report(stderr, err)
 	}
 	if !u.Installed() && alive(ctx, in.cfg.Budget.StateDir) {
-		fmt.Fprintln(stderr, "Symphony is running in a terminal right now. Stop it there with Ctrl-C, then run this command again.")
+		fmt.Fprintln(stderr, "Maestro is running in a terminal right now. Stop it there with Ctrl-C, then run this command again.")
 		return 1
 	}
 	text, err := u.Content()
 	if err != nil {
 		return report(stderr, err)
 	}
-	ui.Say("This makes Symphony run in the background, as you, without a terminal.")
+	ui.Say("This makes Maestro run in the background, as you, without a terminal.")
 	ui.Say("It starts when you log in and is started again if it stops. The agent still works in Docker,")
 	ui.Say("so Docker has to be running; until it is, the service retries every 30 seconds.")
 	ui.Say("")
@@ -313,7 +313,7 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		ui.Say("  Its log:        journalctl --user -u %s -f", u.Label())
 		ui.Say("  To keep it running while you are logged out: sudo loginctl enable-linger $USER")
 	}
-	ui.Say("  What it does:   symphony status")
-	ui.Say("  To remove it:   symphony service uninstall")
+	ui.Say("  What it does:   maestro status")
+	ui.Say("  To remove it:   maestro service uninstall")
 	return 0
 }

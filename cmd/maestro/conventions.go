@@ -17,13 +17,13 @@ import (
 )
 
 const conventionsUsage = `usage:
-  symphony conventions                      list the rule packs
-  symphony conventions show PACK            the rules of a pack and what enforces each
-  symphony conventions apply PACK           write the pack's files into the checkout you are in
+  maestro conventions                      list the rule packs
+  maestro conventions show PACK            the rules of a pack and what enforces each
+  maestro conventions apply PACK           write the pack's files into the checkout you are in
         [--to DIR] [--replace]
-  symphony conventions enable PACK          switch the pack on in this machine's settings file
+  maestro conventions enable PACK          switch the pack on in this machine's settings file
         [--file WORKFLOW.md]
-  symphony conventions disable PACK         switch it off again`
+  maestro conventions disable PACK         switch it off again`
 
 // runConventions is the rule packs' command (SPEC 23).
 func runConventions(args []string, stdout, stderr io.Writer) int {
@@ -38,8 +38,8 @@ func runConventions(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "  %-12s %s, %d rules\n", n, p.Title, len(p.Rules))
 		}
 		fmt.Fprintln(stdout)
-		fmt.Fprintln(stdout, "See the rules of one:    symphony conventions show PACK")
-		fmt.Fprintln(stdout, "Add one to a project:    symphony conventions apply PACK    (run it inside a checkout of the project)")
+		fmt.Fprintln(stdout, "See the rules of one:    maestro conventions show PACK")
+		fmt.Fprintln(stdout, "Add one to a project:    maestro conventions apply PACK    (run it inside a checkout of the project)")
 		return 0
 	}
 	if len(args) < 2 {
@@ -95,7 +95,7 @@ func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writ
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return report(stderr, explain("%s is not a checkout of a Git repository.\n"+
 			"Go into a checkout of the project the conventions are for, and run this again:\n"+
-			"  git clone <the project's address>\n  cd <the project>\n  symphony conventions apply %s", dir, p.Name))
+			"  git clone <the project's address>\n  cd <the project>\n  maestro conventions apply %s", dir, p.Name))
 	}
 	rep, err := p.Apply(dir, *replace)
 	if err != nil {
@@ -107,7 +107,7 @@ func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writ
 			fmt.Fprintln(stderr, "  "+n)
 		}
 		fmt.Fprintln(stderr, "Look at what they hold. To let the pack's version take their place, run:")
-		fmt.Fprintf(stderr, "  symphony conventions apply %s --replace\n", p.Name)
+		fmt.Fprintf(stderr, "  maestro conventions apply %s --replace\n", p.Name)
 		fmt.Fprintln(stderr, "Git keeps the old version, so you can compare with `git diff` before you commit.")
 		return 1
 	}
@@ -141,7 +141,7 @@ func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writ
 	next("On GitHub, make the check required: the repository's Settings, Branches (or Rules),\n"+
 		"   protect the main branch, require status checks, and pick %s.\n"+
 		"   From then on nothing can be merged that breaks a rule.", p.Check)
-	next("Switch the pack on, on every machine that runs agents for this project:\n     symphony conventions enable %s", p.Name)
+	next("Switch the pack on, on every machine that runs agents for this project:\n     maestro conventions enable %s", p.Name)
 	return 0
 }
 
@@ -190,7 +190,7 @@ func switchConventions(p *conventions.Pack, on bool, args []string, stdout, stde
 	path := workflowPath(explicit)
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return report(stderr, explain("%v\nThe settings file is %s. Run `symphony setup` if you have not yet.", err, path))
+		return report(stderr, explain("%v\nThe settings file is %s. Run `maestro setup` if you have not yet.", err, path))
 	}
 	home, _ := os.UserHomeDir()
 	load := func(file string) (*config.Config, error) {
@@ -245,7 +245,7 @@ func switchConventions(p *conventions.Pack, on bool, args []string, stdout, stde
 	fmt.Fprintln(stdout, "  - refuses any change to the rule files")
 	fmt.Fprintln(stdout, "A running service picks this up by itself.")
 	if len(p.Image) > 0 {
-		fmt.Fprintf(stdout, "\nOne step is left: the sandbox image needs %s. Build it again:\n  symphony image\n", p.ImageNote)
+		fmt.Fprintf(stdout, "\nOne step is left: the sandbox image needs %s. Build it again:\n  maestro image\n", p.ImageNote)
 	}
 	return 0
 }

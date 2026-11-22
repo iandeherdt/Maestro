@@ -47,7 +47,7 @@ RUN addgroup -g 10001 agent \
     'echo "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"Done.\",\"session_id\":\"$sid\"}"' \
     > /usr/local/bin/claude \
  && chmod 755 /usr/local/bin/claude
-COPY symphony /usr/local/bin/symphony
+COPY maestro /usr/local/bin/maestro
 `
 
 // fakeHub is GitHub as far as the service uses it for one issue.
@@ -88,7 +88,7 @@ func (h *fakeHub) label(actor, name string) {
 }
 
 func (h *fakeHub) head() string {
-	out, _ := exec.Command("git", "--git-dir", h.remote, "rev-parse", "refs/heads/symphony/GH-7").Output()
+	out, _ := exec.Command("git", "--git-dir", h.remote, "rev-parse", "refs/heads/maestro/GH-7").Output()
 	return strings.TrimSpace(string(out))
 }
 
@@ -209,13 +209,13 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // containers, against a stand-in for GitHub and a stand-in for Claude Code.
 func TestServiceTakesAnIssueToAPullRequest(t *testing.T) {
 	engine := "docker"
-	if e := os.Getenv("SYMPHONY_TEST_ENGINE"); e != "" {
+	if e := os.Getenv("MAESTRO_TEST_ENGINE"); e != "" {
 		engine = e
 	}
 	if exec.Command(engine, "info").Run() != nil {
 		t.Skip("no container engine")
 	}
-	root, err := os.MkdirTemp("", "symphony-e2e-")
+	root, err := os.MkdirTemp("", "maestro-e2e-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestServiceTakesAnIssueToAPullRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(hub.serve))
 	defer srv.Close()
 
-	// What `symphony setup` leaves behind.
+	// What `maestro setup` leaves behind.
 	dir := filepath.Join(root, "config")
 	st, err := setup.LoadState(dir)
 	if err != nil {
@@ -269,7 +269,7 @@ workspace:
   repo: ian/app
 sandbox:
   backend: `+engine+`
-  image: symphony-e2e-sandbox:latest
+  image: maestro-e2e-sandbox:latest
   memory_max: 512M
   cpu_quota: 100%
   tasks_max: 256
@@ -292,7 +292,7 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(root, "symphony")
+	bin := filepath.Join(root, "maestro")
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -307,7 +307,7 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 
 	// Without a login the service says what to do and starts nothing.
 	err = serve(ctx, in, gh, log, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "symphony login") {
+	if err == nil || !strings.Contains(err.Error(), "maestro login") {
 		t.Fatalf("without a login: %v", err)
 	}
 	if in.box.ProxyRunning(ctx, "agent") {
@@ -349,7 +349,7 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 	// The commands of another terminal reach the running service.
 	var errb bytes.Buffer
 	var statusOut bytes.Buffer
-	if code := run([]string{"status", "--dir", dir, workflow}, &statusOut, &errb); code != 0 || !strings.Contains(statusOut.String(), "Symphony is running (worker") {
+	if code := run([]string{"status", "--dir", dir, workflow}, &statusOut, &errb); code != 0 || !strings.Contains(statusOut.String(), "Maestro is running (worker") {
 		t.Errorf("status: %d %s %s", code, statusOut.String(), errb.String())
 	}
 	if code := run([]string{"pause", "--dir", dir, "--file", workflow, "back", "on", "monday"}, io.Discard, &errb); code != 0 {
@@ -389,16 +389,16 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 	if hub.pull == nil || hub.pull["draft"] != false || hub.pull["base"].(map[string]any)["ref"] != "main" {
 		t.Fatalf("pull request: %v", hub.pull)
 	}
-	if got := gitIn(t, root, "--git-dir", remote, "show", "refs/heads/symphony/GH-7:agent.txt"); got != "made by the agent" {
+	if got := gitIn(t, root, "--git-dir", remote, "show", "refs/heads/maestro/GH-7:agent.txt"); got != "made by the agent" {
 		t.Errorf("the pushed branch holds %q", got)
 	}
-	if got := gitIn(t, root, "--git-dir", remote, "log", "-1", "--format=%an <%ae>", "refs/heads/symphony/GH-7"); got != "sym-e2e[bot] <sym-e2e[bot]@users.noreply.github.com>" {
+	if got := gitIn(t, root, "--git-dir", remote, "log", "-1", "--format=%an <%ae>", "refs/heads/maestro/GH-7"); got != "sym-e2e[bot] <sym-e2e[bot]@users.noreply.github.com>" {
 		t.Errorf("commit author = %q", got)
 	}
 	if len(hub.labels) != 2 {
 		t.Errorf("labels = %v", hub.labels)
 	}
-	if !strings.Contains(said.String(), "Symphony is running for ian/app") || !strings.Contains(said.String(), "status:todo  run:"+worker) {
+	if !strings.Contains(said.String(), "Maestro is running for ian/app") || !strings.Contains(said.String(), "status:todo  run:"+worker) {
 		t.Errorf("start message:\n%s", said.String())
 	}
 	if _, err := os.Stat(filepath.Join(root, "state", "audit", "GH-7.jsonl")); err != nil {
@@ -423,12 +423,12 @@ func TestOpenExplainsWhatIsMissing(t *testing.T) {
 	}
 	// A file from before the Docker sandbox existed.
 	_, err := open(dir, write("macos-vm"), nil)
-	if err == nil || !strings.Contains(err.Error(), "symphony setup") || !strings.Contains(err.Error(), "WORKFLOW.md.old") {
+	if err == nil || !strings.Contains(err.Error(), "maestro setup") || !strings.Contains(err.Error(), "WORKFLOW.md.old") {
 		t.Errorf("old backend: %v", err)
 	}
 	// Setup was never run here.
 	_, err = open(dir, write("docker"), nil)
-	if err == nil || !strings.Contains(err.Error(), "Run `symphony setup` first") {
+	if err == nil || !strings.Contains(err.Error(), "Run `maestro setup` first") {
 		t.Errorf("no setup state: %v", err)
 	}
 	// Setup was done for another repository.
@@ -445,14 +445,14 @@ func TestOpenExplainsWhatIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.box.Worker != "mac" || in.box.Image != "symphony-sandbox:latest" || in.box.Memory != "6g" || in.box.CPUs != "3.00" ||
+	if in.box.Worker != "mac" || in.box.Image != "maestro-sandbox:latest" || in.box.Memory != "6g" || in.box.CPUs != "3.00" ||
 		in.box.PIDs != 2048 || in.box.BotName != "sym[bot]" || in.box.MirrorDir != filepath.Join(dir, "state", "mirror") ||
 		in.box.HandoffDir != filepath.Join(dir, "ws", ".handoff") {
 		t.Errorf("box = %+v", in.box)
 	}
 	// No file at all.
 	var errb bytes.Buffer
-	if code := run([]string{"run", "--dir", dir, filepath.Join(dir, "missing.md")}, io.Discard, &errb); code != 1 || !strings.Contains(errb.String(), "symphony setup") {
+	if code := run([]string{"run", "--dir", dir, filepath.Join(dir, "missing.md")}, io.Discard, &errb); code != 1 || !strings.Contains(errb.String(), "maestro setup") {
 		t.Errorf("missing file: %d %s", code, errb.String())
 	}
 	for quota, want := range map[string]string{"300%": "3.00", "50%": "0.50", "125%": "1.25", "x": ""} {

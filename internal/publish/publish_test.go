@@ -74,7 +74,7 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	case key == "GET /repos/ian/app":
 		json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
 	case key == "GET /repos/ian/app/pulls":
-		if r.URL.Query().Get("head") != "ian:symphony/GH-7-abc" || r.URL.Query().Get("state") != "open" {
+		if r.URL.Query().Get("head") != "ian:maestro/GH-7-abc" || r.URL.Query().Get("state") != "open" {
 			w.WriteHeader(422)
 			return
 		}
@@ -87,7 +87,7 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	case key == "POST /repos/ian/app/git/blobs":
 		w.WriteHeader(201)
 		json.NewEncoder(w).Encode(map[string]any{"sha": blobSHA})
-	case key == "GET /repos/ian/app/git/ref/heads/symphony/screenshots":
+	case key == "GET /repos/ian/app/git/ref/heads/maestro/screenshots":
 		if h.shotTip == "" {
 			w.WriteHeader(404)
 			return
@@ -101,7 +101,7 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	case key == "POST /repos/ian/app/git/commits":
 		w.WriteHeader(201)
 		json.NewEncoder(w).Encode(map[string]any{"sha": commitSHA})
-	case key == "POST /repos/ian/app/git/refs" || key == "PATCH /repos/ian/app/git/refs/heads/symphony/screenshots":
+	case key == "POST /repos/ian/app/git/refs" || key == "PATCH /repos/ian/app/git/refs/heads/maestro/screenshots":
 		if h.refuse > 0 {
 			h.refuse--
 			w.WriteHeader(422)
@@ -194,12 +194,12 @@ func newLab(t *testing.T) *lab {
 	l.cfg = &config.Config{
 		Tracker:   config.Tracker{Kind: "github", Provider: map[string]any{"repo": "ian/app"}},
 		Workspace: config.Workspace{Repo: "ian/app", BaseBranch: "main"},
-		Publish:   config.Publish{BranchPrefix: "symphony/", DraftUntilGreen: true, ChecksTimeoutMS: 600000},
+		Publish:   config.Publish{BranchPrefix: "maestro/", DraftUntilGreen: true, ChecksTimeoutMS: 600000},
 		Policy:    config.Policy{MaxChangedFiles: 100, MaxDiffBytes: 1 << 20, MaxFileBytes: 1 << 20, SecretScan: true},
 		Verify:    config.Verify{Command: "npm test"},
 		Worker:    config.Worker{Name: "linux"},
 	}
-	l.ws = workspace.Workspace{Key: "GH-7-abc", Branch: "symphony/GH-7-abc", BaseSHA: l.base}
+	l.ws = workspace.Workspace{Key: "GH-7-abc", Branch: "maestro/GH-7-abc", BaseSHA: l.base}
 	l.is = issue.Issue{ID: "I_7", Identifier: "GH-7", Title: "Fix the login page"}
 	l.pub = &Publisher{
 		Config:     func() *config.Config { return l.cfg },
@@ -231,7 +231,7 @@ func TestPublishOpensAPullRequest(t *testing.T) {
 	if err != nil || rej != nil {
 		t.Fatalf("rejection %+v, error %v", rej, err)
 	}
-	if rec.PRNumber != 31 || rec.HeadSHA != head || rec.Branch != "symphony/GH-7-abc" || rec.IssueID != "I_7" ||
+	if rec.PRNumber != 31 || rec.HeadSHA != head || rec.Branch != "maestro/GH-7-abc" || rec.IssueID != "I_7" ||
 		rec.Identifier != "GH-7" || !rec.ChecksDeadline.Equal(time.Date(2026, 11, 21, 12, 10, 0, 0, time.UTC)) {
 		t.Errorf("record %+v", rec)
 	}
@@ -245,7 +245,7 @@ func TestPublishOpensAPullRequest(t *testing.T) {
 		t.Errorf("requests %v", l.hub.requests)
 	}
 	created := l.hub.bodies[len(l.hub.bodies)-1]
-	if created["title"] != "GH-7: Fix the login page" || created["head"] != "symphony/GH-7-abc" || created["base"] != "main" || created["draft"] != true {
+	if created["title"] != "GH-7: Fix the login page" || created["head"] != "maestro/GH-7-abc" || created["base"] != "main" || created["draft"] != true {
 		t.Errorf("created with %v", created)
 	}
 	text := created["body"].(string)
@@ -265,7 +265,7 @@ func TestSecondPublishUpdatesTheSamePullRequest(t *testing.T) {
 	}
 	l.hub.pulls = []map[string]any{
 		{"number": 99, "head": map[string]any{"ref": "other"}, "base": map[string]any{"ref": "main"}},
-		{"number": 31, "head": map[string]any{"ref": "symphony/GH-7-abc"}, "base": map[string]any{"ref": "main"}},
+		{"number": 31, "head": map[string]any{"ref": "maestro/GH-7-abc"}, "base": map[string]any{"ref": "main"}},
 	}
 	head := l.change("b.go", "package a\n")
 	rec, rej, err := l.pub.Publish(ctx, l.is, l.ws, passed)
@@ -321,7 +321,7 @@ func TestImportRejection(t *testing.T) {
 }
 
 func TestBranchMustBeUnderThePrefix(t *testing.T) {
-	for _, branch := range []string{"main", "symphony/", "feature/x", "symphony/../main", "symphonyx"} {
+	for _, branch := range []string{"main", "maestro/", "feature/x", "maestro/../main", "maestrox"} {
 		l := newLab(t)
 		l.change("a.go", "package a\n")
 		l.ws.Branch = branch
@@ -353,7 +353,7 @@ func TestDefaultBaseBranchIsLookedUp(t *testing.T) {
 
 func TestExistingPullRequestWithAnotherBaseIsAnError(t *testing.T) {
 	l := newLab(t)
-	l.hub.pulls = []map[string]any{{"number": 31, "head": map[string]any{"ref": "symphony/GH-7-abc"}, "base": map[string]any{"ref": "release"}}}
+	l.hub.pulls = []map[string]any{{"number": 31, "head": map[string]any{"ref": "maestro/GH-7-abc"}, "base": map[string]any{"ref": "release"}}}
 	l.change("a.go", "package a\n")
 	rec, _, err := l.pub.Publish(ctx, l.is, l.ws, passed)
 	if err == nil || rec != nil || l.hub.count("PATCH /repos/ian/app/pulls/31") != 0 {
@@ -683,7 +683,7 @@ func (g *gh) ForgetPush(_ context.Context, key string) error {
 
 func pullOn(n int, state, merged, login, repo string) map[string]any {
 	p := map[string]any{"number": n, "state": state, "user": map[string]any{"login": login},
-		"head": map[string]any{"ref": "symphony/GH-7", "sha": headSHA, "repo": map[string]any{"full_name": repo}}}
+		"head": map[string]any{"ref": "maestro/GH-7", "sha": headSHA, "repo": map[string]any{"full_name": repo}}}
 	if merged != "" {
 		p["merged_at"] = merged
 	}
@@ -732,7 +732,7 @@ func newGH(t *testing.T) (*gh, *Publisher) {
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{"commit": map[string]any{"committer": map[string]any{"date": g.headAt}}})
-		case "DELETE /repos/ian/app/git/refs/heads/symphony/GH-7":
+		case "DELETE /repos/ian/app/git/refs/heads/maestro/GH-7":
 			g.deleted = append(g.deleted, r.URL.Path)
 			w.WriteHeader(g.delCode)
 		default:
@@ -741,7 +741,7 @@ func newGH(t *testing.T) (*gh, *Publisher) {
 	}))
 	t.Cleanup(srv.Close)
 	cfg := &config.Config{Workspace: config.Workspace{Repo: "ian/app", BaseBranch: "main"},
-		Publish: config.Publish{BranchPrefix: "symphony/", ReworkOnChangesRequested: true},
+		Publish: config.Publish{BranchPrefix: "maestro/", ReworkOnChangesRequested: true},
 		Tracker: config.Tracker{AllowedCommenters: []string{"Ian"}}}
 	p := &Publisher{Config: func() *config.Config { return cfg }, APIURL: srv.URL, Mirror: g, BotLogin: "sym[bot]",
 		Token: func(context.Context) (string, error) { return token, nil }}
@@ -781,7 +781,7 @@ func TestReviewStates(t *testing.T) {
 		if err != nil || st.State != tc.want || st.PRNumber != tc.number {
 			t.Errorf("%s: %+v, error %v", name, st, err)
 		}
-		if q := g.queries[0]; !strings.Contains(q, "head=ian%3Asymphony%2FGH-7") || !strings.Contains(q, "state=all") {
+		if q := g.queries[0]; !strings.Contains(q, "head=ian%3Amaestro%2FGH-7") || !strings.Contains(q, "state=all") {
 			t.Errorf("%s: query %s", name, q)
 		}
 	}
@@ -799,11 +799,11 @@ func TestReviewEdges(t *testing.T) {
 		t.Fatalf("second page: %+v, %v", st, err)
 	}
 	// A listed pull request on another branch is not the ticket's.
-	g.pulls[0]["head"].(map[string]any)["ref"] = "symphony/GH-70"
+	g.pulls[0]["head"].(map[string]any)["ref"] = "maestro/GH-70"
 	if st, _ := p.Review(ctx, ticket); st.State != orchestrator.ReviewNone {
 		t.Fatalf("other branch: %+v", st)
 	}
-	g.pulls[0]["head"].(map[string]any)["ref"] = "symphony/GH-7"
+	g.pulls[0]["head"].(map[string]any)["ref"] = "maestro/GH-7"
 	// Switched off: reviews are not read.
 	p.Config().Publish.ReworkOnChangesRequested = false
 	if st, err := p.Review(ctx, ticket); err != nil || st.State != orchestrator.ReviewOpen {
@@ -852,7 +852,7 @@ func onLine(login, at, body, path string, line int) map[string]any {
 	return c
 }
 
-func mark(at string) string { return "Picking up.\n\n<!-- symphony:feedback-through " + at + " -->" }
+func mark(at string) string { return "Picking up.\n\n<!-- maestro:feedback-through " + at + " -->" }
 
 // withComments is an open pull request at 12:00, with comments switched on
 // and a quiet time of two minutes.
@@ -916,7 +916,7 @@ func TestAcknowledgedCommentsStartOneRunOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(g.posted) != 1 || !strings.Contains(g.posted[0], "the 2 new comments") ||
-		!strings.Contains(g.posted[0], "<!-- symphony:feedback-through 2026-11-21T11:51:00Z -->") {
+		!strings.Contains(g.posted[0], "<!-- maestro:feedback-through 2026-11-21T11:51:00Z -->") {
 		t.Fatalf("posted %q", g.posted)
 	}
 	if st, _ := p.Review(ctx, ticket); st.State != orchestrator.ReviewOpen {
@@ -1024,7 +1024,7 @@ func TestScreenshotsAreStoredAndShown(t *testing.T) {
 	if c := l.hub.sent("POST /repos/ian/app/git/commits")[0]; len(c["parents"].([]any)) != 0 || c["tree"] != treeSHA {
 		t.Fatalf("commit %v", c)
 	}
-	if r := l.hub.sent("POST /repos/ian/app/git/refs")[0]; r["ref"] != "refs/heads/symphony/screenshots" || r["sha"] != commitSHA {
+	if r := l.hub.sent("POST /repos/ian/app/git/refs")[0]; r["ref"] != "refs/heads/maestro/screenshots" || r["sha"] != commitSHA {
 		t.Fatalf("ref %v", r)
 	}
 	if b := l.hub.sent("POST /repos/ian/app/git/blobs")[0]; b["content"] != "b25l" || b["encoding"] != "base64" {
@@ -1040,7 +1040,7 @@ func TestScreenshotsAreStoredAndShown(t *testing.T) {
 	if trees[1]["base_tree"] != oldTree || len(trees) != 3 {
 		t.Fatalf("%d trees, base %v", len(trees), trees[1]["base_tree"])
 	}
-	moves := l.hub.sent("PATCH /repos/ian/app/git/refs/heads/symphony/screenshots")
+	moves := l.hub.sent("PATCH /repos/ian/app/git/refs/heads/maestro/screenshots")
 	if len(moves) != 2 || moves[1]["force"] != false || moves[1]["sha"] != commitSHA {
 		t.Fatalf("moves %v", moves)
 	}

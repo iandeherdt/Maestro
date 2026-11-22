@@ -30,7 +30,7 @@ func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 	dir := t.TempDir()
 	var s statusJSON
 	err := reach(ctx, dir, http.MethodGet, "/api/v1/state", nil, &s)
-	if err == nil || !strings.Contains(err.Error(), "symphony run") {
+	if err == nil || !strings.Contains(err.Error(), "maestro run") {
 		t.Fatalf("nothing running: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 	}
 	var out bytes.Buffer
 	printStatus(&out, s, now)
-	for _, want := range []string{`worker "mac"`, "PAUSED: on holiday", "symphony resume",
+	for _, want := range []string{`worker "mac"`, "PAUSED: on holiday", "maestro resume",
 		"GH-11    working (agent, turn 2, started 1m30s ago)", "last: editing  [31mhello.txt next",
 		"GH-13    pull request #14 is open", "GH-12    will be tried again in 20s (verify_failed)",
 		"Today: 2 agent run(s), 1500 tokens, 1m35s of agent time."} {

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Every check that decides whether a change is acceptable. Needs no network
-# after prepare.sh. The Symphony service runs this itself before it pushes
+# after prepare.sh. The Maestro service runs this itself before it pushes
 # anything, and CI runs the same script.
 set -eu
 

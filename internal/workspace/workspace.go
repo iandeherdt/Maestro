@@ -233,7 +233,7 @@ func (m *Manager) RunHook(ctx context.Context, name, workspaceKey string) error 
 		Argv:           []string{"sh", "-c", script},
 		NetworkProfile: network,
 		Limits:         sandbox.Limits{TimeoutMS: m.Hooks.TimeoutMS},
-		Env:            map[string]string{"SYMPHONY_HOOK": name},
+		Env:            map[string]string{"MAESTRO_HOOK": name},
 	}, nil)
 	if hctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 		return &Error{Category: HookTimeout, Msg: fmt.Sprintf("%s ran longer than %s", name, timeout)}

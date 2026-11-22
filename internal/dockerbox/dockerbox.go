@@ -118,7 +118,7 @@ func (b *Box) bind(src, dst string, readonly bool) string {
 	return m
 }
 
-func (b *Box) prefix() string { return "symphony-" + b.Worker }
+func (b *Box) prefix() string { return "maestro-" + b.Worker }
 
 // Volume is the name of an issue's workspace volume.
 func (b *Box) Volume(key string) string { return b.prefix() + "-ws-" + key }
@@ -222,7 +222,7 @@ func (b *Box) baseEnv(profile string) map[string]string {
 
 func (b *Box) runArgs(name string, s spec) []string {
 	args := []string{"run", "--rm", "--interactive", "--name", name,
-		"--label", "symphony.worker=" + b.Worker, "--label", "symphony.step=" + string(s.step),
+		"--label", "maestro.worker=" + b.Worker, "--label", "maestro.step=" + string(s.step),
 		"--user", AgentUID + ":" + AgentUID,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--hostname", "sandbox", "--init",
@@ -423,11 +423,11 @@ cd /workspace/repo
 git checkout --quiet -b "$1" "origin/$2"
 git config user.name "$3"
 git config user.email "$4"
-git rev-parse HEAD > .git/symphony-base
-cat .git/symphony-base
+git rev-parse HEAD > .git/maestro-base
+cat .git/maestro-base
 `
 
-const probeScript = `cat /workspace/repo/.git/symphony-base 2>/dev/null || true
+const probeScript = `cat /workspace/repo/.git/maestro-base 2>/dev/null || true
 `
 
 const fastForwardScript = `set -eu
@@ -446,9 +446,9 @@ cd /workspace/repo
 G="git -c core.hooksPath=/dev/null -c core.fsmonitor=false"
 if [ -n "$($G status --porcelain)" ]; then
   $G add -A
-  $G commit --quiet --no-verify -m "symphony: uncommitted changes at end of turn"
+  $G commit --quiet --no-verify -m "maestro: uncommitted changes at end of turn"
 fi
-base="$(cat .git/symphony-base)"
+base="$(cat .git/maestro-base)"
 count="$($G rev-list --count "$base..HEAD")"
 rm -f /handoff/out.bundle
 if [ "$count" -gt 0 ]; then
@@ -494,7 +494,7 @@ func (b *Box) populate(ctx context.Context, s spec, p sandbox.Populate) (sandbox
 		if exists {
 			return sandbox.Result{}, fail("the workspace already exists")
 		}
-		if _, err := b.cli(ctx, "volume", "create", "--label", "symphony.worker="+b.Worker, vol); err != nil {
+		if _, err := b.cli(ctx, "volume", "create", "--label", "maestro.worker="+b.Worker, vol); err != nil {
 			return sandbox.Result{}, fail("%v", err)
 		}
 		s.mirror = true

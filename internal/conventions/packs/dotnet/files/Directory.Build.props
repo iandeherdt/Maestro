@@ -1,7 +1,7 @@
 <Project>
   <!--
     Conventions of this repository, enforced by the build. Written by
-    `symphony conventions apply dotnet`. The agent may not change this file;
+    `maestro conventions apply dotnet`. The agent may not change this file;
     change it by hand when a rule has to change.
   -->
   <PropertyGroup>

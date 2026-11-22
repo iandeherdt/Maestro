@@ -7,7 +7,7 @@ import (
 )
 
 func TestResolvePath(t *testing.T) {
-	if got := ResolvePath("/etc/symphony/WORKFLOW.md"); got != "/etc/symphony/WORKFLOW.md" {
+	if got := ResolvePath("/etc/maestro/WORKFLOW.md"); got != "/etc/maestro/WORKFLOW.md" {
 		t.Errorf("explicit path not used: %q", got)
 	}
 	if got := ResolvePath(""); got != "WORKFLOW.md" {

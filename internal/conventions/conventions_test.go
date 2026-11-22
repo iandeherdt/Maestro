@@ -153,7 +153,7 @@ func TestDerive(t *testing.T) {
 	// The first failing pack stops the script, and a pack whose files are
 	// not in the repository is explained.
 	for _, script := range []string{s.Prepare, s.Verify} {
-		if strings.Count(script, "|| exit $?") != 2 || !strings.Contains(script, "symphony conventions apply typescript") {
+		if strings.Count(script, "|| exit $?") != 2 || !strings.Contains(script, "maestro conventions apply typescript") {
 			t.Errorf("script:\n%s", script)
 		}
 	}

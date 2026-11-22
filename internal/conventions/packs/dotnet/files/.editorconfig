@@ -1,4 +1,4 @@
-# Conventions of this repository. Written by `symphony conventions apply dotnet`.
+# Conventions of this repository. Written by `maestro conventions apply dotnet`.
 # The agent may not change this file; change it by hand when a rule has to change.
 root = true
 

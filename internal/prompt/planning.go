@@ -22,10 +22,10 @@ Your situation and limits:
 Your final message must have one of these two forms.
 
 To ask questions: write the questions as plain text, then end with a line containing exactly
-SYMPHONY_PLAN: questions
+MAESTRO_PLAN: questions
 
 To propose a plan: write one json code block of this shape, then end with a line containing exactly
-SYMPHONY_PLAN: tasks
+MAESTRO_PLAN: tasks
 
 ` + "```json" + `
 {"tasks": [
@@ -84,6 +84,6 @@ func (b *Builder) Planning(in PlanInput) (string, error) {
 func (b *Builder) PlanningRetry(turn, maxTurns int, problem string) string {
 	return fmt.Sprintf("Turn %d of at most %d. Your answer could not be used: %s.\n\n"+
 		"Answer again in one of the two forms described at the start: questions followed by the line "+
-		"\"SYMPHONY_PLAN: questions\", or one json block followed by the line \"SYMPHONY_PLAN: tasks\".\n",
+		"\"MAESTRO_PLAN: questions\", or one json block followed by the line \"MAESTRO_PLAN: tasks\".\n",
 		turn, maxTurns, problem)
 }

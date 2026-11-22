@@ -20,7 +20,7 @@ const (
 	apiVersion    = "2022-11-28"
 	maxResponse   = 4 << 20
 	maxTitleRunes = 120
-	footer        = "Opened by Symphony. A person reviews and merges; the service never does."
+	footer        = "Opened by Maestro. A person reviews and merges; the service never does."
 )
 
 // api is a minimal GitHub REST client for pull requests. The token goes

@@ -1,4 +1,4 @@
-// Package setup is the guided installation behind `symphony setup` (SPEC
+// Package setup is the guided installation behind `maestro setup` (SPEC
 // section 16.8).
 //
 // The wizard is a list of steps. Each step can tell whether it is already
@@ -49,7 +49,7 @@ func (u *UI) Say(format string, a ...any) {
 }
 
 // ErrAborted is returned when the operator declines or the input ends.
-var ErrAborted = errors.New("setup stopped; run `symphony setup` again to continue where you left off")
+var ErrAborted = errors.New("setup stopped; run `maestro setup` again to continue where you left off")
 
 func (u *UI) line() (string, error) {
 	s, err := u.In.ReadString('\n')

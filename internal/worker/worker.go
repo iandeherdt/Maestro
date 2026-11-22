@@ -189,10 +189,10 @@ func failed(category string, err error) orchestrator.Outcome {
 	return out
 }
 
-var statusRE = regexp.MustCompile(`(?m)^[ \t]*SYMPHONY_STATUS:[ \t]*(done|continue|blocked)[ \t]*\r?$`)
+var statusRE = regexp.MustCompile(`(?m)^[ \t]*MAESTRO_STATUS:[ \t]*(done|continue|blocked)[ \t]*\r?$`)
 
 // DeclaredStatus reads the agent's status from its final message: the last
-// line of the form "SYMPHONY_STATUS: done|continue|blocked". No such line
+// line of the form "MAESTRO_STATUS: done|continue|blocked". No such line
 // means done.
 func DeclaredStatus(resultText string) string {
 	m := statusRE.FindAllStringSubmatch(resultText, -1)

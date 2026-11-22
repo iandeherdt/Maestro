@@ -1,4 +1,4 @@
-# Symphony for Claude: Service Specification
+# Maestro: Service Specification
 
 Status: Draft v1
 
@@ -119,13 +119,13 @@ listed.
 
 | Zone | OS identity | Holds | Runs |
 |---|---|---|---|
-| `control` | user `symphony` | Tracker token, repository token, mirror, state and logs | Orchestrator, tracker adapter, publisher |
-| `sandbox` | user `symphony-agent`, inside the sandbox | The Claude Code login in its own profile, the workspace | Hooks, agent, verify, export |
+| `control` | user `maestro` | Tracker token, repository token, mirror, state and logs | Orchestrator, tracker adapter, publisher |
+| `sandbox` | user `maestro-agent`, inside the sandbox | The Claude Code login in its own profile, the workspace | Hooks, agent, verify, export |
 | `launcher` | root, minimal | Nothing | Only the sandbox launcher (Section 11.2) |
 
 Rules:
 
-- No file owned by `symphony` is readable by `symphony-agent`, except the mirror (read-only) and
+- No file owned by `maestro` is readable by `maestro-agent`, except the mirror (read-only) and
   the hand-off directory (Section 15.1).
 - The `control` zone MUST NOT execute any program, script, hook, Git hook, Git filter or
   configuration that originates from a workspace.
@@ -147,7 +147,7 @@ Rules:
 - One issue tracker API (GitHub or Linear).
 - The GitHub REST API for the target repository (pull requests, checks), regardless of tracker.
 - `git` (2.39 or newer) in both zones.
-- The `claude` executable, installed and logged in for `symphony-agent`.
+- The `claude` executable, installed and logged in for `maestro-agent`.
 - Linux backend: systemd 250 or newer on cgroup v2. macOS backend: see Appendix B.
 - An allowlisting forward proxy on the worker (Section 11.4).
 
@@ -277,7 +277,7 @@ Identical to upstream Section 4.2:
 Additional rules:
 
 - `Branch Name`: `<publish.branch_prefix><workspace_key>`. The prefix MUST end with `/` and
-  defaults to `symphony/`. The orchestrator MUST NOT push to any ref outside that prefix.
+  defaults to `maestro/`. The orchestrator MUST NOT push to any ref outside that prefix.
 - A workspace key of `.` or `..`, or one beginning with `-` or `.git`, is invalid and the issue is
   not dispatchable.
 
@@ -289,7 +289,7 @@ Path precedence:
 
 1. Positional CLI argument.
 2. `WORKFLOW.md` in the process working directory.
-3. `WORKFLOW.md` in the guided setup's directory (`symphony/` under the user's configuration
+3. `WORKFLOW.md` in the guided setup's directory (`maestro/` under the user's configuration
    directory), if the file in step 2 does not exist.
 
 Rules:
@@ -297,7 +297,7 @@ Rules:
 - If the file cannot be read, return `missing_workflow_file`.
 - The file SHOULD be version-controlled. It is the operator's configuration, not the agent's.
 - The resolved path MUST NOT be inside `workspace.root`, inside the mirror, or writable by
-  `symphony-agent`. Startup validation fails with `workflow_path_untrusted` otherwise.
+  `maestro-agent`. Startup validation fails with `workflow_path_untrusted` otherwise.
 - A `WORKFLOW.md` that exists inside the target repository is ignored by the service.
 
 ### 5.2 File Format
@@ -346,7 +346,7 @@ Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sa
 #### 5.3.3 `workspace` (object)
 
 - `root` (path or `$VAR`): REQUIRED. No default, because a shared temp directory is not acceptable
-  here. MUST be owned by `symphony-agent`, mode `0700`, on a filesystem mounted `nosuid,nodev`.
+  here. MUST be owned by `maestro-agent`, mode `0700`, on a filesystem mounted `nosuid,nodev`.
 - `repo` (string): REQUIRED. Target repository as `owner/name`.
 - `base_branch` (string): default: the repository's default branch.
 - `clone_depth` (integer): default `0` (full history).
@@ -357,7 +357,7 @@ Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sa
   semantics as upstream Section 5.3.4.
 - `timeout_ms` (integer): default `60000`.
 
-All hooks run inside the sandbox as `symphony-agent` (Section 9.4).
+All hooks run inside the sandbox as `maestro-agent` (Section 9.4).
 
 #### 5.3.5 `agent` (object)
 
@@ -390,7 +390,7 @@ Replaces upstream `codex`.
 
 - `backend` (string): REQUIRED. `docker` or `podman` (Section 11.8), `systemd` (Linux), `macos-vm` or
   `macos-user` (Appendix B). There is no `none` backend.
-- `image` (string): the sandbox image of the `docker` backend. Default `symphony-sandbox:latest`.
+- `image` (string): the sandbox image of the `docker` backend. Default `maestro-sandbox:latest`.
 - `memory_max` (string): default `6G`.
 - `cpu_quota` (string): default `300%`.
 - `tasks_max` (integer): default `2048`.
@@ -414,7 +414,7 @@ Replaces upstream `codex`.
 
 #### 5.3.9 `publish` (object)
 
-- `branch_prefix` (string): default `symphony/`.
+- `branch_prefix` (string): default `maestro/`.
 - `draft_until_green` (boolean): default `true`.
 - `required_checks` (list of check names, `"branch-protection"` or `"none"`): default
   `"branch-protection"` (use the base branch's required status checks). `"none"` is the operator
@@ -449,7 +449,7 @@ Replaces upstream `codex`.
 - `max_tokens_per_day` (integer or null): default null.
 - `max_agent_seconds_per_day` (integer or null): default `28800`.
 - `quota_backoff_ms` (integer): default `3600000`.
-- `state_dir` (path): REQUIRED. Owned by `symphony`, mode `0700`.
+- `state_dir` (path): REQUIRED. Owned by `maestro`, mode `0700`.
 
 #### 5.3.12 `worker` (object)
 
@@ -520,7 +520,7 @@ safety text, and cannot remove it.
 Fallback: if the body is empty, the runtime uses
 `You are working on an issue from the configured tracker. Implement it in this repository.`
 
-`symphony check` parses the template and renders it once with sample data, so most template
+`maestro check` parses the template and renders it once with sample data, so most template
 errors are found before the first dispatch.
 
 ### 5.5 Workflow Validation and Error Surface
@@ -547,7 +547,7 @@ Environment variables never override YAML values globally. An empty resolved sec
 missing.
 
 Secrets are supplied to the service process by the service manager (systemd `LoadCredential=` or
-an environment file readable only by `symphony`; launchd equivalents on macOS). They MUST NOT
+an environment file readable only by `maestro`; launchd equivalents on macOS). They MUST NOT
 appear in `WORKFLOW.md`.
 
 ### 6.2 Dynamic Reload
@@ -558,7 +558,7 @@ REQUIRED, as upstream Section 6.2:
 - Apply to future dispatch, retries, reconciliation, hooks, agent launches, gates.
 - In-flight sessions are not restarted.
 - An invalid reload MUST NOT crash the service. Keep the last known good configuration and emit an
-  operator-visible error (log, API, and `symphony status`).
+  operator-visible error (log, API, and `maestro status`).
 - Re-validate defensively before each dispatch.
 - The file is checked at the start of every tick, before reconciliation, by comparing a hash of
   its content. While the file is invalid, dispatch is skipped and reconciliation continues with
@@ -625,13 +625,13 @@ skip dispatch for that tick and keep reconciling.
 - `claude.read_timeout_ms`: default `30000`
 - `claude.stall_timeout_ms`: default `300000`
 - `sandbox.backend`: `docker` | `podman` | `systemd` | `macos-vm` | `macos-user`, REQUIRED
-- `sandbox.image`: `symphony-sandbox:latest` (docker backend)
+- `sandbox.image`: `maestro-sandbox:latest` (docker backend)
 - `sandbox.memory_max` `6G`, `sandbox.cpu_quota` `300%`, `sandbox.tasks_max` `2048`
 - `sandbox.network.proxy`: REQUIRED except with the docker backend
 - `sandbox.network.allow_agent`, `sandbox.network.allow_hooks`: default `[]`
 - `sandbox.env`: default `{}`
 - `verify.command`: REQUIRED; `verify.timeout_ms` `1800000`; `verify.network` `false`
-- `publish.branch_prefix` `symphony/`; `publish.draft_until_green` `true`
+- `publish.branch_prefix` `maestro/`; `publish.draft_until_green` `true`
 - `publish.required_checks` `branch-protection` (or a list, or `none`); `publish.checks_timeout_ms` `3600000`
 - `publish.rework_on_changes_requested` `true`; `publish.max_bundle_bytes` `104857600`
 - `publish.rework_on_comments` `true`; `publish.review_quiet_ms` `120000`
@@ -721,7 +721,7 @@ After every turn that ends normally, the worker:
 2. Runs the export step (Section 15.1). If the workspace has no commits beyond `base_sha` and no
    changes, the outcome is `no_changes`.
 3. Reads the agent's declared status from the final result text: the last line matching
-   `SYMPHONY_STATUS: (done|continue|blocked)`. Absent means `done`. This line is a hint from an
+   `MAESTRO_STATUS: (done|continue|blocked)`. Absent means `done`. This line is a hint from an
    untrusted party. It can request more work or give up. It can never skip a gate.
 4. Decides:
    - `blocked` declared: fail the attempt with `agent_declared_blocked`.
@@ -825,7 +825,7 @@ Failure accounting (extension, bounded retries):
   - the issue reaches the hand-off state or a terminal state;
   - an issue that has a `blocked_at` marker is seen in an active state again. Only a human can
     make that transition, so it is the operator's signal to retry. The marker is cleared too;
-  - the operator runs `symphony unblock <identifier>`.
+  - the operator runs `maestro unblock <identifier>`.
   The reset check runs before the budget check in Section 8.2.
 
 Retry handling (as upstream Section 8.4): refresh the issue by ID; not found releases; terminal
@@ -882,7 +882,7 @@ startup rather than silently resetting counts.
 - A dispatch increments `runs` for the current local day.
 - Token and runtime totals are added when a session ends.
 - When a daily limit is reached, dispatch stops until the next local day. Running sessions finish.
-- `symphony pause [reason]` sets `paused`. `symphony resume` clears it. While paused nothing is
+- `maestro pause [reason]` sets `paused`. `maestro resume` clears it. While paused nothing is
   dispatched. Reconciliation, checks and hand-off watch continue.
 - When the agent reports a usage limit (Section 10.7, `agent_quota_exhausted`), the orchestrator
   sets `quota_blocked_until = now + budget.quota_backoff_ms`, or the reset time reported by the
@@ -892,10 +892,10 @@ startup rather than silently resetting counts.
 
 ### 9.1 Layout
 
-- Workspace root: `workspace.root`, owned by `symphony-agent`, mode `0700`.
+- Workspace root: `workspace.root`, owned by `maestro-agent`, mode `0700`.
 - Per-issue workspace: `<workspace.root>/<workspace_key>`.
 - Mirror (control zone): `<budget.state_dir>/mirror.git`, a bare mirror of the target repository,
-  owned by `symphony`, readable by `symphony-agent`.
+  owned by `maestro`, readable by `maestro-agent`.
 - Hand-off directory: `<workspace.root>/.handoff/`, written by the sandbox, read by the control
   zone under the rules in Section 15.1.
 
@@ -914,7 +914,7 @@ is supplied through an ephemeral `GIT_ASKPASS` helper.
 2. If the directory does not exist (`created_now = true`):
    - Inside the sandbox, with no network: `git clone --no-hardlinks <mirror> <path>`, check out a
      new branch `<branch_name>` at the tip of `base_branch`.
-   - Record `base_sha` in `<path>/.git/symphony-base` and in the running entry.
+   - Record `base_sha` in `<path>/.git/maestro-base` and in the running entry.
    - The clone's only remote is the local mirror path. It has no credential and no network URL.
    - Run `after_create` if configured.
 3. If the directory exists (`created_now = false`):
@@ -939,7 +939,7 @@ handling as upstream Section 9.4:
 
 Differences:
 
-- Every hook runs inside the sandbox as `symphony-agent`, with `sh -c <script>` and the workspace
+- Every hook runs inside the sandbox as `maestro-agent`, with `sh -c <script>` and the workspace
   as `cwd`. Hooks never run in the control zone. Hooks are trusted configuration, but they execute
   repository content (package scripts), so they get no more privilege than the agent.
 - Network: `after_create` and `before_run` may reach `sandbox.network.allow_hooks`. `after_run`
@@ -1146,7 +1146,7 @@ workspace population, hooks, agent turns, verify, export.
 
 A backend MUST provide all of the following. Section 11.6 tests each one.
 
-- P1 Identity: processes run as `symphony-agent`, with no way to gain privileges (no setuid
+- P1 Identity: processes run as `maestro-agent`, with no way to gain privileges (no setuid
   effect, no capabilities, no sudo rule).
 - P2 Filesystem: writable paths are exactly the workspace, the agent's Claude Code state
   directory, and private temporary directories. The mirror is read-only. The control zone's state
@@ -1164,8 +1164,8 @@ A backend MUST provide all of the following. Section 11.6 tests each one.
 
 The control zone cannot start processes as another user by itself. A small launcher does it.
 
-- Installed root-owned, not writable by `symphony`. Invoked through one fixed privilege rule
-  (sudoers or polkit) that allows `symphony` to run exactly that program.
+- Installed root-owned, not writable by `maestro`. Invoked through one fixed privilege rule
+  (sudoers or polkit) that allows `maestro` to run exactly that program.
 - Input: a JSON request on standard input with `{step, workspace_key, argv, network_profile,
   limits, env}`. `step` is one of `populate`, `hook`, `agent`, `verify`, `export`.
 - A `populate` request carries `populate: {op, branch, base_branch}` instead of `argv`. `op` is
@@ -1187,10 +1187,10 @@ The control zone cannot start processes as another user by itself. A small launc
 ### 11.3 Linux Backend (`systemd`)
 
 Each step is a transient service unit started with `systemd-run --wait --collect --pipe`, named
-`symphony-<worker>-<workspace_key>-<step>-<n>`, with at least:
+`maestro-<worker>-<workspace_key>-<step>-<n>`, with at least:
 
 ```text
-User=symphony-agent            Group=symphony-agent
+User=maestro-agent            Group=maestro-agent
 NoNewPrivileges=yes            CapabilityBoundingSet=      AmbientCapabilities=
 ProtectSystem=strict           ProtectHome=tmpfs
 BindPaths=<workspace> <agent claude state dir>
@@ -1234,20 +1234,20 @@ IPAddressAllow=<proxy address>          # only for steps with network access
 - GitHub is not on any default allowlist. The agent gets the repository from the local mirror and
   has no reason to reach it.
 - The proxy's configuration is generated by the control zone from the workflow and is not
-  writable by `symphony-agent`.
+  writable by `maestro-agent`.
 - Independently of the proxy, the host firewall drops all traffic from the worker VM to private
   address ranges other than its gateway (Appendix A).
 
 ### 11.5 Cleanup
 
 - On worker termination the orchestrator stops the unit and waits for it to be gone.
-- At startup the service lists units matching `symphony-<worker>-*` and stops them.
+- At startup the service lists units matching `maestro-<worker>-*` and stops them.
 - Workspace removal runs inside the sandbox (`populate` step with a remove request), because the
   control zone does not own those files and must not traverse them.
 
 ### 11.6 Self-Test
 
-`symphony doctor` and service startup run a self-test in a scratch workspace. Each check MUST
+`maestro doctor` and service startup run a self-test in a scratch workspace. Each check MUST
 fail closed (startup aborts) if the forbidden action succeeds:
 
 - read a file in `budget.state_dir`; read the service's environment; read another workspace
@@ -1275,28 +1275,28 @@ Every step is one container that is removed when the step ends:
 - User `10001:10001`, all capabilities dropped, `no-new-privileges`, memory, CPU and process
   limits from `sandbox.memory_max`, `cpu_quota` and `tasks_max`, an init process, and a fixed
   environment in which nothing of the service's own environment appears.
-- The workspace of an issue is a named volume, `symphony-<worker>-ws-<workspace_key>`, mounted
+- The workspace of an issue is a named volume, `maestro-<worker>-ws-<workspace_key>`, mounted
   at `/workspace`. No directory of the host is mounted, with two exceptions that last one step
   each: the mirror, read-only, in the populate step, and the issue's hand-off directory in the
   export step.
-- The agent's Claude Code state, including its login, is the volume `symphony-<worker>-claude`.
+- The agent's Claude Code state, including its login, is the volume `maestro-<worker>-claude`.
   Only agent steps get it. Hooks and verify, which run repository scripts, never do.
 - Network: `--network none` for steps without a profile. A step with a profile is attached to
   that profile's internal network only (`docker network create --internal`), which has no route
   out and resolves no outside names. On that network is the profile's proxy container, the
-  service's own binary running `symphony proxy` (Section 11.4), which is also attached to
+  service's own binary running `maestro proxy` (Section 11.4), which is also attached to
   Docker's default bridge. It is the only way out. The allowlists are files of the control zone,
   mounted read-only into the proxies and read for every request.
 - Cleanup (Section 11.5): at startup every container carrying this worker's label is removed.
   Stopping a step removes its container, which kills every process in it.
 
-The image (`sandbox.image`) is built by `symphony image` from a Dockerfile inside the binary:
+The image (`sandbox.image`) is built by `maestro image` from a Dockerfile inside the binary:
 a Node.js base image, git, a pinned Claude Code release, and the service's binary for the proxy.
 On Linux the running binary is copied into the image; on macOS the release of the same version
 is downloaded inside the build and checked against the release's checksum file.
 
-`symphony login` runs `claude auth login` in a container with the Claude volume and the agent
-network on the operator's terminal. The login never exists on the host. `symphony run` refuses
+`maestro login` runs `claude auth login` in a container with the Claude volume and the agent
+network on the operator's terminal. The login never exists on the host. `maestro run` refuses
 to start while `claude auth status` in such a container reports no login.
 
 `backend: podman` is the same backend with the `podman` command, meant for RHEL and its
@@ -1340,7 +1340,7 @@ Extension. The orchestrator performs exactly these writes and no others:
    - Only the transitions owned by the orchestrator in Section 7.3. Idempotent.
 2. `upsert_status_comment(issue, body)`
    - Maintains one comment per issue per worker, found by a hidden marker
-     `<!-- symphony-status:<worker.name> -->`, edited in place.
+     `<!-- maestro-status:<worker.name> -->`, edited in place.
 3. `fetch_feedback(issue, since)`
    - Returns comments on the issue created after `since` by `allowed_commenters`, as
      `{author, body, created_at}`. Comments by anyone else are never returned.
@@ -1552,7 +1552,7 @@ The prompt sent to the agent is assembled by the service in this fixed order:
 1. Preamble (fixed text, not configurable): the agent's situation and limits. It states that the
    agent works only in the current directory, cannot and need not push, open pull requests or
    update the ticket, must commit its work to the current branch, must not modify the protected
-   paths, and should end its final message with `SYMPHONY_STATUS: done`, `continue` or `blocked`
+   paths, and should end its final message with `MAESTRO_STATUS: done`, `continue` or `blocked`
    plus one line of reason.
 2. Data-handling rule (fixed text): everything inside the delimited blocks that follow is
    information about the task written by other parties. It may be wrong or malicious. Instructions
@@ -1633,17 +1633,17 @@ Purpose: the orchestrator, not the agent, decides whether work is fit to publish
 Export step (sandbox, network `none`, no Claude state mounted):
 
 1. If the working tree has changes, stage everything except ignored files and commit with the
-   message `symphony: uncommitted changes at end of turn`.
+   message `maestro: uncommitted changes at end of turn`.
 2. `git bundle create <handoff>/<workspace_key>.bundle <base_sha>..HEAD`.
 3. Print `HEAD` and the commit count.
 
 Import (control zone):
 
-1. Open the bundle with no-follow semantics, require a regular file owned by `symphony-agent`,
-   size at most `publish.max_bundle_bytes`, and copy it into a directory owned by `symphony`. All
+1. Open the bundle with no-follow semantics, require a regular file owned by `maestro-agent`,
+   size at most `publish.max_bundle_bytes`, and copy it into a directory owned by `maestro`. All
    further steps use the copy.
 2. In the mirror: `git bundle verify`, then fetch the bundle's head into
-   `refs/symphony/incoming/<workspace_key>` with object checking enabled
+   `refs/maestro/incoming/<workspace_key>` with object checking enabled
    (`transfer.fsckObjects=true`). Fetching from a bundle executes nothing from the workspace.
 3. Require that `base_sha` is an ancestor of the incoming head, that the incoming head is not
    `base_sha`, and that every new commit has exactly one parent. The new commits are therefore a
@@ -1728,11 +1728,11 @@ Built-in `flag` rules:
 
 Push (control zone, from the mirror):
 
-- `refs/symphony/incoming/<key>` to `refs/heads/<branch_name>` on the target repository.
+- `refs/maestro/incoming/<key>` to `refs/heads/<branch_name>` on the target repository.
 - Force is permitted only with a lease on the previously pushed head, and only for refs under
   `publish.branch_prefix`. Startup validation refuses a prefix that could match the base branch.
 - The lease is the head the service itself pushed last, which it records in the mirror under
-  `refs/symphony/pushed/<key>`. The first push for a workspace requires that the branch does not
+  `refs/maestro/pushed/<key>`. The first push for a workspace requires that the branch does not
   exist. If the branch is anywhere else, someone else pushed to it: the push fails and nothing is
   overwritten.
 - The installation token is supplied through an ephemeral `GIT_ASKPASS` helper. The helper file
@@ -1863,7 +1863,7 @@ review was submitted, not from when it was drafted: a draft is invisible, and a 
 between would otherwise hide the comment for good.
 
 The mark is a comment by the bot on the pull request that says the new comments were picked up
-and ends in `<!-- symphony:feedback-through <RFC 3339 time of the newest comment taken up> -->`.
+and ends in `<!-- maestro:feedback-through <RFC 3339 time of the newest comment taken up> -->`.
 A mark counts only when the bot identity wrote the comment that carries it. Without a known bot
 identity the service cannot tell its own mark from one somebody typed, and comments do not send
 an issue back. The state is written before the mark: when the mark then fails, the comments
@@ -1900,7 +1900,7 @@ As upstream Section 13.1:
 
 ### 16.2 Audit Log
 
-Per attempt, under `<budget.state_dir>/audit/<workspace_key>/<started_at>/`, owned by `symphony`:
+Per attempt, under `<budget.state_dir>/audit/<workspace_key>/<started_at>/`, owned by `maestro`:
 
 - `prompt.txt` (exact prompt), `stream.jsonl` (raw agent stream), `stderr.txt`
 - `verify.txt`, `policy.json` (rule results), `publish.json` (branch, head, pull request)
@@ -1926,7 +1926,7 @@ As upstream Section 13.7, loopback only:
   `awaiting_checks`, `budget`, `paused`, `quota_blocked_until`, `worker`, `config_error`.
 - `GET /api/v1/<issue_identifier>`: upstream shape, plus `phase`, `failure_attempts`, `publish`
   and `policy`.
-- `POST /api/v1/refresh`: queue an immediate tick. Requires a header `X-Symphony-Local: 1`, so
+- `POST /api/v1/refresh`: queue an immediate tick. Requires a header `X-Maestro-Local: 1`, so
   that a web page open in a local browser cannot trigger it with a simple cross-site request.
 - `POST /api/v1/pause` with an optional JSON body `{"reason": "..."}`, and `POST /api/v1/resume`.
   Both need the same header. They are how the CLI reaches the running service; the reason is
@@ -1952,28 +1952,28 @@ As upstream Section 13.7, loopback only:
 
 ### 16.7 CLI
 
-- `symphony run [--dir DIR] [--file WORKFLOW.md]`: run the service in the foreground.
-- `symphony image`, `symphony login`: build the sandbox image and sign Claude Code in inside it
+- `maestro run [--dir DIR] [--file WORKFLOW.md]`: run the service in the foreground.
+- `maestro image`, `maestro login`: build the sandbox image and sign Claude Code in inside it
   (Section 11.8).
-- `symphony service install|uninstall`: run the service in the background as the current user,
+- `maestro service install|uninstall`: run the service in the background as the current user,
   started at login and restarted when it stops. On macOS a launchd agent in
   `~/Library/LaunchAgents`, on Linux a systemd user unit in `~/.config/systemd/user`. The file is
   shown and confirmed before it is written. Uninstall removes only that file.
-- `symphony setup [--dir DIR] [--port N]`: guided installation (Section 16.8).
-- `symphony check [path-to-WORKFLOW.md]`: validate a workflow file without starting anything.
-- `symphony status`: print the state from the loopback API. Text that an agent may have written
+- `maestro setup [--dir DIR] [--port N]`: guided installation (Section 16.8).
+- `maestro check [path-to-WORKFLOW.md]`: validate a workflow file without starting anything.
+- `maestro status`: print the state from the loopback API. Text that an agent may have written
   is stripped of control characters before it reaches the terminal.
-- `symphony doctor [--repo]`: configuration, sandbox self-test, token scopes, branch protection,
+- `maestro doctor [--repo]`: configuration, sandbox self-test, token scopes, branch protection,
   repository readiness (Appendix C).
-- `symphony pause [reason]`, `symphony resume`: through the loopback API. A pause is stored and
+- `maestro pause [reason]`, `maestro resume`: through the loopback API. A pause is stored and
   survives a restart.
-- `symphony unblock <identifier>`: reset `failure_attempts` for an issue. (not built; moving the
+- `maestro unblock <identifier>`: reset `failure_attempts` for an issue. (not built; moving the
   issue back to an active state does the same)
 - Exit status: `0` on normal shutdown, nonzero on startup failure or abnormal exit.
 
 ### 16.8 Guided Setup
 
-`symphony setup` installs the service step by step. It exists so that a correct, least-privilege
+`maestro setup` installs the service step by step. It exists so that a correct, least-privilege
 installation is also the easiest one.
 
 Rules for every step:
@@ -2009,7 +2009,7 @@ Steps:
 4. Tickets. For an organization, a board: the operator names the worker and gives the GitHub
    login whose issues are worked on, which becomes `allowed_authors`. The wizard lists the
    organization's open Projects and uses the one the operator picks, or creates one named
-   Symphony linked to the repository. It then makes sure the Status field has an option for
+   Maestro linked to the repository. It then makes sure the Status field has an option for
    every state and that a single-select field Worker lists this worker. GitHub can only replace
    a field's whole option list, and what that does to items using an option is not documented,
    so the wizard rewrites options only while the Project has no items; otherwise it tells the
@@ -2028,8 +2028,8 @@ Steps:
    configuration directory.
 6. Service: the users, directories and the systemd or launchd unit are installed after the
    wizard has shown what it will write. Outside the wizard for now: the operator runs
-   `symphony image`, `symphony login` and then `symphony run` or `symphony service install`.
-7. Self-test: `symphony doctor`. (not built)
+   `maestro image`, `maestro login` and then `maestro run` or `maestro service install`.
+7. Self-test: `maestro doctor`. (not built)
 
 Steps 1 to 5 ran on a Mac against github.com on 2026-11-21 and completed: GitHub accepted the
 loopback `redirect_url`, the code exchange needed no authentication, a repository-limited token
@@ -2077,7 +2077,7 @@ Scheduling state is not persisted. After a restart:
 - Edit `WORKFLOW.md` (reloaded automatically).
 - Move cards: to a terminal state (stop and clean), out of the active states (stop), to `Rework`
   (send back), from `Blocked` to `Todo` (retry with a fresh budget).
-- `symphony pause`, `resume`, `unblock`.
+- `maestro pause`, `resume`, `unblock`.
 - Log the agent user out of Claude Code to revoke model access immediately.
 - Revoke the repository or tracker token.
 
@@ -2611,9 +2611,9 @@ part of it.
 
 The agent's final message MUST end in one of two forms:
 
-- Questions as plain text, followed by a line `SYMPHONY_PLAN: questions`.
+- Questions as plain text, followed by a line `MAESTRO_PLAN: questions`.
 - One fenced `json` block `{"tasks": [{"title", "description", "worker", "depends_on"}]}` followed
-  by a line `SYMPHONY_PLAN: tasks`.
+  by a line `MAESTRO_PLAN: tasks`.
 
 The service reads the answer strictly: the last marker line counts; unknown JSON fields are an
 error; 1 to 20 tasks; a title is one line of at most 120 characters; a description is not empty
@@ -2728,16 +2728,16 @@ reduced:
 Each script is preceded by a check that the pack's files are in the repository, so that a pack
 that is switched on but not applied fails with an explanation.
 
-`symphony image` appends the Dockerfile lines of the packs that are switched on.
+`maestro image` appends the Dockerfile lines of the packs that are switched on.
 
 ### 23.4 Commands
 
-- `symphony conventions` lists the packs, `show <pack>` prints the rules with their tools.
-- `symphony conventions apply <pack> [--to DIR] [--replace]` writes the pack's files into a
+- `maestro conventions` lists the packs, `show <pack>` prints the rules with their tools.
+- `maestro conventions apply <pack> [--to DIR] [--replace]` writes the pack's files into a
   checkout. A file that exists with other content is a conflict: nothing is written unless
   `--replace` is given. Nothing is written through a symbolic link. The owner commits and pushes;
   the service's App cannot, because it has no right to change workflows.
-- `symphony conventions enable|disable <pack> [--file PATH]` edits the one line in the settings
+- `maestro conventions enable|disable <pack> [--file PATH]` edits the one line in the settings
   file. The changed file is validated with the startup code before it replaces the old one.
 
 ### 23.5 Limits
@@ -2819,7 +2819,7 @@ branch again.
 
 ### 24.4 The image
 
-`symphony image` adds a browser (Chromium) and fonts to the sandbox image when
+`maestro image` adds a browser (Chromium) and fonts to the sandbox image when
 `screenshots.pages` is set. With `screenshots.command` the operator's image has to hold what the
 command needs.
 
@@ -2847,12 +2847,12 @@ Guest:
   ranges, including the host's LAN and the host itself, except DNS and the gateway as needed for
   NAT. Allow outbound TCP 443. No inbound forwarding.
 - Administration over SSH from the host only, key authentication.
-- Users: `symphony`, `symphony-agent`, `symphony-proxy`. None has sudo, except the single
-  launcher rule for `symphony`.
-- Units: `symphony@<name>.service` (one per workflow), the proxy service, a timer for audit
+- Users: `maestro`, `maestro-agent`, `maestro-proxy`. None has sudo, except the single
+  launcher rule for `maestro`.
+- Units: `maestro@<name>.service` (one per workflow), the proxy service, a timer for audit
   retention.
 - Secrets: systemd credentials, files readable by root only, loaded into the service unit.
-- Claude Code installed system-wide. The operator logs in once as `symphony-agent`
+- Claude Code installed system-wide. The operator logs in once as `maestro-agent`
   (interactive session), then never again unless the login expires.
 - Snapshots before upgrades. The VM is disposable: everything needed to rebuild it is in this
   repository plus the secrets.
@@ -2868,7 +2868,7 @@ has to be at least as strong as the Linux one.
   Apple ID, no signing certificates, no provisioning profiles, no personal data.
 - The control zone (orchestrator, tokens, mirror, proxy) runs on the host as a dedicated
   non-administrator user, started by launchd. The sandbox zone is the guest.
-- The launcher's steps execute commands in the guest as `symphony-agent` over a host-only
+- The launcher's steps execute commands in the guest as `maestro-agent` over a host-only
   channel. Workspaces live inside the guest. The mirror is shared read-only. The hand-off
   directory is the only guest-writable shared path.
 - Guest networking: host-only plus NAT, with host packet-filter rules that allow the guest to
@@ -2885,7 +2885,7 @@ has to be at least as strong as the Linux one.
 Used only if B.1 cannot run a required toolchain. Weaker, and the operator accepts that
 explicitly in `WORKFLOW.md` by selecting it.
 
-- A dedicated standard user `symphony-agent` with no access to the operator's home, keychains or
+- A dedicated standard user `maestro-agent` with no access to the operator's home, keychains or
   signing identities (file permissions and no shared keychain).
 - Each step runs under a kernel sandbox profile restricting file writes to the workspace and
   temporary directories and denying network access except to the proxy.
@@ -2897,13 +2897,13 @@ explicitly in `WORKFLOW.md` by selecting it.
 
 - Agents never sign, notarize, archive for distribution or upload builds. Verify commands build
   unsigned (or ad-hoc signed) and run tests.
-- The worker runs only while the Mac is awake. `symphony pause` is the operator's switch when
+- The worker runs only while the Mac is awake. `maestro pause` is the operator's switch when
   using the machine.
 - Routing: issues carry `run:mac`. Typical work: Xcode projects, Unity projects.
 
 ## Appendix C. Repository Readiness
 
-`symphony doctor --repo` checks, and a repository that fails is not served:
+`maestro doctor --repo` checks, and a repository that fails is not served:
 
 1. `verify.command` passes on the base branch in the sandbox with no network, twice in a row.
 2. It finishes within `verify.timeout_ms / 3`.

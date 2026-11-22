@@ -707,7 +707,11 @@ func (a *Adapter) SetState(ctx context.Context, is issue.Issue, state string) er
 	return nil
 }
 
-func (a *Adapter) marker() string { return "<!-- symphony-status:" + a.worker + " -->" }
+func (a *Adapter) marker() string { return "<!-- maestro-status:" + a.worker + " -->" }
+
+// oldMarker is the marker from when the command was called symphony, so
+// that a status comment written then is updated and not doubled.
+func (a *Adapter) oldMarker() string { return "<!-- symphony-status:" + a.worker + " -->" }
 
 func (a *Adapter) comments(ctx context.Context, n int, q url.Values, each func(ghComment)) error {
 	if err := a.c.list(ctx, a.path("/issues/%d/comments", n), q, func(page json.RawMessage) error {
@@ -736,7 +740,7 @@ func (a *Adapter) UpsertStatusComment(ctx context.Context, is issue.Issue, body 
 	}
 	var existing int64
 	err = a.comments(ctx, n, nil, func(c ghComment) {
-		if existing == 0 && c.User != nil && norm(c.User.Login) == a.bot && strings.HasPrefix(c.Body, a.marker()) {
+		if existing == 0 && c.User != nil && norm(c.User.Login) == a.bot && (strings.HasPrefix(c.Body, a.marker()) || strings.HasPrefix(c.Body, a.oldMarker())) {
 			existing = c.ID
 		}
 	})

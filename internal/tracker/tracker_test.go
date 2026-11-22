@@ -6,7 +6,7 @@ import (
 )
 
 func TestFenceNeutralizesUntrustedText(t *testing.T) {
-	in := "done @octocat fixes #12 <img src=x>\n```\n<!-- symphony-status:linux -->\x1b[31m"
+	in := "done @octocat fixes #12 <img src=x>\n```\n<!-- maestro-status:linux -->\x1b[31m"
 	out := Fence(in)
 	for _, bad := range []string{"@octocat", "#12", "<img", "<!--", "\x1b"} {
 		if strings.Contains(out, bad) {

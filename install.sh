@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs the symphony binary from a GitHub release.
+# Installs the maestro binary from a GitHub release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/iandeherdt/Maestro/main/install.sh | sh
 #
@@ -8,15 +8,15 @@
 # not use sudo and changes nothing else.
 #
 # Settings (environment variables):
-#   SYMPHONY_VERSION      a tag such as v0.1.0 (default: the latest release)
-#   SYMPHONY_INSTALL_DIR  where the binary goes (default: ~/.local/bin)
+#   MAESTRO_VERSION      a tag such as v0.1.0 (default: the latest release)
+#   MAESTRO_INSTALL_DIR  where the binary goes (default: ~/.local/bin)
 set -eu
 
 main() {
   repo="iandeherdt/Maestro"
-  base="${SYMPHONY_DOWNLOAD_BASE:-https://github.com/$repo/releases}"
-  version="${SYMPHONY_VERSION:-}"
-  dir="${SYMPHONY_INSTALL_DIR:-$HOME/.local/bin}"
+  base="${MAESTRO_DOWNLOAD_BASE:-https://github.com/$repo/releases}"
+  version="${MAESTRO_VERSION:-}"
+  dir="${MAESTRO_INSTALL_DIR:-$HOME/.local/bin}"
 
   case "$(uname -s)" in
     Darwin) os=darwin ;;
@@ -34,16 +34,16 @@ main() {
 
   if [ -n "$version" ]; then
     case "$version" in
-      *[!A-Za-z0-9.-]*) fail "SYMPHONY_VERSION must look like v1.2.3" ;;
+      *[!A-Za-z0-9.-]*) fail "MAESTRO_VERSION must look like v1.2.3" ;;
       v[0-9]*) ;;
-      *) fail "SYMPHONY_VERSION must look like v1.2.3" ;;
+      *) fail "MAESTRO_VERSION must look like v1.2.3" ;;
     esac
     url="$base/download/$version"
   else
     url="$base/latest/download"
   fi
 
-  archive="symphony_${os}_${arch}.tar.gz"
+  archive="maestro_${os}_${arch}.tar.gz"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
 
@@ -63,20 +63,24 @@ main() {
   [ "$got" = "$want" ] || fail "the checksum does not match. Nothing was installed."
   say "Checksum ok"
 
-  tar -xzf "$tmp/$archive" -C "$tmp" symphony
+  tar -xzf "$tmp/$archive" -C "$tmp" maestro
   mkdir -p "$dir"
   # Written next to the target and renamed, so a running copy is never
   # half replaced.
-  cp "$tmp/symphony" "$dir/.symphony.new"
-  chmod 755 "$dir/.symphony.new"
-  mv -f "$dir/.symphony.new" "$dir/symphony"
+  cp "$tmp/maestro" "$dir/.maestro.new"
+  chmod 755 "$dir/.maestro.new"
+  mv -f "$dir/.maestro.new" "$dir/maestro"
 
-  say "Installed $("$dir/symphony" version) in $dir"
+  say "Installed $("$dir/maestro" version) in $dir"
+  if [ -e "$dir/symphony" ]; then
+    say "The command was called symphony before. That copy is still in $dir; remove it when you like:"
+    say "  rm $dir/symphony"
+  fi
   case ":$PATH:" in
-    *":$dir:"*) say "Next: symphony setup" ;;
+    *":$dir:"*) say "Next: maestro setup" ;;
     *)
       say "$dir is not on your PATH. Run it as:"
-      say "  $dir/symphony setup"
+      say "  $dir/maestro setup"
       say "or add this line to your shell profile:"
       say "  export PATH=\"$dir:\$PATH\""
       ;;

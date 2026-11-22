@@ -53,7 +53,7 @@ func (e *FormatError) Error() string { return e.Msg }
 func bad(format string, a ...any) error { return &FormatError{Msg: fmt.Sprintf(format, a...)} }
 
 var (
-	markerRE = regexp.MustCompile(`(?m)^[ \t]*SYMPHONY_PLAN:[ \t]*(questions|tasks)[ \t]*\r?$`)
+	markerRE = regexp.MustCompile(`(?m)^[ \t]*MAESTRO_PLAN:[ \t]*(questions|tasks)[ \t]*\r?$`)
 	jsonRE   = regexp.MustCompile("(?s)```json[ \\t]*\\r?\\n(.*?)\\r?\\n[ \\t]*```")
 )
 
@@ -62,7 +62,7 @@ var (
 func Parse(result string, workers []string) (*Plan, error) {
 	marks := markerRE.FindAllStringSubmatchIndex(result, -1)
 	if len(marks) == 0 {
-		return nil, bad(`the answer has no line "SYMPHONY_PLAN: questions" or "SYMPHONY_PLAN: tasks"`)
+		return nil, bad(`the answer has no line "MAESTRO_PLAN: questions" or "MAESTRO_PLAN: tasks"`)
 	}
 	last := marks[len(marks)-1]
 	kind, before := result[last[2]:last[3]], result[:last[0]]
@@ -71,7 +71,7 @@ func Parse(result string, workers []string) (*Plan, error) {
 		q := strings.TrimSpace(before)
 		switch {
 		case q == "":
-			return nil, bad("the questions have to come before the SYMPHONY_PLAN line, and there are none")
+			return nil, bad("the questions have to come before the MAESTRO_PLAN line, and there are none")
 		case utf8.RuneCountInString(q) > MaxQuestions:
 			return nil, bad("the questions are longer than %d characters; ask fewer and shorter questions", MaxQuestions)
 		}
@@ -80,7 +80,7 @@ func Parse(result string, workers []string) (*Plan, error) {
 
 	blocks := jsonRE.FindAllStringSubmatch(before, -1)
 	if len(blocks) == 0 {
-		return nil, bad("there is no ```json block before the SYMPHONY_PLAN line")
+		return nil, bad("there is no ```json block before the MAESTRO_PLAN line")
 	}
 	dec := json.NewDecoder(bytes.NewReader([]byte(blocks[len(blocks)-1][1])))
 	dec.DisallowUnknownFields()

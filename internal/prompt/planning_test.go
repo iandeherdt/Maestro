@@ -45,7 +45,7 @@ func TestPlanningPromptKeepsDataInBlocks(t *testing.T) {
 func TestThePromptsExampleParses(t *testing.T) {
 	i := strings.Index(planningPreamble, "```json")
 	j := strings.LastIndex(planningPreamble, "```")
-	example := planningPreamble[i:j+3] + "\nSYMPHONY_PLAN: tasks\n"
+	example := planningPreamble[i:j+3] + "\nMAESTRO_PLAN: tasks\n"
 	example = strings.NewReplacer("a name from WORKERS", "mac", `"worker": "..."`, `"worker": "mac"`).Replace(example)
 	p, err := plan.Parse(example, []string{"mac"})
 	if err != nil || len(p.Tasks) != 2 || p.Tasks[1].DependsOn[0] != 1 {

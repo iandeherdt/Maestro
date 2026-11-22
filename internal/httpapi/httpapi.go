@@ -34,7 +34,7 @@ type State interface {
 }
 
 // LocalHeader must be present on mutating requests.
-const LocalHeader = "X-Symphony-Local"
+const LocalHeader = "X-Maestro-Local"
 
 // Server is the loopback status server.
 type Server struct {
@@ -357,11 +357,11 @@ func (s *Server) apiIssue(w http.ResponseWriter, r *http.Request) {
 // Every dynamic value goes through html/template, which escapes it for the
 // place it lands in. Issue titles and agent messages are untrusted.
 var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Symphony {{.Worker}}</title>
+<html lang="en"><head><meta charset="utf-8"><title>Maestro {{.Worker}}</title>
 <style>body{font:14px system-ui,sans-serif;margin:2rem;max-width:70rem}table{border-collapse:collapse;width:100%}
 th,td{text-align:left;padding:.3rem .6rem;border-bottom:1px solid #ddd;vertical-align:top}
 .warn{background:#fff3cd;padding:.5rem .8rem}h2{margin-top:2rem}</style></head><body>
-<h1>Symphony worker {{.Worker}}</h1>
+<h1>Maestro worker {{.Worker}}</h1>
 <p>Generated {{.Generated}}. Runs today: {{.S.Today.Runs}}. Tokens today: {{.S.Today.TotalTokens}}.</p>
 {{if .S.Paused}}<p class="warn">Dispatch is paused: {{.S.PauseReason}}</p>{{end}}
 {{if .Quota}}<p class="warn">Usage limit reached. Dispatch resumes after {{.Quota}}.</p>{{end}}

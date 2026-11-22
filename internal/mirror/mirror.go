@@ -56,7 +56,7 @@ var (
 )
 
 // IncomingRef is the ref an imported head is stored under.
-func IncomingRef(workspaceKey string) string { return "refs/symphony/incoming/" + workspaceKey }
+func IncomingRef(workspaceKey string) string { return "refs/maestro/incoming/" + workspaceKey }
 
 // git runs one git command in the mirror with a configuration that takes
 // nothing from the machine or the user and can execute nothing.
@@ -438,7 +438,7 @@ func (m *Mirror) Diff(ctx context.Context, baseSHA, head string, lim Limits) (Di
 
 // PushedRef records the head last pushed for a workspace. It is the lease
 // for the next push.
-func PushedRef(workspaceKey string) string { return "refs/symphony/pushed/" + workspaceKey }
+func PushedRef(workspaceKey string) string { return "refs/maestro/pushed/" + workspaceKey }
 
 // ErrBranchMoved means the remote branch is not where the service left it:
 // someone else pushed to it. The service does not overwrite that.
@@ -466,7 +466,7 @@ func ValidBranch(name string) bool {
 const askpass = `#!/bin/sh
 case "$1" in
 Username*) printf '%s\n' x-access-token ;;
-*) printf '%s\n' "$SYMPHONY_PUSH_TOKEN" ;;
+*) printf '%s\n' "$MAESTRO_PUSH_TOKEN" ;;
 esac
 `
 
@@ -514,7 +514,7 @@ func (m *Mirror) Push(ctx context.Context, remoteURL, workspaceKey, branch, toke
 	}
 	ref := "refs/heads/" + branch
 	// An empty expected value means "the branch must not exist".
-	out, err = m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "SYMPHONY_PUSH_TOKEN=" + token},
+	out, err = m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "MAESTRO_PUSH_TOKEN=" + token},
 		"-c", "protocol."+scheme+".allow=always", "-c", "http.followRedirects=false",
 		"push", "--porcelain", "--no-verify", "--no-recurse-submodules",
 		"--force-with-lease="+ref+":"+expected, remoteURL, head+":"+ref)
@@ -581,7 +581,7 @@ func (m *Mirror) Sync(ctx context.Context, remoteURL, token string, skip ...stri
 	}
 	args := append([]string{"-c", "protocol." + scheme + ".allow=always", "-c", "http.followRedirects=false",
 		"fetch", "--quiet", "--prune", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", remoteURL}, refs...)
-	if _, err := m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "SYMPHONY_PUSH_TOKEN=" + token}, args...); err != nil {
+	if _, err := m.gitEnv(ctx, nil, 0, []string{"GIT_ASKPASS=" + helper, "MAESTRO_PUSH_TOKEN=" + token}, args...); err != nil {
 		if exited(err) {
 			return fmt.Errorf("the repository could not be fetched")
 		}

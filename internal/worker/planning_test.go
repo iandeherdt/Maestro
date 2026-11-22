@@ -18,7 +18,7 @@ type fakeBrief struct {
 
 func (f fakeBrief) Brief(context.Context, issue.Issue) (plan.Brief, error) { return f.brief, f.err }
 
-const onePlan = "```json\n{\"tasks\":[{\"title\":\"Add login\",\"description\":\"Do it.\",\"worker\":\"mac\"}]}\n```\nSYMPHONY_PLAN: tasks"
+const onePlan = "```json\n{\"tasks\":[{\"title\":\"Add login\",\"description\":\"Do it.\",\"worker\":\"mac\"}]}\n```\nMAESTRO_PLAN: tasks"
 
 // planRig is a rig whose issue is an idea.
 func planRig(t *testing.T, turns ...script) *rig {
@@ -49,7 +49,7 @@ func TestPlanningRunReturnsAPlanAndPublishesNothing(t *testing.T) {
 		}
 	}
 	// The coding instructions are not part of a planning prompt.
-	if strings.Contains(p, "Implement GH-1") || strings.Contains(p, "SYMPHONY_STATUS") || strings.Contains(p, "Commit your work") {
+	if strings.Contains(p, "Implement GH-1") || strings.Contains(p, "MAESTRO_STATUS") || strings.Contains(p, "Commit your work") {
 		t.Errorf("coding instructions in a planning prompt:\n%s", p)
 	}
 	if r.lastSandboxStep() != "hook:after_run" && !strings.Contains(r.lastSandboxStep(), "after_run") {
@@ -58,7 +58,7 @@ func TestPlanningRunReturnsAPlanAndPublishesNothing(t *testing.T) {
 }
 
 func TestPlanningQuestions(t *testing.T) {
-	r := planRig(t, script{text: "Which screen first?\nSYMPHONY_PLAN: questions"})
+	r := planRig(t, script{text: "Which screen first?\nMAESTRO_PLAN: questions"})
 	out := r.run(orchestrator.Attempt{Planning: true})
 	if out.Kind != orchestrator.Planned || out.Plan.Questions != "Which screen first?" {
 		t.Fatalf("outcome %+v", out)
@@ -72,12 +72,12 @@ func TestMalformedPlanIsSentBackThenFails(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 	second := r.f.prompts[1]
-	if second.ResumeSessionID != "sess-1" || !strings.Contains(second.Prompt, "could not be used") || !strings.Contains(second.Prompt, "SYMPHONY_PLAN") ||
+	if second.ResumeSessionID != "sess-1" || !strings.Contains(second.Prompt, "could not be used") || !strings.Contains(second.Prompt, "MAESTRO_PLAN") ||
 		strings.Contains(second.Prompt, "I think we should") {
 		t.Errorf("second prompt %+v", second)
 	}
 
-	bad := script{text: "```json\n{\"tasks\":[{\"title\":\"T\",\"description\":\"D\",\"worker\":\"windows\"}]}\n```\nSYMPHONY_PLAN: tasks"}
+	bad := script{text: "```json\n{\"tasks\":[{\"title\":\"T\",\"description\":\"D\",\"worker\":\"windows\"}]}\n```\nMAESTRO_PLAN: tasks"}
 	r = planRig(t, bad, bad, bad)
 	out = r.run(orchestrator.Attempt{Planning: true})
 	if out.Kind != orchestrator.Failed || out.Category != PlanMalformed || len(r.f.prompts) != 3 {

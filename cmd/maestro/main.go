@@ -1,4 +1,4 @@
-// Command symphony runs the orchestrator described in docs/SPEC.md.
+// Command maestro runs the orchestrator described in docs/SPEC.md.
 package main
 
 import (
@@ -31,24 +31,24 @@ func main() {
 var version = "dev"
 
 const usage = `usage:
-  symphony setup [--dir DIR] [--port N]   guided installation, safe to run again
-  symphony check [path-to-WORKFLOW.md]    validate a workflow file
-  symphony image                          build the sandbox image (needs Docker)
-  symphony login                          sign Claude Code in inside the sandbox
-  symphony run                            start the service, stop with Ctrl-C
-  symphony status                         what the running service is doing
-  symphony pause [reason]                 start no new tickets until resume
-  symphony resume                         continue after a pause
-  symphony service install                run in the background, start at login
-  symphony service uninstall              stop running in the background
-  symphony conventions                    rule packs per kind of project, enforced by tools
-  symphony version                        print the version
+  maestro setup [--dir DIR] [--port N]   guided installation, safe to run again
+  maestro check [path-to-WORKFLOW.md]    validate a workflow file
+  maestro image                          build the sandbox image (needs Docker)
+  maestro login                          sign Claude Code in inside the sandbox
+  maestro run                            start the service, stop with Ctrl-C
+  maestro status                         what the running service is doing
+  maestro pause [reason]                 start no new tickets until resume
+  maestro resume                         continue after a pause
+  maestro service install                run in the background, start at login
+  maestro service uninstall              stop running in the background
+  maestro conventions                    rule packs per kind of project, enforced by tools
+  maestro version                        print the version
 
 The usual order the first time: setup, image, login, run.`
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
-		fmt.Fprintln(stdout, "symphony", version)
+		fmt.Fprintln(stdout, "maestro", version)
 		return 0
 	}
 	if len(args) > 0 && args[0] == "proxy" {
@@ -127,13 +127,35 @@ func workflowPath(explicit string) string {
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
-	if base, err := os.UserConfigDir(); err == nil {
-		fromSetup := filepath.Join(base, "symphony", workflow.DefaultFileName)
+	if dir, err := configDir(); err == nil {
+		fromSetup := filepath.Join(dir, workflow.DefaultFileName)
 		if _, err := os.Stat(fromSetup); err == nil {
 			return fromSetup
 		}
 	}
 	return path
+}
+
+// configDir is where setup keeps its state: "maestro" in the user's
+// configuration directory. An installation made when the command was called
+// symphony keeps its directory, so its App key and settings are found.
+func configDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, "maestro")
+	if _, err := os.Stat(dir); err != nil {
+		if old := filepath.Join(base, "symphony"); isDir(old) {
+			return old, nil
+		}
+	}
+	return dir, nil
+}
+
+func isDir(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }
 
 // runProxy is the egress proxy. It is started by the service inside the
@@ -145,7 +167,7 @@ func runProxy(args []string, stderr io.Writer) int {
 	profile := fs.String("profile", "", "network profile, for the log")
 	allowFile := fs.String("allow-file", "", "JSON file with the allowed host names")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *listen == "" || *allowFile == "" {
-		fmt.Fprintln(stderr, "usage: symphony proxy --listen ADDR --profile NAME --allow-file FILE")
+		fmt.Fprintln(stderr, "usage: maestro proxy --listen ADDR --profile NAME --allow-file FILE")
 		return 2
 	}
 	ln, err := net.Listen("tcp", *listen)
@@ -171,12 +193,12 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *dir == "" {
-		base, err := os.UserConfigDir()
+		found, err := configDir()
 		if err != nil {
 			fmt.Fprintln(stderr, "no configuration directory was found for this user, pass --dir:", err)
 			return 1
 		}
-		*dir = filepath.Join(base, "symphony")
+		*dir = found
 	}
 	abs, err := filepath.Abs(*dir)
 	if err != nil {
@@ -191,7 +213,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ui := setup.Terminal(stdin, stdout)
-	ui.Banner("Maestro setup", "Symphony setup. Every step says what it will do and waits for you.",
+	ui.Banner("Maestro setup", "Every step says what it will do and waits for you.",
 		"You can stop with Ctrl-C and run this command again; finished steps are skipped.",
 		fmt.Sprintf("State and the App key are kept in %s", abs))
 	steps := []setup.Step{
@@ -236,11 +258,11 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
 	ui.Say("Three commands are left. Run them in this order, with Docker running:")
 	ui.Commands([][2]string{
-		{"symphony image", "builds the container the agent works in (a few minutes, once)"},
-		{"symphony login", "signs Claude Code in inside that container (once)"},
-		{"symphony run", "starts the service; it then picks up " + pickup},
+		{"maestro image", "builds the container the agent works in (a few minutes, once)"},
+		{"maestro login", "signs Claude Code in inside that container (once)"},
+		{"maestro run", "starts the service; it then picks up " + pickup},
 	})
 	ui.Say("Your settings: %s", st.WorkflowFile)
-	ui.Say("To check them at any time: `symphony check`")
+	ui.Say("To check them at any time: `maestro check`")
 	return 0
 }

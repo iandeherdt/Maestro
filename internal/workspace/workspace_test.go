@@ -28,7 +28,7 @@ type world struct {
 
 func (w *world) handle(ctx context.Context, req sandbox.Request) (sandbox.Result, error) {
 	if req.Step == sandbox.StepHook {
-		switch req.Env["SYMPHONY_HOOK"] {
+		switch req.Env["MAESTRO_HOOK"] {
 		case w.failHook:
 			return sandbox.Result{ExitStatus: 1, Stderr: []byte("npm ERR! @everyone")}, nil
 		case w.hangHook:
@@ -67,7 +67,7 @@ func setup(hooks config.Hooks) (*Manager, *sandboxtest.Fake, *world) {
 		hooks.TimeoutMS = 60000
 	}
 	cfg := &config.Config{Hooks: hooks,
-		Publish:   config.Publish{BranchPrefix: "symphony/"},
+		Publish:   config.Publish{BranchPrefix: "maestro/"},
 		Workspace: config.Workspace{BaseBranch: "main"}}
 	return New(cfg, f, nil), f, w
 }
@@ -80,14 +80,14 @@ func TestCreateThenReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ws.CreatedNow || ws.Key != "GH-7" || ws.Branch != "symphony/GH-7" || ws.BaseSHA != sha {
+	if !ws.CreatedNow || ws.Key != "GH-7" || ws.Branch != "maestro/GH-7" || ws.BaseSHA != sha {
 		t.Fatalf("workspace = %+v", ws)
 	}
 	if got := f.Trace(); !reflect.DeepEqual(got, []string{"populate:probe", "populate:clone", "hook:after_create"}) {
 		t.Fatalf("trace = %v", got)
 	}
 	clone := f.Calls()[1].Req
-	if clone.Populate.Branch != "symphony/GH-7" || clone.Populate.BaseBranch != "main" || clone.NetworkProfile != sandbox.NetNone {
+	if clone.Populate.Branch != "maestro/GH-7" || clone.Populate.BaseBranch != "main" || clone.NetworkProfile != sandbox.NetNone {
 		t.Fatalf("clone request = %+v", clone)
 	}
 
@@ -135,7 +135,7 @@ func TestRequestsCarryNoPathsAndFixedHookShape(t *testing.T) {
 			}
 			continue
 		}
-		name := c.Req.Env["SYMPHONY_HOOK"]
+		name := c.Req.Env["MAESTRO_HOOK"]
 		seen[name] = true
 		if len(c.Req.Argv) != 3 || c.Req.Argv[0] != "sh" || c.Req.Argv[1] != "-c" {
 			t.Errorf("%s argv = %v", name, c.Req.Argv)

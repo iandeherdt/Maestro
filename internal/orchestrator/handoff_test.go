@@ -155,7 +155,7 @@ func TestHandoffWatchLeavesOtherTicketsAlone(t *testing.T) {
 	}
 	// Another worker's ticket is not even looked at.
 	other := inReview(1)
-	other.Labels = []string{"symphony", "run:mac"}
+	other.Labels = []string{"maestro", "run:mac"}
 	e := newEnv(t, other)
 	r := &fakeReviews{status: map[string]ReviewStatus{"id-1": {State: ReviewMerged, PRNumber: 7}}}
 	e.o.d.Reviews = r

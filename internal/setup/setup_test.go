@@ -32,7 +32,7 @@ func ui(answers string) (*UI, *bytes.Buffer) {
 
 func state(t *testing.T) *State {
 	t.Helper()
-	st, err := LoadState(filepath.Join(t.TempDir(), "symphony"))
+	st, err := LoadState(filepath.Join(t.TempDir(), "maestro"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func (g *github) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(201)
-		json.NewEncoder(w).Encode(map[string]any{"id": 4242, "slug": "symphony-ian-abc123", "pem": g.key,
+		json.NewEncoder(w).Encode(map[string]any{"id": 4242, "slug": "maestro-ian-abc123", "pem": g.key,
 			"client_secret": "CLIENTSECRET", "webhook_secret": "HOOKSECRET"})
 	case r.Method == "GET" && (r.URL.Path == "/repos/ian/app/installation" || r.URL.Path == "/repos/acme/app/installation"):
 		if !g.installed {
@@ -421,7 +421,7 @@ func TestCreateAndInstallApp(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 
-	if st.AppID != "4242" || st.AppSlug != "symphony-ian-abc123" || st.InstallationID != "777" || st.Repo != "ian/app" {
+	if st.AppID != "4242" || st.AppSlug != "maestro-ian-abc123" || st.InstallationID != "777" || st.Repo != "ian/app" {
 		t.Errorf("state %+v", st)
 	}
 	fi, err := os.Stat(st.AppKeyFile)
@@ -444,7 +444,7 @@ func TestCreateAndInstallApp(t *testing.T) {
 		perms["workflows"] != nil || g.manifest["public"] != false || g.manifest["hook_attributes"] != nil {
 		t.Errorf("manifest %v", g.manifest)
 	}
-	if name, _ := g.manifest["name"].(string); !regexp.MustCompile(`^symphony-ian-[0-9a-f]{6}$`).MatchString(name) {
+	if name, _ := g.manifest["name"].(string); !regexp.MustCompile(`^maestro-ian-[0-9a-f]{6}$`).MatchString(name) {
 		t.Errorf("app name %q", name)
 	}
 	for _, want := range []string{"cannot change repository settings", "ssh -N -L"} {
@@ -526,7 +526,7 @@ func TestInstallAppAsksUntilInstalled(t *testing.T) {
 	g := newGitHub(t)
 	gh := GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}
 	st := state(t)
-	st.Repo, st.AppID, st.AppSlug = "ian/app", "4242", "symphony-ian-abc123"
+	st.Repo, st.AppID, st.AppSlug = "ian/app", "4242", "maestro-ian-abc123"
 	st.AppKeyFile = filepath.Join(st.Dir(), keyFileName)
 	os.WriteFile(st.AppKeyFile, []byte(g.key), 0o600)
 	install := &InstallApp{GitHub: gh}
@@ -537,7 +537,7 @@ func TestInstallAppAsksUntilInstalled(t *testing.T) {
 	if err := install.Run(ctx, u, st); !errors.Is(err, ErrAborted) {
 		t.Fatalf("%v", err)
 	}
-	if strings.Count(out.String(), "/apps/symphony-ian-abc123/installations/new") != 2 || !strings.Contains(out.String(), "Only select repositories") {
+	if strings.Count(out.String(), "/apps/maestro-ian-abc123/installations/new") != 2 || !strings.Contains(out.String(), "Only select repositories") {
 		t.Errorf("instructions:\n%s", out)
 	}
 	g.installed = true
@@ -554,7 +554,7 @@ func TestInstallAppAsksUntilInstalled(t *testing.T) {
 func installed(t *testing.T, g *github) *State {
 	t.Helper()
 	st := state(t)
-	st.Repo, st.AppID, st.AppSlug, st.InstallationID = "ian/app", "4242", "symphony-ian-abc123", "777"
+	st.Repo, st.AppID, st.AppSlug, st.InstallationID = "ian/app", "4242", "maestro-ian-abc123", "777"
 	st.AppKeyFile = filepath.Join(st.Dir(), keyFileName)
 	if err := os.WriteFile(st.AppKeyFile, []byte(g.key), 0o600); err != nil {
 		t.Fatal(err)
@@ -618,7 +618,7 @@ func TestWorkflowFileStep(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"repo: ian/app", "state_source: labels", `bot_login: "symphony-ian-abc123[bot]"`,
+		for _, want := range []string{"repo: ian/app", "state_source: labels", `bot_login: "maestro-ian-abc123[bot]"`,
 			"allowed_authors: [ian]", "    go test ./...\n", "name: linux", wantBackend,
 			"root: " + strconv.Quote(filepath.Join(st.Dir(), "workspaces")), "state_dir: " + strconv.Quote(filepath.Join(st.Dir(), "state"))} {
 			if strings.Contains(string(raw), "required_checks") {
