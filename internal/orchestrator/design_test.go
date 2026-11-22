@@ -166,3 +166,57 @@ func TestTasksWaitForTheDesignAndTidyUpAfter(t *testing.T) {
 		t.Errorf("deleted %v", r.deleted)
 	}
 }
+
+// ops lists the writes to one issue other than the status comment.
+func ops(e *env, id string) []string {
+	var out []string
+	for _, w := range e.tr.Writes() {
+		if w.ID != id || w.Op == "comment" {
+			continue
+		}
+		v := w.Value
+		if w.Op == "post" {
+			v = strings.SplitN(v, ".", 2)[0]
+		}
+		out = append(out, w.Op+":"+v)
+	}
+	return out
+}
+
+func TestDesignWorkShowsOnTheCardAndTheIssue(t *testing.T) {
+	e, _, d, _ := designEnv(t, inDesign(1))
+	d.plans["id-1"] = true
+	e.tick()
+	got := ops(e, "id-1")
+	if len(got) != 2 || got[0] != "post:An agent is making a design for the plan on worker `linux`" || got[1] != "label:"+DesigningLabel {
+		t.Fatalf("writes %v", got)
+	}
+	e.exit(Outcome{Kind: Designed, Design: &plan.Design{PRNumber: 9}})
+	got = ops(e, "id-1")
+	if len(got) != 4 || got[2] != "unlabel:"+DesigningLabel || got[3] != "set_state:Human Review" {
+		t.Fatalf("writes %v", got)
+	}
+}
+
+func TestPlanningShowsOnTheCardAndTheLabelGoesWhenTheRunIsStopped(t *testing.T) {
+	e, _, _, _ := designEnv(t, idea(1))
+	e.tick()
+	if got := ops(e, "id-1"); len(got) != 2 || got[0] != "post:An agent is planning this idea on worker `linux`" || got[1] != "label:"+PlanningLabel {
+		t.Fatalf("writes %v", got)
+	}
+	e.tr.Move("id-1", "Backlog")
+	e.tick()
+	if got := ops(e, "id-1"); got[len(got)-1] != "unlabel:"+PlanningLabel {
+		t.Fatalf("writes %v", got)
+	}
+}
+
+func TestCodingWorkGetsNoLabel(t *testing.T) {
+	e, _, _, _ := designEnv(t, todo(1))
+	e.tick()
+	for _, w := range ops(e, "id-1") {
+		if strings.HasPrefix(w, "label:") || strings.HasPrefix(w, "post:") {
+			t.Fatalf("writes %v", ops(e, "id-1"))
+		}
+	}
+}

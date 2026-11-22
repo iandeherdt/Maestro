@@ -273,7 +273,9 @@ haiku]}`; a card that asks for something else gets the default.
 For an idea that is too big or too vague for one pull request, move the card to **Idea** instead
 of Todo (set its Worker first).
 
-1. An agent reads the repository and thinks about the idea. It changes nothing.
+1. An agent reads the repository and thinks about the idea. It changes nothing. The card stays in
+   **Idea**, so you can tell it is being worked on by the label `maestro:planning` on the card
+   and a comment on the issue saying an agent started.
 2. If it needs to know something, it asks. The questions appear as a comment on the issue and the
    card moves to **Human Review**. Answer in a comment and move the card back to **Idea**.
 3. When it knows enough, it posts a plan: a list of small tasks, each with a full description,
@@ -304,7 +306,9 @@ Once a plan is posted, you can ask to see what it will look like before any of i
 is optional: skip it and move the card to **Planned** as before.
 
 1. Move the card with the plan to **Design**.
-2. An agent makes a design for the plan, in the folder `design/GH-<number>/` of the repository:
+2. An agent makes a design for the plan, in the folder `design/GH-<number>/` of the repository.
+   The card stays in **Design** and carries the label `maestro:designing` while it works, and a
+   comment on the issue says it started:
    - for a website or app, mock-ups of the pages and screens the plan adds, in plain HTML and CSS;
    - for a game, a game design (the core loop, controls, rules, levels, art direction and colours)
      with mock screens of the main moments and, where it helps, a tiny playable sketch.

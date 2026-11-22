@@ -183,6 +183,21 @@ func (f *Fake) FetchFeedback(_ context.Context, _ issue.Issue, since time.Time) 
 }
 
 var _ tracker.Planner = (*Fake)(nil)
+var _ tracker.Activity = (*Fake)(nil)
+
+func (f *Fake) MarkWorking(_ context.Context, is issue.Issue, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes = append(f.writes, Write{"label", is.ID, label})
+	return nil
+}
+
+func (f *Fake) UnmarkWorking(_ context.Context, is issue.Issue, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes = append(f.writes, Write{"unlabel", is.ID, label})
+	return nil
+}
 
 // planErr consumes the failure script of the planner writes.
 func (f *Fake) planErr() error {

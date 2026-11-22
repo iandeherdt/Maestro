@@ -2626,7 +2626,12 @@ adapter with `state_source: project`.
    (`Idea`).
 2. The orchestrator dispatches a planning run for it. The card is not moved: an idea in the
    in-progress state would be implemented as it stands after a restart. Claims, concurrency,
-   retries, budgets and reconciliation apply as for any run.
+   retries, budgets and reconciliation apply as for any run. Since the card stays where it is,
+   the run is made visible another way: a new comment on the issue says that an agent started,
+   and the issue carries the label `maestro:planning` for as long as the run lasts, so that the
+   card on the board shows it. Both are best effort and need the adapter's `activity`
+   operations (`mark_working`, `unmark_working`). A label left behind by a service that was
+   killed stays until the next run of that idea ends, or until the owner removes it.
 3. The planning run uses the same sandbox and the same agent, with a prompt of its own (22.2). The
    agent may read the repository. Nothing it changes is exported, verified or published.
 4. The run ends with questions or with a plan. The orchestrator moves the card to the hand-off
@@ -2951,7 +2956,7 @@ approved directly.
 1. A plan was posted (22.1) and the card is in the hand-off state. The owner moves it to
    `design_state` (`Design`).
 2. The orchestrator dispatches a design run. As with planning, the card is not moved while it
-   runs. An idea in the design state without a plan the owner saw is not dispatched; it gets one
+   runs; a new comment and the label `maestro:designing` show that an agent is at work (22.1). An idea in the design state without a plan the owner saw is not dispatched; it gets one
    comment saying so.
 3. The design run has a workspace and a branch of its own, named after the idea with the suffix
    `-design` (`maestro/GH-12-design`), so that it can never be taken for the idea's own work. The

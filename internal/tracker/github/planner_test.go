@@ -133,3 +133,25 @@ func TestPostCommentIsANewComment(t *testing.T) {
 		t.Fatalf("comments %+v", h.issues[1].comments)
 	}
 }
+
+func TestWorkingLabelGoesOnAndOff(t *testing.T) {
+	h := newBoardHub(t)
+	h.card(1, "ian", "Design", "linux")
+	a := boardAdapter(t, h)
+	gi, _, _ := a.read(ctx, 1)
+	is, _ := a.normalize(ctx, gi, nil)
+	if err := a.MarkWorking(ctx, is, "maestro:designing"); err != nil {
+		t.Fatal(err)
+	}
+	if l := strings.Join(h.issues[1].labels, ","); !strings.Contains(l, "maestro:designing") {
+		t.Fatalf("labels %q", l)
+	}
+	for i := 0; i < 2; i++ { // a second removal finds nothing and is fine
+		if err := a.UnmarkWorking(ctx, is, "maestro:designing"); err != nil {
+			t.Fatalf("removal %d: %v", i+1, err)
+		}
+	}
+	if l := strings.Join(h.issues[1].labels, ","); strings.Contains(l, "maestro:designing") {
+		t.Fatalf("labels %q", l)
+	}
+}
