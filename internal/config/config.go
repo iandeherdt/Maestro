@@ -33,6 +33,7 @@ type Config struct {
 	Verify      Verify
 	Screenshots Screenshots
 	Design      Design
+	Unity       Unity
 	Publish     Publish
 	Policy      Policy
 	Budget      Budget
@@ -123,6 +124,20 @@ type Verify struct {
 	TimeoutMS       int64
 	Network         bool
 	OutputTailBytes int64
+}
+
+// Unity is where the unity pack's checks run when they do not run in the
+// sandbox. Unity's Editor for Linux cannot run emulated on a Mac with Apple
+// silicon, so there the service runs the checks with the Editor that Unity
+// Hub installed, on the Mac itself, fenced off by macOS's sandbox.
+type Unity struct {
+	// Editor is the Unity Editor's program on this machine. Empty: the
+	// checks run in the sandbox like the other packs'.
+	Editor string
+	// Verify is the unity pack's check script, run with Editor. It is not
+	// part of Verify.Command then, and the pack's prepare step is not
+	// part of the before_run hook.
+	Verify string
 }
 
 // Screenshots is how the service takes pictures of the work for the pull
@@ -316,6 +331,35 @@ func (b *builder) conventions(root *section) {
 	}
 	b.cfg.Conventions = names
 	b.packs = conventions.Derive(list)
+
+	u := root.sub("unity")
+	editor := strings.TrimSpace(u.str("editor", ""))
+	b.strict(u)
+	if editor == "" {
+		return
+	}
+	if !filepath.IsAbs(editor) || strings.ContainsAny(editor, "\"$`\\\n") {
+		b.fail("unity.editor", "must be the full path of the Unity Editor's program, such as "+
+			"/Applications/Unity/Hub/Editor/6000.5.8f1/Unity.app/Contents/MacOS/Unity")
+		return
+	}
+	var unity, rest []*conventions.Pack
+	for _, p := range list {
+		if p.Name == "unity" {
+			unity = append(unity, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+	if len(unity) == 0 {
+		b.cfg.Warnings = append(b.cfg.Warnings, "unity.editor is set but the unity pack is off, so it is not used")
+		return
+	}
+	// The image, the protected paths and the hosts stay those of all
+	// packs; only the steps that run Unity move out of the sandbox.
+	r := conventions.Derive(rest)
+	b.packs.Prepare, b.packs.Verify = r.Prepare, r.Verify
+	b.cfg.Unity = Unity{Editor: editor, Verify: conventions.Derive(unity).Verify}
 }
 
 // both joins two shell scripts so that the second runs only when the
@@ -773,6 +817,9 @@ func (b *builder) verify(s *section) {
 		own = "" // the placeholder setup writes when there are no tests
 	}
 	v.Command = both(b.packs.Verify, own)
+	if strings.TrimSpace(v.Command) == "" && b.cfg.Unity.Verify != "" {
+		v.Command = "true" // the checks that matter run on the machine
+	}
 	v.TimeoutMS = b.positive("verify.timeout_ms", s.integer("timeout_ms", 1800000))
 	v.Network = s.boolean("network", false)
 	v.OutputTailBytes = b.positive("verify.output_tail_bytes", s.integer("output_tail_bytes", 16384))

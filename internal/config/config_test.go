@@ -578,3 +578,42 @@ func TestBinaryPaths(t *testing.T) {
 		t.Errorf("defaults %+v", c.Policy)
 	}
 }
+
+func TestUnityEditorMovesUnitysStepsOutOfTheSandbox(t *testing.T) {
+	const editor = "/Applications/Unity/Hub/Editor/6000.5.8f1/Unity.app/Contents/MacOS/Unity"
+	c := mustBuild(t, with("command: make test", "command: \"true\"", "conventions: [unity, blender]\nunity:\n  editor: "+editor+"\n"))
+	if c.Unity.Editor != editor || !strings.Contains(c.Unity.Verify, "sh conventions/unity/verify.sh || exit $?") {
+		t.Fatalf("unity %+v", c.Unity)
+	}
+	if strings.Contains(c.Verify.Command, "unity") || !strings.Contains(c.Verify.Command, "conventions/blender/verify.sh") {
+		t.Errorf("verify:\n%s", c.Verify.Command)
+	}
+	if strings.Contains(c.Hooks.BeforeRun, "unity") {
+		t.Errorf("before_run:\n%s", c.Hooks.BeforeRun)
+	}
+	// What the pack protects and needs stays.
+	if !slices.Contains(c.Policy.DenyPaths, "Packages/manifest.json") || !slices.Contains(c.Sandbox.AllowHooks, "packages.unity.com") {
+		t.Errorf("deny %v, hosts %v", c.Policy.DenyPaths, c.Sandbox.AllowHooks)
+	}
+
+	// Unity alone: the sandbox's own verify has nothing to do, and passes.
+	c = mustBuild(t, with("command: make test", "command: \"true\"", "conventions: [unity]\nunity:\n  editor: "+editor+"\n"))
+	if c.Verify.Command != "true" || c.Unity.Verify == "" {
+		t.Errorf("verify %q, unity %+v", c.Verify.Command, c.Unity)
+	}
+
+	// Without the setting, Unity runs in the sandbox.
+	c = mustBuild(t, with("command: make test", "command: \"true\"", "conventions: [unity]\n"))
+	if c.Unity != (Unity{}) || !strings.Contains(c.Verify.Command, "conventions/unity/verify.sh") {
+		t.Errorf("verify %q, unity %+v", c.Verify.Command, c.Unity)
+	}
+
+	for _, bad := range []string{"Unity", "/a/$(x)/Unity", "/a/\"/Unity"} {
+		if _, err := build(t, with("", "", "conventions: [unity]\nunity:\n  editor: '"+bad+"'\n"), nil); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	if _, err := build(t, with("", "", "conventions: [unity]\nunity:\n  editr: x\n"), nil); err == nil {
+		t.Error("a misspelt key was accepted")
+	}
+}

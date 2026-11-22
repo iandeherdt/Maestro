@@ -31,6 +31,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/gate"
 	"github.com/iandeherdt/Maestro/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"github.com/iandeherdt/Maestro/internal/httpapi"
 	"github.com/iandeherdt/Maestro/internal/issue"
 	"github.com/iandeherdt/Maestro/internal/logging"
@@ -205,6 +206,39 @@ func (in *install) docker(ctx context.Context) error {
 		return explain("Docker is installed but not running. Start Docker Desktop, wait until it says it is running, and try again.")
 	}
 	return nil
+}
+
+// hostChecks runs the unity pack's checks with the Editor of this Mac
+// (unity.editor), inside macOS's sandbox. Nil where there is no such
+// sandbox; a settings file that asks for them then fails at the checks
+// with words.
+func (in *install) hostChecks(cfg func() *config.Config, log *slog.Logger) gate.HostChecks {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return nil
+	}
+	return &hostcheck.Runner{
+		MirrorDir: in.mirrorDir, HandoffDir: in.handoffDir,
+		// Unity's Library is big and can be made again: it belongs in the
+		// caches, apart from Maestro's setup, which the checks cannot read.
+		WorkDir: filepath.Join(cache, "maestro", "unity-checks", in.cfg.Worker.Name),
+		Secret:  absAll(in.dir, in.cfg.Budget.StateDir, in.cfg.Workspace.Root),
+		Allow:   func() []string { return cfg().Sandbox.AllowHooks },
+		Log:     log,
+	}
+}
+
+func absAll(paths ...string) []string {
+	var out []string
+	for _, p := range paths {
+		if a, err := filepath.Abs(p); err == nil && p != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // allow writes the proxies' allowlists from the configuration.
@@ -404,6 +438,20 @@ type synced struct {
 	sync func(context.Context) error
 	log  *slog.Logger
 	mu   sync.Mutex
+	// host drops what the checks on this machine kept for a workspace.
+	host gate.HostChecks
+}
+
+// Remove removes the workspace, and the folder its checks on this machine
+// used, which holds Unity's imported assets.
+func (s *synced) Remove(ctx context.Context, identifier string) error {
+	if err := s.Manager.Remove(ctx, identifier); err != nil {
+		return err
+	}
+	if k, err := issue.WorkspaceKey(identifier); err == nil && s.host != nil {
+		s.host.Forget(k)
+	}
+	return nil
 }
 
 func (s *synced) Ensure(ctx context.Context, is issue.Issue) (workspace.Workspace, error) {
@@ -587,16 +635,17 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		APIURL: gh.api, GitURL: gh.git,
 	}
 	spaces := workspace.New(cur.config(), in.box, log)
+	host := in.hostChecks(cur.config, log)
 	wk := &worker.Worker{
 		Settings: func() worker.Settings {
 			l := cur.p.Load()
 			return worker.Settings{Config: l.Config, Prompt: l.Prompt}
 		},
 		Tracker:    trk,
-		Workspaces: &synced{Manager: spaces, sync: syncMirror, log: log},
+		Workspaces: &synced{Manager: spaces, sync: syncMirror, log: log, host: host},
 		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
 			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} }},
-		Gates: &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub},
+		Gates: &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub, Host: host},
 		Notes: pub,
 	}
 	// The planning stage needs a board. The names of its states are read

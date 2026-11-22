@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"github.com/iandeherdt/Maestro/internal/issue"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
 	"github.com/iandeherdt/Maestro/internal/sandbox"
@@ -189,5 +190,64 @@ func TestTailKeepsValidText(t *testing.T) {
 	}
 	if got := tail([]byte("abc"), 0); got != "abc" {
 		t.Fatalf("%q", got)
+	}
+}
+
+type fakeHost struct {
+	calls  []string
+	res    hostcheck.Result
+	err    error
+	forgot []string
+}
+
+func (h *fakeHost) Unity(_ context.Context, editor, key, head, script string) (hostcheck.Result, error) {
+	h.calls = append(h.calls, editor+"|"+key+"|"+head+"|"+script)
+	return h.res, h.err
+}
+
+func (h *fakeHost) Forget(key string) { h.forgot = append(h.forgot, key) }
+
+func TestUnityChecksRunOnTheMachineAfterTheSandbox(t *testing.T) {
+	r := newRig(headA + " 2")
+	r.cfg.Verify.OutputTailBytes = 1000
+	r.cfg.Unity = config.Unity{Editor: "/x/Unity", Verify: "sh conventions/unity/verify.sh"}
+	h := &fakeHost{res: hostcheck.Result{Output: []byte("3 tests passed.")}}
+	r.g.Host = h
+	r.verify = sandbox.Result{Stdout: []byte("sandbox ok\n")}
+	v, err := r.g.Verify(ctx, ws)
+	if err != nil || !v.Passed || v.OutputTail != "sandbox ok\n3 tests passed." {
+		t.Fatalf("%+v, %v", v, err)
+	}
+	if len(h.calls) != 1 || h.calls[0] != "/x/Unity|GH-1|"+headA+"|sh conventions/unity/verify.sh" {
+		t.Fatalf("calls %v", h.calls)
+	}
+
+	h.res = hostcheck.Result{ExitStatus: 1, Output: []byte("FAILED HealthTests.Heal")}
+	if v, err := r.g.Verify(ctx, ws); err != nil || v.Passed || v.ExitStatus != 1 || !strings.HasSuffix(v.OutputTail, "FAILED HealthTests.Heal") {
+		t.Fatalf("%+v, %v", v, err)
+	}
+
+	// A sandbox that fails already does not start Unity.
+	r.verify = sandbox.Result{ExitStatus: 2}
+	r.g.Verify(ctx, ws)
+	if len(h.calls) != 2 {
+		t.Fatalf("calls %v", h.calls)
+	}
+
+	// A problem of the machine is an error, not the agent's failure.
+	r.verify = sandbox.Result{}
+	h.err = errors.New("Unity Hub has no licence")
+	if _, err := r.g.Verify(ctx, ws); err == nil {
+		t.Fatal("no error")
+	}
+	r.g.Host = nil
+	if _, err := r.g.Verify(ctx, ws); err == nil {
+		t.Fatal("no error without a host")
+	}
+
+	r.g.Host = h
+	r.g.Forget("GH-1")
+	if len(h.forgot) != 1 {
+		t.Fatal("not forgotten")
 	}
 }

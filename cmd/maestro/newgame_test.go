@@ -147,3 +147,28 @@ func TestRemoteRE(t *testing.T) {
 		}
 	}
 }
+
+func TestWithUnityEditorSetsOneSection(t *testing.T) {
+	const editor = "/Applications/Unity/Hub/Editor/6000.5.8f1/Unity.app/Contents/MacOS/Unity"
+	file := "---\nconventions: [unity]\nverify:\n  command: \"true\"\n---\nThe prompt.\nunity:\n  editor: not this one\n"
+	got, err := withUnityEditor(file, editor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "---\nunity:\n  editor: \"" + editor + "\"\nconventions: [unity]\nverify:\n  command: \"true\"\n---\nThe prompt.\nunity:\n  editor: not this one\n"
+	if got != want {
+		t.Fatalf("got:\n%s", got)
+	}
+	// Again: the section is replaced, not added twice.
+	again, err := withUnityEditor(strings.Replace(got, "6000.5.8f1", "6000.0.1f1", 1), editor)
+	if err != nil || again != want {
+		t.Fatalf("again (%v):\n%s", err, again)
+	}
+	mid := "---\nconventions: [unity]\nunity:\n  editor: /old\n\nverify:\n  command: x\n---\n"
+	if got, _ := withUnityEditor(mid, editor); got != "---\nconventions: [unity]\nunity:\n  editor: \""+editor+"\"\nverify:\n  command: x\n---\n" {
+		t.Fatalf("in the middle:\n%s", got)
+	}
+	if _, err := withUnityEditor("no settings\n", editor); err == nil {
+		t.Error("a file without settings was accepted")
+	}
+}

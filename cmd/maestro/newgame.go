@@ -14,10 +14,12 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/iandeherdt/Maestro/internal/config"
 	"github.com/iandeherdt/Maestro/internal/conventions"
+	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"github.com/iandeherdt/Maestro/internal/setup"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 	"golang.org/x/term"
@@ -168,7 +170,7 @@ func runGame(ctx context.Context, ui *setup.UI, g *game) int {
 		&gameRepo{g},
 		&setup.Machine{}, &setup.CreateApp{Port: setup.DefaultPort}, &setup.InstallApp{}, &setup.Tickets{},
 		&setup.WorkflowFile{PackTests: func() string { return "sh conventions/" + g.engine + "/verify.sh" }},
-		&gameEnable{g}, &gameImage{g}, &gameLicence{g},
+		&gameEnable{g}, &gameHostUnity{g}, &gameImage{g}, &gameLicence{g},
 	}
 	if err := setup.Run(ctx, ui, g.st, steps); err != nil {
 		if errors.Is(err, setup.ErrAborted) {
@@ -1050,6 +1052,129 @@ func (s *gameEnable) Run(_ context.Context, ui *setup.UI, st *setup.State) error
 	return nil
 }
 
+// ---- 8b. on a Mac with Apple silicon, Unity's checks run with its own Unity
+
+type gameHostUnity struct{ *game }
+
+func (*gameHostUnity) Title() string { return "Run Unity's checks with the Unity on this Mac" }
+
+// needed: Unity's Editor for Linux crashes when it runs emulated, and on a
+// Mac with Apple silicon emulated is the only way it runs.
+func (s *gameHostUnity) needed() bool {
+	return s.engine == "unity" && s.goos == "darwin" && s.arch == "arm64"
+}
+
+func (s *gameHostUnity) Check(_ context.Context, st *setup.State) (setup.Status, error) {
+	if !s.needed() {
+		return setup.Status{Done: true, Detail: "The checks run in the sandbox."}, nil
+	}
+	def, err := workflow.Load(st.WorkflowFile)
+	if err != nil {
+		return setup.Status{Detail: "The settings file cannot be read: " + err.Error()}, nil
+	}
+	cfg, err := config.Build(def, config.Options{Env: os.Getenv, HomeDir: s.home})
+	if err != nil {
+		return setup.Status{Detail: "The settings file cannot be read: " + err.Error()}, nil
+	}
+	want := projectVersion(s.dir)
+	if e := cfg.Unity.Editor; e != "" && hostcheck.EditorVersion(e) == want {
+		if _, err := os.Stat(e); err == nil {
+			return setup.Status{Done: true, Detail: "The checks use Unity " + want + " from Unity Hub on this Mac."}, nil
+		}
+	}
+	return setup.Status{Detail: "Unity's Editor for Linux does not run emulated on a Mac with Apple silicon, " +
+		"so the service runs Unity's checks with the Unity that Unity Hub installed here."}, nil
+}
+
+func (s *gameHostUnity) Run(_ context.Context, ui *setup.UI, st *setup.State) error {
+	want := projectVersion(s.dir)
+	editor := (&gameFolder{s.game}).localEditor(want)
+	for editor == "" {
+		ui.Say("  Unity %s is not installed with Unity Hub on this Mac. In Unity Hub: Installs, Install Editor,", want)
+		ui.Say("  then %s (under Archive if it is not listed).", want)
+		ok, err := ui.Confirm("  Installed?")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return setup.ErrAborted
+		}
+		editor = (&gameFolder{s.game}).localEditor(want)
+	}
+	ui.Say("  The service will run Unity's checks with %s.", tildePath(editor, s.home))
+	ui.Say("  They run the agent's code on this Mac, fenced off by macOS's sandbox: no network but Unity's")
+	ui.Say("  hosts, no writes outside their own folder and Unity's, and no reads of Maestro's keys. That fence")
+	ui.Say("  is weaker than the container, so use it for your own projects only.")
+	ok, err := ui.Confirm("  Write this into the settings file?")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return setup.ErrAborted
+	}
+	if err := setUnityEditor(st.WorkflowFile, editor, s.home); err != nil {
+		return err
+	}
+	if !hostcheck.HubLicence(s.home) {
+		ui.Say("  Unity Hub has no licence on this Mac yet. Open Unity Hub, sign in, and add one (Preferences,")
+		ui.Say("  Licenses, Add, Get a free personal licence). The checks need it.")
+	}
+	return nil
+}
+
+var unityBlockRE = regexp.MustCompile(`(?m)^unity:[^\n]*\n(?:[ \t]+[^\n]*\n|[ \t]*\n)*`)
+
+// withUnityEditor sets unity.editor in the settings block of a settings file.
+func withUnityEditor(text, editor string) (string, error) {
+	if !strings.HasPrefix(text, "---\n") && !strings.HasPrefix(text, "---\r\n") {
+		return "", errors.New("the settings file does not start with a settings block (a line of three dashes)")
+	}
+	block := "unity:\n  editor: " + strconv.Quote(editor) + "\n"
+	nl := strings.Index(text, "\n") + 1
+	end := strings.Index(text[nl:], "\n---")
+	if end < 0 {
+		return "", errors.New("the settings block of the settings file does not end")
+	}
+	head := text[nl : nl+end+1]
+	if loc := unityBlockRE.FindStringIndex(head); loc != nil {
+		return text[:nl] + head[:loc[0]] + block + head[loc[1]:] + text[nl+end+1:], nil
+	}
+	return text[:nl] + block + text[nl:], nil
+}
+
+// setUnityEditor writes unity.editor into the settings file, and keeps the
+// old file when the new one does not read as intended.
+func setUnityEditor(path, editor, home string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text, err := withUnityEditor(string(raw), editor)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, []byte(text), info.Mode().Perm()); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	def, err := workflow.Load(tmp)
+	if err == nil {
+		var cfg *config.Config
+		if cfg, err = config.Build(def, config.Options{Env: os.Getenv, HomeDir: home}); err == nil && cfg.Unity.Editor != editor {
+			err = errors.New("the change did not take effect")
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("the settings file was left as it was, because the changed one is not valid: %w", err)
+	}
+	return os.Rename(tmp, path)
+}
+
 // ---- 10. the Unity licence (after the image: Unity activates inside it)
 
 type gameLicence struct{ *game }
@@ -1059,6 +1184,12 @@ func (*gameLicence) Title() string { return "Give the checks a Unity licence" }
 func (s *gameLicence) Check(context.Context, *setup.State) (setup.Status, error) {
 	if s.engine != "unity" {
 		return setup.Status{Done: true, Detail: "Godot needs no licence."}, nil
+	}
+	if (&gameHostUnity{s.game}).needed() {
+		if hostcheck.HubLicence(s.home) {
+			return setup.Status{Done: true, Detail: "The checks use Unity Hub's licence on this Mac."}, nil
+		}
+		return setup.Status{Detail: "The checks use Unity Hub's licence on this Mac, and there is none yet."}, nil
 	}
 	if unityStore(s.setupDir).Has() {
 		return setup.Status{Done: true, Detail: "This machine has a Unity licence for the checks."}, nil
@@ -1088,6 +1219,19 @@ func (s *gameLicence) licenceFiles() []string {
 }
 
 func (s *gameLicence) Run(_ context.Context, ui *setup.UI, st *setup.State) error {
+	if (&gameHostUnity{s.game}).needed() {
+		for !hostcheck.HubLicence(s.home) {
+			ui.Say("  Open Unity Hub, sign in, and add a licence: Preferences, Licenses, Add, Get a free personal licence.")
+			ok, err := ui.Confirm("  Done?")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return setup.ErrAborted
+			}
+		}
+		return nil
+	}
 	store := unityStore(s.setupDir)
 	for {
 		if files := s.licenceFiles(); len(files) > 0 {
@@ -1173,9 +1317,8 @@ func (s *gameImage) Run(_ context.Context, ui *setup.UI, st *setup.State) error 
 	if s.engine == "unity" {
 		ui.Say("  The Unity Editor makes the image about 8 GB, so the first build takes a while.")
 		if s.arch == "arm64" {
-			ui.Say("  Unity's Editor for Linux exists for Intel only, so on this Mac the sandbox runs emulated, which")
-			ui.Say("  is slower. In Docker Desktop, switch on Settings, General, \"Use Rosetta for x86_64/amd64")
-			ui.Say("  emulation on Apple Silicon\" before you go on.")
+			ui.Say("  Unity's Editor for Linux exists for Intel only, so on this Mac the agent's container runs")
+			ui.Say("  emulated, which is slower. Unity's own checks run with the Unity on this Mac.")
 		}
 	}
 	ok, err := ui.Confirm("  Build it now?")
