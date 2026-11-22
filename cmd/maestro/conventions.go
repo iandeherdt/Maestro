@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -24,6 +25,8 @@ const conventionsUsage = `usage:
   maestro conventions enable PACK...       switch the packs on in this machine's settings file
         [--file WORKFLOW.md]
   maestro conventions disable PACK...      switch them off again
+  maestro conventions check [PACK...]      run the packs' quick checks in the checkout you are in
+        [--to DIR]                          (the packs found in it, when none are named)
 
 Several packs at once: maestro conventions apply godot blender klad`
 
@@ -43,6 +46,9 @@ func runConventions(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "See the rules of one:    maestro conventions show PACK")
 		fmt.Fprintln(stdout, "Add one to a project:    maestro conventions apply PACK    (run it inside a checkout of the project)")
 		return 0
+	}
+	if args[0] == "check" && (len(args) == 1 || strings.HasPrefix(args[1], "-")) {
+		return checkConventions(nil, args[1:], stdout, stderr)
 	}
 	if len(args) < 2 {
 		fmt.Fprintln(stderr, conventionsUsage)
@@ -79,6 +85,8 @@ func runConventions(args []string, stdout, stderr io.Writer) int {
 		}
 	case "apply":
 		return applyConventions(list, args[n:], stdout, stderr)
+	case "check":
+		return checkConventions(list, args[n:], stdout, stderr)
 	case "enable", "disable":
 		for _, p := range list {
 			if code := switchConventions(p, args[0] == "enable", args[n:], stdout, stderr); code != 0 {
@@ -89,6 +97,68 @@ func runConventions(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stderr, conventionsUsage)
 	return 2
+}
+
+// checkConventions runs the quick check of each pack in a checkout, the
+// one the agent runs while it works: it needs no licence and no network.
+// A pack without one is checked before every push only.
+func checkConventions(list []*conventions.Pack, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("conventions check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	to := fs.String("to", ".", "the checkout of the project")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, conventionsUsage)
+		return 2
+	}
+	dir, err := filepath.Abs(*to)
+	if err != nil {
+		return report(stderr, err)
+	}
+	if list == nil {
+		for _, n := range conventions.Names() {
+			if st, err := os.Stat(filepath.Join(dir, "conventions", n)); err == nil && st.IsDir() {
+				p, err := conventions.Get(n)
+				if err != nil {
+					return report(stderr, err)
+				}
+				list = append(list, p)
+			}
+		}
+		if len(list) == 0 {
+			return report(stderr, explain("%s has no rule packs (no conventions/ folder of a pack).\n"+
+				"Run this inside a checkout of a project with packs, or add one: maestro conventions apply PACK", dir))
+		}
+	}
+	failed := 0
+	for _, p := range list {
+		script := filepath.Join(dir, "conventions", p.Name, "check.sh")
+		if _, err := os.Stat(script); err != nil {
+			if _, err := os.Stat(filepath.Join(dir, "conventions", p.Name)); err != nil {
+				fmt.Fprintf(stdout, "%s: not in this checkout. Add it with: maestro conventions apply %s\n", p.Name, p.Name)
+				failed++
+				continue
+			}
+			fmt.Fprintf(stdout, "%s: no quick check; Maestro runs its checks before every push.\n", p.Name)
+			continue
+		}
+		if changed := packChanged(dir, p); len(changed) > 0 {
+			fmt.Fprintf(stdout, "%s: %d of its files here are not this Maestro's (%s). maestro new updates them and pushes them.\n",
+				p.Name, len(changed), strings.Join(changed, ", "))
+		}
+		fmt.Fprintf(stdout, "%s: sh conventions/%s/check.sh\n", p.Name, p.Name)
+		cmd := exec.Command("sh", filepath.Join("conventions", p.Name, "check.sh"))
+		cmd.Dir, cmd.Stdout, cmd.Stderr = dir, stdout, stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(stdout, "%s: FAILED\n", p.Name)
+			failed++
+			continue
+		}
+		fmt.Fprintf(stdout, "%s: passed\n", p.Name)
+	}
+	if failed > 0 {
+		return 1
+	}
+	return 0
 }
 
 func showConventions(p *conventions.Pack, stdout io.Writer) int {

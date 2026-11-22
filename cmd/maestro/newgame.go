@@ -639,20 +639,30 @@ func (s *gamePacks) outdated() map[string][]string {
 		if _, err := os.Stat(filepath.Join(s.dir, filepath.FromSlash(p.GuidePath()))); err != nil {
 			continue // not in the project: missing, not outdated
 		}
-		files, err := p.Files()
-		if err != nil {
+		if names := packChanged(s.dir, p); len(names) > 0 {
+			out[n] = names
+		}
+	}
+	return out
+}
+
+// packChanged lists the files of a pack in dir that differ from this
+// version's, settings.sh (the owner's) left out.
+func packChanged(dir string, p *conventions.Pack) []string {
+	files, err := p.Files()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for name, raw := range files {
+		if path.Base(name) == "settings.sh" {
 			continue
 		}
-		for name, raw := range files {
-			if path.Base(name) == "settings.sh" {
-				continue
-			}
-			if have, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(name))); err != nil || !bytes.Equal(have, raw) {
-				out[n] = append(out[n], name)
-			}
+		if have, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name))); err != nil || !bytes.Equal(have, raw) {
+			out = append(out, name)
 		}
-		sort.Strings(out[n])
 	}
+	sort.Strings(out)
 	return out
 }
 

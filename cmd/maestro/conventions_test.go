@@ -122,3 +122,61 @@ func TestConventionsEnableChangesTheSettingsFileSafely(t *testing.T) {
 		t.Error("an invalid file was changed")
 	}
 }
+
+// TestConventionsCheckFindsTheHubEditorOnAMac runs the unity pack's quick
+// check as a person would on a Mac: no UNITY_PATH, the Editor where Unity
+// Hub put it (here the folder set in Hub's settings).
+func TestConventionsCheckFindsTheHubEditorOnAMac(t *testing.T) {
+	tmp := t.TempDir()
+	repo, home, hub, bin := filepath.Join(tmp, "repo"), filepath.Join(tmp, "home"), filepath.Join(tmp, "Hub Editors"), filepath.Join(tmp, "bin")
+	contents := filepath.Join(hub, "6000.5.8f1", "Unity.app", "Contents")
+	files := map[string]string{
+		filepath.Join(bin, "uname"):                                                                    "#!/bin/sh\necho Darwin\n",
+		filepath.Join(contents, "MacOS", "Unity"):                                                      "#!/bin/sh\nexit 0\n",
+		filepath.Join(contents, "NetCoreRuntime", "dotnet"):                                            "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/called\"\n",
+		filepath.Join(contents, "DotNetSdkRoslyn", "csc.dll"):                                          "",
+		filepath.Join(home, "Library", "Application Support", "UnityHub", "secondaryInstallPath.json"): `"` + hub + `"`,
+		filepath.Join(repo, ".git", "HEAD"):                                                            "ref: refs/heads/main\n",
+		filepath.Join(repo, "ProjectSettings", "ProjectVersion.txt"):                                   "m_EditorVersion: 6000.5.8f1\n",
+		filepath.Join(repo, "ProjectSettings", "EditorSettings.asset"):                                 "EditorSettings:\n  m_SerializationMode: 2\n",
+		filepath.Join(repo, "Assets", "Game.cs"):                                                       "class Game {}\n",
+		filepath.Join(repo, "Assets", "Game.cs.meta"):                                                  "guid: 1\n",
+	}
+	for p, text := range files {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(text), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out, errs bytes.Buffer
+	if code := runConventions([]string{"apply", "unity", "--to", repo}, &out, &errs); code != 0 {
+		t.Fatalf("apply: %d\n%s%s", code, out.String(), errs.String())
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", home)
+	t.Setenv("UNITY_PATH", "")
+	os.Unsetenv("UNITY_PATH")
+	out.Reset()
+	errs.Reset()
+	if code := runConventions([]string{"check", "--to", repo}, &out, &errs); code != 0 {
+		t.Fatalf("check: %d\n%s%s", code, out.String(), errs.String())
+	}
+	if !strings.Contains(out.String(), "unity: passed") {
+		t.Errorf("%s", out.String())
+	}
+	if called, _ := os.ReadFile(filepath.Join(contents, "NetCoreRuntime", "called")); !strings.Contains(string(called), filepath.Join(contents, "DotNetSdkRoslyn", "csc.dll")) {
+		t.Errorf("the Hub Editor's compiler was not used: %q", called)
+	}
+
+	// Another version than the project's is not taken for it.
+	os.WriteFile(filepath.Join(repo, "ProjectSettings", "ProjectVersion.txt"), []byte("m_EditorVersion: 6000.6.0f1\n"), 0o644)
+	out.Reset()
+	errs.Reset()
+	if code := runConventions([]string{"check", "unity", "--to", repo}, &out, &errs); code != 1 || !strings.Contains(errs.String(), "Unity 6000.6.0f1, the version of this project, is not installed") {
+		t.Errorf("%d\n%s%s", code, out.String(), errs.String())
+	}
+	// A checkout without packs says so.
+	if code := runConventions([]string{"check", "--to", tmp}, &out, &errs); code == 0 || !strings.Contains(errs.String(), "no rule packs") {
+		t.Errorf("no packs: %d %s", code, errs.String())
+	}
+}
