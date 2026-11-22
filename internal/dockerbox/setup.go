@@ -19,7 +19,10 @@ import (
 
 // ClaudeVersion is the Claude Code release the image is built with. The
 // version is pinned because a later release may change what print mode
-// does with the login (SPEC 10.1).
+// does with the login (SPEC 10.1). The scheduled pin check reads the
+// marker below; keep it next to the constant.
+//
+// pin: npm @anthropic-ai/claude-code
 const ClaudeVersion = "2.1.330"
 
 const proxyConfigDir = "/etc/maestro-proxy"

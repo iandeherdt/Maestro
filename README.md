@@ -611,6 +611,24 @@ go test -race ./...
 The tests need Git on the PATH. A live test of the GitHub adapter exists behind a build tag and
 is described at the top of `internal/tracker/github/live_test.go`.
 
+### Pinned tool versions
+
+The sandbox image and the convention packs pin the versions of the tools they install: Claude
+Code, the Node.js base image, the .NET SDK, and whatever a pack adds. Every Monday the workflow
+`pin-updates` looks for newer releases and keeps one issue, labelled `pin-updates`, that lists
+each newer release and every file that names the old one. It closes the issue once every pin is
+current. Run it by hand from the Actions page, or locally:
+
+```sh
+go run ./tools/pincheck          # the report
+go run ./tools/pincheck -list    # only the pins it finds, and where
+```
+
+Pins are found from their shape, so a new pack needs nothing extra: an image after `FROM`,
+`COPY --from=`, `container:` or `image:`, a literal `npm install name@version`, a
+`git clone --branch <tag>`, a GitHub release download, and a Blender download. A version kept in
+a constant is marked with a comment above it, such as `// pin: npm @anthropic-ai/claude-code`.
+
 ## Background
 
 The design follows the specification of OpenAI's Symphony, adapted for Claude Code and hardened
