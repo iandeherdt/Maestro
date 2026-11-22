@@ -169,20 +169,6 @@ func findProject(ps []project, name string) (project, bool) {
 	return project{}, false
 }
 
-// projectOf is the project whose setup directory is dir, if any.
-func projectOf(dir string) (project, bool) {
-	ps, err := listProjects()
-	if err != nil {
-		return project{}, false
-	}
-	for _, p := range ps {
-		if samePath(p.Dir, dir) {
-			return p, true
-		}
-	}
-	return project{}, false
-}
-
 func samePath(a, b string) bool {
 	a, _ = filepath.Abs(a)
 	b, _ = filepath.Abs(b)
