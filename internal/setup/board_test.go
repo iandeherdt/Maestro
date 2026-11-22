@@ -430,3 +430,23 @@ func TestABoardWithCardsWorksWithoutTheDesignColumn(t *testing.T) {
 		t.Errorf("not done without the optional column: %s", s.Detail)
 	}
 }
+
+// A board that cannot take this machine can be swapped for a new one in
+// the same run.
+func TestBoardStepOffersAnotherBoard(t *testing.T) {
+	g := newGitHub(t)
+	full := []option{}
+	for _, c := range columns {
+		full = append(full, option(c))
+	}
+	g.boards = []*fakeBoard{{number: 1, title: "Shared", items: 5, status: full, hasWorker: true, worker: []option{{"mac", "BLUE", "x"}}, hasModel: true}}
+	st, step := onOrg(t, g)
+	// Pick board 1, then "another board", then press Enter to create one.
+	u, out := ui("\nian\n1\n2\n\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if st.Board == 1 || st.Board == 0 || len(g.mutations) == 0 {
+		t.Fatalf("board %d, mutations %v\n%s", st.Board, g.mutations, out)
+	}
+}
