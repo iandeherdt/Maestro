@@ -12,8 +12,8 @@ out=${ART_OUT:-$ART_OUTPUT}
 mkdir -p "$out"
 names=${*:-$(generators)}
 if [ -z "$names" ]; then
-    echo "conventions: there are no generators in $ART_SOURCE." >&2
-    exit 1
+    echo "There are no generators yet; nothing to build."
+    exit 0
 fi
 work=$(mktemp -d)
 failed=0
@@ -36,6 +36,10 @@ for n in $names; do
         continue
     fi
     cp -R "$work/$n/." "$out/"
+    # Which generator made which file, for the checks.
+    if [ -n "${ART_MANIFEST:-}" ]; then
+        (cd "$work/$n" && find . -type f | sed "s#^\./#$n #") >> "$ART_MANIFEST"
+    fi
     echo "ok $n: $(ls "$work/$n" | tr '\n' ' ')"
 done
 rm -rf "$work"

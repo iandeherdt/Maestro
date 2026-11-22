@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,8 @@ type install struct {
 	state  *setup.State
 	box    *dockerbox.Box
 	skills skills.Store
+	// dir is where setup keeps its state.
+	dir string
 	// Directories of the control zone.
 	mirrorDir, handoffDir, allowDir, auditDir string
 }
@@ -136,6 +139,7 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	in.auditDir = filepath.Join(stateDir, "audit")
 	in.handoffDir = filepath.Join(in.cfg.Workspace.Root, ".handoff")
 	bot := st.AppSlug + "[bot]"
+	in.dir = dir
 	in.skills = skills.Store{Dir: filepath.Join(dir, "agent-files")}
 	if err := in.skills.Ensure(); err != nil {
 		return nil, err
@@ -148,10 +152,19 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		Memory: strings.ToLower(in.cfg.Sandbox.MemoryMax), CPUs: cpus(in.cfg.Sandbox.CPUQuota), PIDs: in.cfg.Sandbox.TasksMax,
 		BotName: bot, BotEmail: bot + "@users.noreply.github.com",
 	}
-	// The checks get the Unity licence, when there is one (`maestro unity
-	// activate`). The agent's own step never does.
-	if lic := unityStore(dir); lic.Has() {
+	// The checks get the Unity licence when the unity pack is on and there
+	// is one (`maestro unity activate`). The agent's own step never does.
+	if lic := unityStore(dir); lic.Has() && slices.Contains(in.cfg.Conventions, "unity") {
 		in.box.UnityLicenceDir = lic.Dir
+	}
+	// The agents get the skills of the packs that are on. They do not read
+	// the repository's .claude settings, where the packs put them for people.
+	packs, err := conventions.Resolve(in.cfg.Conventions)
+	if err != nil {
+		return nil, err
+	}
+	if err := conventions.SyncSkills(in.skills.SkillsDir(), packs); err != nil {
+		return nil, err
 	}
 	return in, nil
 }
@@ -537,8 +550,12 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	pub := &publish.Publisher{
 		Config: cur.config, Mirror: mir, HandoffDir: in.handoffDir, Token: code.Token,
-		HeldSecrets: func() []string { return []string{tickets.Current(), code.Current()} },
-		BotName:     in.box.BotName, BotEmail: in.box.BotEmail, BotLogin: in.box.BotName,
+		HeldSecrets: func() []string {
+			// The Unity licence reaches code the agent wrote, in the checks:
+			// it may not leave in a commit.
+			return append([]string{tickets.Current(), code.Current()}, unityStore(in.dir).Secrets()...)
+		},
+		BotName: in.box.BotName, BotEmail: in.box.BotEmail, BotLogin: in.box.BotName,
 		APIURL: gh.api, GitURL: gh.git,
 	}
 	spaces := workspace.New(cur.config(), in.box, log)

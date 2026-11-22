@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -67,5 +68,26 @@ func TestImport(t *testing.T) {
 	}
 	if got := s.Files(); !reflect.DeepEqual(got, []string{LicenceFile}) {
 		t.Fatalf("files %v", got)
+	}
+}
+
+func TestSecretsAreTheLicencesValues(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "unity-licence")}
+	sig := "QmFzZTY0U2lnbmF0dXJlVmFsdWVUaGF0SXNMb25nRW5vdWdoVG9TcGxpdEludG9QaWVjZXNPZlRoaXJ0eVR3bw=="
+	ulf := `<?xml version="1.0" encoding="UTF-8"?><root><License id="Terms">
+<SerialMasked Value="F4-XXXX-XXXX-XXXX-XXXX-1234"/><Binding Key="1" Value="576562626572264761624c65526f7578"/>
+<Short Value="abc"/></License><Signature><SignatureValue>` + sig[:40] + "\n" + sig[40:] + `</SignatureValue></Signature></root>`
+	if err := s.Save(map[string][]byte{LicenceFile: []byte(ulf)}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.Secrets()
+	want := []string{"F4-XXXX-XXXX-XXXX-XXXX-1234", "576562626572264761624c65526f7578", sig, sig[:32]}
+	for _, w := range want {
+		if !slices.Contains(got, w) {
+			t.Errorf("missing %q in %q", w, got)
+		}
+	}
+	if slices.Contains(got, "abc") {
+		t.Error("a short value is not distinctive")
 	}
 }

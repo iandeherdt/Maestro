@@ -22,19 +22,24 @@ own=$(find Assets -name '*.asmdef' -exec sed -n 's/^[[:space:]]*"name"[[:space:]
         UNITY_2021_1_OR_NEWER UNITY_2022_1_OR_NEWER UNITY_2023_1_OR_NEWER UNITY_6000_0_OR_NEWER
     for f in "$UNITY_DATA"/Managed/UnityEngine/*.dll "$UNITY_DATA"/NetStandard/ref/2.1.0/netstandard.dll "$UNITY_DATA"/NetStandard/compat/2.1.0/shims/netfx/*.dll \
         "$UNITY_DATA"/Resources/PackageManager/BuiltInPackages/com.unity.ext.nunit/net40/unity-custom/nunit.framework.dll; do
-        [ -f "$f" ] && echo "-r:$f"
+        if [ -f "$f" ]; then echo "-r:$f"; fi
     done
     if [ -d Library/ScriptAssemblies ]; then
         for f in Library/ScriptAssemblies/*.dll; do
             [ -f "$f" ] || continue
             name=$(basename "$f" .dll)
             case "$name" in Assembly-CSharp*) continue ;; esac
-            echo "$own" | grep -qx "$name" && continue
+            if echo "$own" | grep -qx "$name"; then continue; fi
             echo "-r:$f"
         done
     fi
+    # Only .NET assemblies: a plugin folder can also hold native libraries
+    # for other platforms, which end in .dll too. A .NET assembly carries
+    # the metadata signature BSJB.
     find Assets Library/PackageCache \( -name '.*' -o -name '*~' \) -prune -o -name '*.dll' -print 2>/dev/null |
-        grep -v '^Library/PackageCache/.*/Tests/' | sed 's/^/-r:/'
+        grep -v '^Library/PackageCache/.*/Tests/' | while IFS= read -r f; do
+            if LC_ALL=C grep -q -a BSJB "$f"; then echo "-r:$f"; fi
+        done
     find Assets \( -name '.*' -o -name '*~' \) -prune -o -name '*.cs' -print
 } > "$rsp"
 

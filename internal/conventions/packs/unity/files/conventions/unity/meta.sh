@@ -43,7 +43,7 @@ fi
 echo "== no GUID is used twice =="
 dups=$(grep '\.meta$' "$list" | while IFS= read -r m; do
     g=$(sed -n 's/^guid: *//p' "$m" | tr -d '\r')
-    [ -n "$g" ] && printf '%s %s\n' "$g" "$m"
+    if [ -n "$g" ]; then printf '%s %s\n' "$g" "$m"; fi
 done | sort | awk '{ if ($1 == prev) { print prevline; print $0 } prev = $1; prevline = $0 }' | sort -u)
 if [ -n "$dups" ]; then
     fail "these .meta files share a GUID. Give the copy a new one (a copied .meta file keeps the old GUID):"

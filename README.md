@@ -474,8 +474,10 @@ GPU (the sandbox has neither; Blender renders on the CPU). Art drawn by hand sta
 it and the agent works with it. Git LFS is not supported yet, so files kept in LFS arrive in the
 workspace as pointer files.
 
-The game packs add skills to the repository (`.claude/skills/`), so your own Claude Code uses
-them in that project too.
+Each game pack comes with a skill. The agents get it from Maestro, next to the skills you added
+with `maestro skills`, because the agent's Claude Code does not read skills from the repository.
+The pack also writes the skill into the repository (`.claude/skills/`), so your own Claude Code
+uses it in that project too. A skill of your own with the same name wins.
 
 ### Unity
 
@@ -489,7 +491,9 @@ maestro unity                   # whether this machine has a licence
 ```
 
 The licence is kept on this machine and given read-only to the steps that run the project's own
-scripts (preparing the project and the checks), never to the agent's container. Your password
+scripts (preparing the project and the checks), never to the agent's container, and only to
+repositories that have the `unity` pack enabled. The secret scan of a pull request also looks for
+the licence's serial and signature, so an agent cannot copy it into a change it sends. Your password
 is not kept. The checks do run code the agent wrote, and that code can read the licence: use a
 Unity account that holds nothing else, such as a free Personal account made for this.
 
@@ -537,8 +541,8 @@ maestro conventions apply blender     # in a checkout of the project; then set t
 maestro conventions enable blender && maestro image
 ```
 
-The skills are written into the repository (`.claude/skills/`), so your own Claude Code uses
-them in that project too, not only the agents.
+As with the other game packs, the agents get the skill from Maestro, and the repository gets a
+copy for your own Claude Code.
 
 The models and pictures are binary files, which Maestro refuses by default. Name the one folder
 they go into, and only there may the agent commit them:
@@ -554,10 +558,13 @@ screenshots:
 A text file in such a folder is read and limited like any other, so the secret scan still sees
 it.
 
-The Blender check builds everything into a throwaway folder, because an export carries the time
-it was made and Maestro fails a check that changes files. klad renders the same pixels on every
-machine, so its check compares the committed pictures with a fresh export and fails when one is
-out of date.
+The Blender check builds everything into a throwaway folder, because an FBX export carries the
+time it was made and Maestro fails a check that changes files. It fails when two generators
+write the same file, and when a generator was changed but its committed models were not built
+again (a glTF export is the same every time, so an unchanged one passes). klad renders the same
+pixels on every machine, so its check compares the committed pictures with a fresh export and
+fails when one is out of date. The pack pins klad's version, and the check fails when the klad
+in the image is another one. A project with no generators or drawings yet passes.
 
 ## Configure
 

@@ -385,3 +385,92 @@ func Derive(list []*Pack) Settings {
 	s.Prepare, s.Verify = strings.Join(prep, "\n"), strings.Join(ver, "\n")
 	return s
 }
+
+// Skills returns the agent skills of the pack: skill name to its files,
+// path within the skill to content. They are the directories under
+// .claude/skills/ in the pack's files. The pack writes them into the
+// repository for people's own Claude Code; the service gives the agents
+// the copies from the binary, because the agents do not read the
+// repository's .claude settings.
+func (p *Pack) Skills() (map[string]map[string][]byte, error) {
+	files, err := p.Files()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]map[string][]byte{}
+	for name, raw := range files {
+		rest, ok := strings.CutPrefix(name, ".claude/skills/")
+		if !ok {
+			continue
+		}
+		skill, file, ok := strings.Cut(rest, "/")
+		if !ok {
+			continue
+		}
+		if out[skill] == nil {
+			out[skill] = map[string][]byte{}
+		}
+		out[skill][file] = raw
+	}
+	return out, nil
+}
+
+// PackSkillMark is the file that marks a skill directory as written by
+// SyncSkills, so it is replaced or removed with the packs.
+const PackSkillMark = ".maestro-pack"
+
+// SyncSkills makes dir (the agents' skills directory) hold the skills of
+// the given packs. Skills it wrote before for packs that are no longer
+// switched on are removed. A skill the owner installed under the same
+// name is left alone.
+func SyncSkills(dir string, list []*Pack) error {
+	want := map[string]map[string][]byte{}
+	for _, p := range list {
+		skills, err := p.Skills()
+		if err != nil {
+			return err
+		}
+		for name, files := range skills {
+			want[name] = files
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	for _, e := range entries {
+		mark := filepath.Join(dir, e.Name(), PackSkillMark)
+		if _, ok := want[e.Name()]; !ok && e.IsDir() && fileExists(mark) {
+			if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	for name, files := range want {
+		target := filepath.Join(dir, name)
+		if info, err := os.Lstat(target); err == nil && (!info.IsDir() || !fileExists(filepath.Join(target, PackSkillMark))) {
+			continue // the owner's own
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+		for file, raw := range files {
+			path := filepath.Join(target, filepath.FromSlash(file))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(path, raw, 0o644); err != nil {
+				return err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(target, PackSkillMark), []byte("written by maestro for a conventions pack\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}

@@ -8,8 +8,8 @@ cd "$(dirname "$0")/../.."
 out=${KLAD_OUT:-$KLAD_OUTPUT}
 names=${*:-$(drawings)}
 if [ -z "$names" ]; then
-    echo "conventions: there are no drawings in $KLAD_SOURCE." >&2
-    exit 1
+    echo "There are no drawings yet; nothing to build."
+    exit 0
 fi
 failed=0
 for n in $names; do

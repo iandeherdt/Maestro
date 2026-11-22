@@ -16,7 +16,7 @@ permissions:
 jobs:
   conventions-unity:
     runs-on: ubuntu-latest
-    container: unityci/editor:ubuntu-6000.3.29f1-base-4.0.0
+    container: unityci/editor:ubuntu-6000.3.29f1-base-4.0.0@sha256:41e91f1929220bfe7eec1518c4ba22b749216ddc0bc33006141640945ad5a091
     steps:
       - uses: actions/checkout@v4
         with:

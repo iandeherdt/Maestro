@@ -6,6 +6,12 @@ if ! command -v "$KLAD" >/dev/null 2>&1; then
     echo "In the Maestro sandbox: run \`maestro image\` again, it builds klad when this pack is switched on." >&2
     exit 1
 fi
+have=$("$KLAD" --version | sed -n 's/^klad \([0-9][0-9.]*\).*/\1/p')
+if [ -n "${KLAD_VERSION:-}" ] && [ "$have" != "$KLAD_VERSION" ]; then
+    echo "conventions: this is klad $have, the project exports with klad $KLAD_VERSION (KLAD_VERSION in conventions/klad/settings.sh)." >&2
+    echo "Pictures exported with another version can differ. Use klad $KLAD_VERSION, or change the version by hand and export every drawing again." >&2
+    exit 1
+fi
 if [ ! -d "$KLAD_SOURCE" ]; then
     echo "conventions: there is no drawing folder $KLAD_SOURCE (KLAD_SOURCE in conventions/klad/settings.sh)." >&2
     exit 1

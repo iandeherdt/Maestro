@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -135,3 +136,47 @@ func (s Store) Import(file string) error {
 
 // Remove deletes the licence.
 func (s Store) Remove() error { return os.RemoveAll(s.Dir) }
+
+var (
+	valueRE = regexp.MustCompile(`Value="([^"]{20,})"`)
+	textRE  = regexp.MustCompile(`>\s*([A-Za-z0-9+/=\s]{24,}?)\s*<`)
+	spaceRE = regexp.MustCompile(`\s+`)
+)
+
+// Secrets returns the distinctive values of the licence (its signature,
+// serial and machine bindings), for the secret scan: the licence reaches
+// code the agent wrote, in the checks, and may not leave in a commit. A
+// long value is also given in pieces of 32 characters, so a value split
+// over lines is still found. This stops a slip, not a determined attempt
+// to re-encode the licence.
+func (s Store) Secrets() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(v string) {
+		v = spaceRE.ReplaceAllString(v, "")
+		if len(v) < 20 || seen[v] {
+			return
+		}
+		seen[v] = true
+		out = append(out, v)
+		for i := 0; len(v) > 64 && i+32 <= len(v); i += 32 {
+			if piece := v[i : i+32]; !seen[piece] {
+				seen[piece] = true
+				out = append(out, piece)
+			}
+		}
+	}
+	for _, f := range s.Files() {
+		raw, err := os.ReadFile(filepath.Join(s.Dir, filepath.FromSlash(f)))
+		if err != nil {
+			continue
+		}
+		for _, m := range valueRE.FindAllStringSubmatch(string(raw), -1) {
+			add(m[1])
+		}
+		for _, m := range textRE.FindAllStringSubmatch(string(raw), -1) {
+			add(m[1])
+		}
+	}
+	return out
+}

@@ -23,7 +23,7 @@ for n in $names; do
     mkdir -p "$work/out" "$work/pic"
     if generate "$n" "$work/out" "$work/pic" "$work/log"; then
         for p in "$work/pic"/*.png; do
-            [ -f "$p" ] && cp "$p" "$dir/$n-$(basename "$p")"
+            if [ -f "$p" ]; then cp "$p" "$dir/$n-$(basename "$p")"; fi
         done
     else
         echo "no preview of $n: the generator failed" >&2

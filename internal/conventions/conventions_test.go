@@ -164,3 +164,29 @@ func TestDerive(t *testing.T) {
 		t.Errorf("no packs: %+v", s)
 	}
 }
+
+func TestSyncSkills(t *testing.T) {
+	dir := t.TempDir()
+	blender, _ := Get("blender")
+	godot, _ := Get("godot")
+	os.MkdirAll(filepath.Join(dir, "godot-dev"), 0o755)
+	os.WriteFile(filepath.Join(dir, "godot-dev", "SKILL.md"), []byte("the owner's own"), 0o644)
+	if err := SyncSkills(dir, []*Pack{blender, godot}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(dir, "blender-art", "SKILL.md")); err != nil || !strings.Contains(string(raw), "name: blender-art") {
+		t.Fatalf("blender-art: %v", err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "godot-dev", "SKILL.md")); string(raw) != "the owner's own" {
+		t.Errorf("an owner's skill was replaced: %q", raw)
+	}
+	if err := SyncSkills(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blender-art")); err == nil {
+		t.Error("the skill of a pack that is switched off stayed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "godot-dev", "SKILL.md")); err != nil {
+		t.Error("an owner's skill was removed")
+	}
+}

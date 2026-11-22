@@ -66,8 +66,8 @@
   "check": "conventions-unity",
   "gitignore": ["Library/", "Temp/", "Obj/", "obj/", "Logs/", "UserSettings/", "Build/", "Builds/", "MemoryCaptures/", "*.csproj", "*.sln"],
   "image": [
-    "COPY --from=docker.io/unityci/editor:ubuntu-6000.3.29f1-base-4.0.0 /opt/unity /opt/unity",
-    "COPY --from=docker.io/unityci/editor:ubuntu-6000.3.29f1-base-4.0.0 /usr/lib/game-ci /usr/lib/game-ci",
+    "COPY --from=docker.io/unityci/editor:ubuntu-6000.3.29f1-base-4.0.0@sha256:41e91f1929220bfe7eec1518c4ba22b749216ddc0bc33006141640945ad5a091 /opt/unity /opt/unity",
+    "COPY --from=docker.io/unityci/editor:ubuntu-6000.3.29f1-base-4.0.0@sha256:41e91f1929220bfe7eec1518c4ba22b749216ddc0bc33006141640945ad5a091 /usr/lib/game-ci /usr/lib/game-ci",
     "RUN apt-get update \\\n && apt-get install -y --no-install-recommends xvfb xauth libgtk-3-0 libgl1 libglu1-mesa libgbm1 libvulkan1 libasound2 libnss3 libxtst6 libxss1 libcap2 libicu72 libssl3 \\\n && rm -rf /var/lib/apt/lists/* \\\n && printf '6d61657374726f2d756e697479303031\\n' > /etc/machine-id"
   ],
   "image_note": "the Unity Editor 6000.3.29f1 for Linux (about 8 GB)",

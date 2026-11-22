@@ -6,3 +6,6 @@ KLAD_SOURCE=art/klad
 KLAD_OUTPUT=art/textures
 # The scale of the export (1/16 to 8; whole numbers for pixel drawings).
 KLAD_SCALE=1
+# The klad version the pictures are exported with. Another version may
+# render a drawing differently, and then every picture looks out of date.
+KLAD_VERSION=0.4.0
