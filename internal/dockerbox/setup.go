@@ -76,6 +76,8 @@ type Build struct {
 	// Extra are Dockerfile lines that add the tools of the rule packs.
 	// They run as root, before the image switches to the agent's user.
 	Extra []string
+	// Labels are put on the image, such as which packs it was built for.
+	Labels map[string]string
 }
 
 var versionRE = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -99,6 +101,12 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 	defer os.RemoveAll(dir)
 	text := o.Dockerfile
 	args := []string{"build", "--tag", b.Image, "--build-arg", "CLAUDE_VERSION=" + ClaudeVersion}
+	if b.Platform != "" {
+		args = append(args, "--platform", b.Platform)
+	}
+	for _, k := range sortedKeys(o.Labels) {
+		args = append(args, "--label", k+"="+o.Labels[k])
+	}
 	switch {
 	case o.Binary != "":
 		raw, err := os.ReadFile(o.Binary)
@@ -133,6 +141,29 @@ func (b *Box) BuildImage(ctx context.Context, o Build) error {
 func (b *Box) ImageExists(ctx context.Context) bool {
 	_, err := b.cli(ctx, "image", "inspect", "--format", "{{.Id}}", b.Image)
 	return err == nil
+}
+
+// ImageLabel is a label of the sandbox image; ok is false when there is no
+// image.
+func (b *Box) ImageLabel(ctx context.Context, key string) (value string, ok bool) {
+	out, err := b.cli(ctx, "image", "inspect", "--format", "{{index .Config.Labels \""+key+"\"}}", b.Image)
+	if err != nil {
+		return "", false
+	}
+	v := strings.TrimSpace(out)
+	if v == "<no value>" {
+		v = ""
+	}
+	return v, true
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // allowFile is what a proxy reads its allowlist from.

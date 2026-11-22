@@ -32,6 +32,7 @@ var version = "dev"
 
 const usage = `usage:
   maestro setup [--dir DIR] [--port N]   guided installation, safe to run again
+  maestro new                            guided start of a Unity or Godot game for the agents
   maestro check [path-to-WORKFLOW.md]    validate a workflow file
   maestro image                          build the sandbox image (needs Docker)
   maestro login                          sign Claude Code in inside the sandbox
@@ -83,6 +84,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "setup" {
 		return runSetup(args[1:], os.Stdin, stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "new" {
+		return runNew(args[1:], os.Stdin, stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "check" || len(args) > 2 {
 		fmt.Fprintln(stderr, usage)

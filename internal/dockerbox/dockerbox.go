@@ -85,6 +85,11 @@ type Box struct {
 	// BotName and BotEmail are set as the commit identity of a new
 	// workspace.
 	BotName, BotEmail string
+	// Platform, such as "linux/amd64", is the platform every container and
+	// the image are made for. Empty is the machine's own. A pack whose
+	// tools exist for one platform only sets it; on another machine the
+	// containers then run emulated, more slowly.
+	Platform string
 }
 
 var (
@@ -109,12 +114,16 @@ func (b *Box) docker() string {
 
 // engineFlags are run and create flags only one of the clients needs.
 func (b *Box) engineFlags() []string {
+	var f []string
 	if b.Podman {
 		// Podman copies the proxy variables of whoever starts it into
 		// the container unless told not to.
-		return []string{"--http-proxy=false"}
+		f = append(f, "--http-proxy=false")
 	}
-	return nil
+	if b.Platform != "" {
+		f = append(f, "--platform", b.Platform)
+	}
+	return f
 }
 
 // bind is a bind mount of a host directory. With podman the directory is

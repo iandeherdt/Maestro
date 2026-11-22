@@ -306,3 +306,38 @@ func runStyled(ctx context.Context, ui *UI, st *State, steps []Step) error {
 	}
 	return nil
 }
+
+// SwitchRepo points the installation at another repository. The App stays:
+// it is installed on that repository too in the next step. The settings
+// file of the old repository is kept under another name, and a new one is
+// written for the new repository. Only a repository of the same owner can
+// be switched to, because the App belongs to that owner.
+func SwitchRepo(st *State, repo string) (kept string, err error) {
+	if err := validRepo(repo); err != nil {
+		return "", err
+	}
+	if st.Repo == repo {
+		return "", nil
+	}
+	if st.Repo != "" {
+		was, now := repoRE.FindStringSubmatch(st.Repo), repoRE.FindStringSubmatch(repo)
+		if !strings.EqualFold(was[1], now[1]) {
+			return "", fmt.Errorf("the App on this machine belongs to %s, and %s belongs to %s. "+
+				"Put the repository under %s, or set up a second installation with `maestro setup --dir` and another folder", was[1], repo, now[1], was[1])
+		}
+	}
+	if st.WorkflowFile != "" {
+		if _, err := os.Stat(st.WorkflowFile); err == nil {
+			old := repoRE.FindStringSubmatch(st.Repo)
+			kept = strings.TrimSuffix(st.WorkflowFile, ".md") + "." + old[2] + ".md"
+			if _, err := os.Lstat(kept); err == nil {
+				return "", fmt.Errorf("%s already exists; move it away first", kept)
+			}
+			if err := os.Rename(st.WorkflowFile, kept); err != nil {
+				return "", err
+			}
+		}
+	}
+	st.Repo, st.InstallationID, st.WorkflowFile = repo, "", ""
+	return kept, st.Save()
+}

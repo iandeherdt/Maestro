@@ -614,3 +614,14 @@ func TestLoginAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformGoesToEveryContainer(t *testing.T) {
+	b := &Box{Platform: "linux/amd64"}
+	if f := strings.Join(b.engineFlags(), " "); f != "--platform linux/amd64" {
+		t.Errorf("docker: %q", f)
+	}
+	b.Podman = true
+	if f := strings.Join(b.engineFlags(), " "); f != "--http-proxy=false --platform linux/amd64" {
+		t.Errorf("podman: %q", f)
+	}
+}

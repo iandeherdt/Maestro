@@ -81,5 +81,6 @@
     "path": "ProjectSettings/ProjectVersion.txt",
     "hint": "Make the project first: in Unity Hub, New project, with Editor 6000.3.29f1 (the version of the Maestro image). Close Unity, run `git init` in the project's folder (or move the project into this checkout), and run this again there."
   },
-  "starter_unless": "Assets/Tests"
+  "starter_unless": "Assets/Tests",
+  "platform": "linux/amd64"
 }
