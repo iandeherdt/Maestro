@@ -14,8 +14,9 @@ What sets it apart:
   logged in to yourself. No key is passed around.
 - **Only GitHub.** The board, the tickets, the comments and the pull requests all live there. No
   other tracker, no extra server, no database.
-- **From idea to done, not only from ticket to code.** Planning, your answers, rework when you ask
-  for changes, and closing the card after the merge are all part of it.
+- **From idea to done, not only from ticket to code.** Planning, your answers, a design to look
+  at before anything is built, rework when you ask for changes, and closing the card after the
+  merge are all part of it.
 - **Rules that tools enforce.** Rule packs for .NET and TypeScript are checked by linters,
   analyzers and coverage, in places the agent cannot edit.
 - **Your machines.** A Mac and a home server can share one board, and each card says which one
@@ -65,6 +66,7 @@ instead: `status:todo`, `status:in progress` and so on. Everything else is the s
 | The agent's word is not trusted | The service runs the verify command, checks the diff and waits for CI before a ticket reaches you. |
 | Nothing reaches the main branch without you | The service cannot merge or approve. It only opens pull requests, and only on branches under its own prefix. |
 | Only you can start work | A ticket is picked up only if an allowlisted account wrote it and it was approved: its card stands in Todo on a board only you can change, or you applied its labels. Comments from anyone else never reach the agent. |
+| What you run yourself was pointed out first | Once you merge and run the code, it runs with your rights, and the sandbox no longer helps. So the pull request starts with what deserves a look: added code that opens a network connection, starts another program, runs code built at run time or holds a long encoded block; changed dependencies and build scripts; weakened tests. Compiled files are refused outright. This helps you review. It does not replace reading the diff. |
 | Cost is bounded | Per-ticket retry limit, daily run limits, and `pause`. |
 
 The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
@@ -156,7 +158,7 @@ get. It is not written to your files or your keychain, and no API key is involve
 While `maestro run` is running, it looks at the board every 30 seconds.
 
 If the board opens as a table, click the small arrow next to the name of the view and choose
-**Board** under Layout. You do that once. The board has nine columns, so some are off the right
+**Board** under Layout. You do that once. The board has ten columns, so some are off the right
 edge of the screen: scroll sideways to see them. A card that seems to have vanished has usually
 moved to a column further right, such as Human Review.
 
@@ -174,6 +176,7 @@ Then watch the card move:
 |---|---|
 | Backlog | Not approved. Nothing happens here. |
 | Idea | An agent is planning it, see below |
+| Design | Optional. An agent makes a design of the plan for you to look at, see [See it before it is built](#see-it-before-it-is-built-a-design) |
 | Planned | You approved the plan and its tasks were created |
 | Todo | Approved, waiting for a free slot |
 | In Progress | An agent is working on it |
@@ -280,6 +283,8 @@ of Todo (set its Worker first).
    to the idea as sub-issues, and placed in **Todo**. The agents then work through them in the
    order the plan gives: a task waits until the tasks it depends on are done.
 
+Before step 5 you can also ask for a design first, see the next section.
+
 Moving the card to Planned is your approval of every task in the plan, so read them. Each task
 then goes through the same steps as a ticket you wrote yourself and ends as a pull request for
 you to review.
@@ -292,6 +297,37 @@ Do not switch on a board automation that puts new cards in Todo by itself.
 With labels instead of a board (a repository on a personal account), approve an issue by adding
 `status:todo` and `run:<machine>`, and the service changes the `status:` label as the card
 would move.
+
+### See it before it is built: a design
+
+Once a plan is posted, you can ask to see what it will look like before any of it is built. This
+is optional: skip it and move the card to **Planned** as before.
+
+1. Move the card with the plan to **Design**.
+2. An agent makes a design for the plan, in the folder `design/GH-<number>/` of the repository:
+   - for a website or app, mock-ups of the pages and screens the plan adds, in plain HTML and CSS;
+   - for a game, a game design (the core loop, controls, rules, levels, art direction and colours)
+     with mock screens of the main moments and, where it helps, a tiny playable sketch.
+
+   Everything works offline from the files, with an `index.html` that links to every page and a
+   `README.md` for the agents that build the tasks. It decides between the two from the
+   repository; set `design: {kind: web}` or `design: {kind: game}` to tell it.
+3. The service opens a pull request with the design and pictures of its pages, taken by the
+   service itself without network. The card moves to **Human Review**.
+4. Then:
+   - **Like it?** Merge the pull request and move the card to **Planned**. The tasks are created
+     and each one is told to follow the design, which is now in the repository.
+   - **Want changes?** Comment on the pull request, on a line or in a review. A couple of
+     minutes later the card goes back to **Design** by itself and the design is reworked on the
+     same pull request. A comment on the issue works too: move the card back to **Design** yourself.
+   - **Rather not?** Close the pull request and move the card to **Planned**. The tasks are
+     created without a design.
+
+While the design's pull request is open, a card in Planned waits for it and says so. The design
+agent is held to the same rules as any other agent, and may only add files inside its folder.
+It needs the browser in the sandbox image for the pictures: run `maestro image` once after you
+upgrade. A board made before this existed has no **Design** column; setup tells you how to add
+it, and nothing else changes.
 
 What happens to a ticket, step by step: the service clones the repository into a fresh
 container, runs Claude Code there on a branch named `maestro/GH-<number>`, runs your test
@@ -622,7 +658,10 @@ changed ones:
 | `publish.review_quiet_ms` | `120000` | How long you have to be quiet on the pull request before that happens, in milliseconds |
 | `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
 | `claude.model` | `opus` | The model for every ticket, see [Choosing the model](#choosing-the-model) |
-| `claude.planning_model` | `claude.model` | The model while an idea is planned |
+| `claude.planning_model` | `claude.model` | The model while an idea is planned and while its design is made |
+| `design.kind` | `auto` | What a design is: `web` (HTML and CSS pages), `game` (a game design with mock screens) or `auto` |
+| `design.folder` | `design` | Where designs are kept in the repository, one folder per idea |
+| `tracker.design_state` | `Design` | The column that asks for a design; `""` switches designs off |
 | `claude.card_models` | any | The models a card may ask for |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
 | `budget.max_failure_attempts` | 3 | Failed attempts before a ticket is blocked |
@@ -658,9 +697,11 @@ Last updated 2026-11-22.
 | `maestro image`, `maestro login`, `maestro run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `maestro status`, `pause`, `resume` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
+| Design stage (mock-ups or a game design between plan and tasks) | Written. Tested against stand-ins for the board, GitHub and Claude Code; the pictures are tested with a real Chromium and the design's commits with real Git. Not yet run against github.com. |
 | Tools and a skill for your own Claude Code (`maestro assistant`, `maestro mcp`) | Written. The server is tested here by speaking the protocol to it against a stand-in for the running service. Not yet added to a real Claude Code. |
 | Skills and agent files for the agents (`maestro skills`) | Written. Finding, checking, storing and removing them is tested, also fetching from a git repository. The read-only mount is tested with a real container in CI. Not yet tried with a real Claude Code run: that the agent picks a skill up from that place is taken from Claude Code's documentation. |
 | Model per card, for planning and by default | Written and tested against stand-ins for the board and for Claude Code. Not yet run with a real card. |
+| Pointing out code that reaches outside the program | Done. Patterns for C#, TypeScript and JavaScript, Go, Python, C and shell, tested on examples. A pattern list can be evaded by someone who knows it, so it is an aid for the reviewer and not a guarantee. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
 | Unity (pack `unity`, `maestro unity`) | Written. The `.meta`, version and quick compile checks were run against a sample project in the Unity 6.3 image, and shown to fail on a violation. The Editor was shown to start under the sandbox's settings and stop for want of a licence. The licence is shown to reach the hooks and verify read-only and not the agent. Not yet run with a real licence, against Unity's servers, or in an image built with `maestro image`. |
 | Packs `blender` and `klad`, binary folders (`policy.binary_paths`) | Written. Both packs were run under the sandbox's settings (no network, its user, no capabilities) against sample projects: Blender 5.0.1 with a good generator, one that raises, one that writes nothing, and a triangle limit; klad v0.4.0 (built from source here) with a missing, a current and an out-of-date picture. The image lines that download Blender and build klad have not been built with `maestro image`. |

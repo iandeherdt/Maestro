@@ -40,6 +40,9 @@ type hub struct {
 	// it is refused first.
 	shotTip string
 	refuse  int
+	// head is the branch pull requests are looked up for; empty means the
+	// ticket's.
+	head string
 }
 
 const (
@@ -74,7 +77,11 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	case key == "GET /repos/ian/app":
 		json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
 	case key == "GET /repos/ian/app/pulls":
-		if r.URL.Query().Get("head") != "ian:maestro/GH-7-abc" || r.URL.Query().Get("state") != "open" {
+		head := h.head
+		if head == "" {
+			head = "maestro/GH-7-abc"
+		}
+		if r.URL.Query().Get("head") != "ian:"+head || r.URL.Query().Get("state") != "open" {
 			w.WriteHeader(422)
 			return
 		}

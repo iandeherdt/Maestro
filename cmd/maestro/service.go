@@ -268,8 +268,9 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	b := dockerbox.Build{Out: stdout, Version: version, Extra: conventions.Derive(packs).Image}
-	if len(in.cfg.Screenshots.Pages) > 0 {
-		// The service takes the screenshots with this browser (SPEC 24).
+	if len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "" {
+		// The service takes the screenshots and the pictures of designs
+		// with this browser (SPEC 24 and 25).
 		b.Extra = append(b.Extra, browserLine)
 	}
 
@@ -574,17 +575,22 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	// The planning stage needs a board. The names of its states are read
 	// at start; changing them takes a restart.
 	var plans orchestrator.Plans
+	var designs orchestrator.Designs
 	if onBoard && cfg.Tracker.PlanningState != "" {
 		plansDir, err := plan.OpenStore(filepath.Join(cfg.Budget.StateDir, "plans"))
 		if err != nil {
 			return err
 		}
 		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: trk, PlanningState: cfg.Tracker.PlanningState,
-			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0]}
+			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0],
+			DesignState: cfg.Tracker.DesignState, DesignFolder: cfg.Design.Folder, Designs: pub}
 		wk.Planning, plans = desk, desk
+		if cfg.Tracker.DesignState != "" {
+			wk.Designing, designs = desk, desk
+		}
 	}
 	orch := orchestrator.New(cur.config(), orchestrator.Deps{
-		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Plans: plans, Log: log,
+		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Plans: plans, Designs: designs, Log: log,
 		Preflight: func() (*config.Config, error) {
 			l, err := in.source.Check()
 			if l == nil {
@@ -621,6 +627,9 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		if plans != nil {
 			fmt.Fprintf(stdout, "For something bigger, move the card to %s instead: an agent asks you questions on the issue and proposes\n", cfg.Tracker.PlanningState)
 			fmt.Fprintf(stdout, "a plan of small tasks. Move the card to %s to approve the plan.\n", cfg.Tracker.PlannedState)
+			if designs != nil {
+				fmt.Fprintf(stdout, "To see a design before anything is built, move a card with a plan to %s first.\n", cfg.Tracker.DesignState)
+			}
 		}
 	} else {
 		fmt.Fprintf(stdout, "It looks for issues every %d seconds. To give it one, put these labels on an issue:\n", cfg.Polling.IntervalMS/1000)

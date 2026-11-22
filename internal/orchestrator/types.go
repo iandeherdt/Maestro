@@ -73,6 +73,8 @@ const (
 	NotLoggedIn
 	// Planned: a planning run ended with questions or a plan (SPEC 22).
 	Planned
+	// Designed: a design run published its design (SPEC 27).
+	Designed
 )
 
 // Outcome is reported exactly once per attempt.
@@ -86,6 +88,8 @@ type Outcome struct {
 	QuotaResetAt time.Time
 	// Plan is set for the outcome Planned. Its text is untrusted.
 	Plan *plan.Plan
+	// Design is set for the outcome Designed.
+	Design *plan.Design
 }
 
 // PublishRecord describes pushed work that is waiting for its checks.
@@ -109,6 +113,9 @@ type Attempt struct {
 	Feedback  []issue.Feedback
 	// Planning is true for an idea: the run plans and changes nothing.
 	Planning bool
+	// Design is true for an idea in the design state: the run makes a
+	// design for its plan (SPEC 27).
+	Design bool
 }
 
 // Sink receives updates from one attempt. Both methods may be called from
@@ -150,6 +157,16 @@ type Plans interface {
 	// continues where an earlier call stopped. The summary is non-empty
 	// once, when the last task is in place.
 	Materialize(ctx context.Context, is issue.Issue) (summary string, err error)
+}
+
+// Designs is the design stage as the orchestrator sees it (SPEC 27).
+type Designs interface {
+	// HasPlan reports whether the idea has a plan a design can be made for.
+	HasPlan(issueID string) bool
+	// HasDesign reports whether a design was published for the latest plan.
+	HasDesign(issueID string) bool
+	// Designed records a published design and tells the owner.
+	Designed(ctx context.Context, is issue.Issue, d plan.Design) error
 }
 
 // Clock is the time source.

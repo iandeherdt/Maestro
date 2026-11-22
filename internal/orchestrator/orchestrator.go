@@ -52,6 +52,8 @@ type Deps struct {
 	Reviews Reviews
 	// Plans is optional. Without it ideas are not planned.
 	Plans Plans
+	// Designs is optional. Without it no designs are made.
+	Designs Designs
 	// Preflight is the optional per-tick validation (SPEC 6.2, 6.3). It
 	// returns a configuration to apply when the workflow file changed, or
 	// nil. An error skips dispatch for that tick; reconciliation still
@@ -97,10 +99,13 @@ type Orchestrator struct {
 	// the ideas whose missing or outdated plan was already commented on.
 	plansAt   time.Time
 	planNoted map[string]bool
-	claimed   map[string]bool
-	retries   map[string]*RetryEntry
-	completed map[string]bool
-	totals    Totals
+	// designNoted holds the ideas in the design state without a plan that
+	// were already commented on.
+	designNoted map[string]bool
+	claimed     map[string]bool
+	retries     map[string]*RetryEntry
+	completed   map[string]bool
+	totals      Totals
 
 	gen           uint64
 	spawnFailures int
@@ -128,7 +133,7 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		running:   map[string]*runEntry{},
 		awaiting:  map[string]*PublishRecord{},
 		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{}, closedNoted: map[string]bool{},
-		planNoted: map[string]bool{},
+		planNoted: map[string]bool{}, designNoted: map[string]bool{},
 		claimed:   map[string]bool{},
 		retries:   map[string]*RetryEntry{},
 		completed: map[string]bool{},
@@ -360,6 +365,14 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 		if o.claimed[is.ID] || !o.eligible(is) || !o.stateSlotFree(is) {
 			continue
 		}
+		if o.designing(is) && !o.d.Designs.HasPlan(is.ID) {
+			if !o.designNoted[is.ID] {
+				o.designNoted[is.ID] = true
+				o.comment(ctx, is, "This card is in "+o.cfg.Tracker.DesignState+", but this machine has no plan for it that you have seen. "+
+					"A design is made for a plan: move the card to "+o.cfg.Tracker.PlanningState+" first.", "")
+			}
+			continue
+		}
 		if o.d.Prober != nil && issue.NormalizeState(is.State) == issue.NormalizeState(o.cfg.Tracker.InProgressState) {
 			rec, err := o.d.Prober.Probe(ctx, is)
 			if err != nil {
@@ -409,6 +422,9 @@ func (o *Orchestrator) eligible(is issue.Issue) bool {
 	if o.planning(is) && o.d.Plans == nil {
 		return false
 	}
+	if o.designing(is) && o.d.Designs == nil {
+		return false
+	}
 	if _, err := issue.WorkspaceKey(is.Identifier); err != nil {
 		return false
 	}
@@ -451,9 +467,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int
 	// An idea stays in its own state while it is planned. Moving it to the
 	// in-progress state would turn it into work to implement after a
 	// restart.
-	planning := o.planning(is)
+	planning, designing := o.planning(is), o.designing(is)
+	delete(o.designNoted, is.ID)
 	dispatchState := issue.NormalizeState(is.State)
-	if !planning {
+	if !planning && !designing {
 		if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.InProgressState); err != nil {
 			// The claim is held: an issue whose state cannot be written must
 			// not be picked up again by the next poll.
@@ -470,10 +487,13 @@ func (o *Orchestrator) dispatch(ctx context.Context, is issue.Issue, attempt int
 	if planning {
 		what = "Planning on"
 	}
+	if designing {
+		what = "Making a design on"
+	}
 	o.comment(ctx, is, what+" worker `"+o.cfg.Worker.Name+"`"+attemptSuffix(attempt)+".", "")
 
 	o.gen++
-	h, err := o.d.Worker.Start(Attempt{Issue: is, Number: attempt, RetryKind: kind, Feedback: feedback, Planning: planning},
+	h, err := o.d.Worker.Start(Attempt{Issue: is, Number: attempt, RetryKind: kind, Feedback: feedback, Planning: planning, Design: designing},
 		sink{o, is.ID, o.gen})
 	if err != nil {
 		o.spawnFailures++
@@ -736,6 +756,8 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 		o.release(id)
 	case Planned:
 		o.proposed(ctx, e, out.Plan)
+	case Designed:
+		o.designed(ctx, e, out.Design)
 	case Rejected:
 		o.failed(ctx, e, KindGate, out.Category, out.Message, out.Feedback)
 	default:
@@ -800,6 +822,67 @@ func (o *Orchestrator) proposed(ctx context.Context, e *runEntry, p *plan.Plan) 
 		len(p.Tasks), o.cfg.Tracker.PlannedState, o.cfg.Tracker.PlanningState), "")
 }
 
+// designing reports whether the issue is an idea to make a design for
+// (SPEC 27).
+func (o *Orchestrator) designing(is issue.Issue) bool {
+	d := issue.NormalizeState(o.cfg.Tracker.DesignState)
+	return d != "" && issue.NormalizeState(is.State) == d
+}
+
+// designed hands a published design to the owner. As with a plan, the card
+// is moved first, so that a failed write cannot start the design again.
+func (o *Orchestrator) designed(ctx context.Context, e *runEntry, d *plan.Design) {
+	is := e.issue
+	if d == nil || o.d.Designs == nil {
+		o.failed(ctx, e, KindFailure, "design_missing", "", nil)
+		return
+	}
+	if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.HandoffState); err != nil {
+		o.failed(ctx, e, KindFailure, "tracker_write_failed", err.Error(), nil)
+		return
+	}
+	o.d.Budget.ClearIssue(is.ID)
+	o.persist()
+	o.release(is.ID)
+	if err := o.d.Designs.Designed(ctx, is, *d); err != nil {
+		o.d.Log.Warn("design not recorded", "issue", is.Identifier, "error", err)
+		o.comment(ctx, is, fmt.Sprintf("The design is in pull request #%d, but this machine could not record it. Move the card back to %s to try again.",
+			d.PRNumber, o.cfg.Tracker.DesignState), "")
+	}
+}
+
+// watchDesign looks at the design pull request of an idea that waits for
+// the owner. Comments on it send the idea back to the design state, the
+// way comments on a ticket's pull request send it back to work.
+func (o *Orchestrator) watchDesign(ctx context.Context, is issue.Issue) {
+	if o.d.Designs == nil || o.cfg.Tracker.DesignState == "" || !o.d.Designs.HasDesign(is.ID) {
+		return
+	}
+	di := plan.DesignIssue(is)
+	st, err := o.d.Reviews.Review(ctx, di)
+	if err != nil {
+		o.d.Log.Warn("design pull request could not be read, will retry", "issue", is.Identifier, "error", err)
+		return
+	}
+	switch {
+	case st.State == ReviewFeedback:
+	case st.State == ReviewChangesRequested && o.cfg.Publish.ReworkOnChangesRequested:
+	default:
+		return
+	}
+	if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.DesignState); err != nil {
+		o.d.Log.Warn("design state not written, will retry", "issue", is.Identifier, "error", err)
+		return
+	}
+	if st.State == ReviewFeedback {
+		if err := o.d.Reviews.Acknowledge(ctx, di, st); err != nil {
+			o.d.Log.Warn("comments on the design pull request not acknowledged", "issue", is.Identifier, "error", err)
+		}
+	}
+	o.d.Log.Info("status", "issue", is.Identifier,
+		"text", fmt.Sprintf("New comments on design pull request #%d. Back to the design.", st.PRNumber))
+}
+
 // watchPlans turns approved plans into tasks. An idea is approved by the
 // owner moving its card to the planned state; the service never does that.
 func (o *Orchestrator) watchPlans(ctx context.Context) {
@@ -825,6 +908,7 @@ func (o *Orchestrator) watchPlans(ctx context.Context) {
 		seen[is.ID] = true
 		summary, err := o.d.Plans.Materialize(ctx, is)
 		note := ""
+		var waiting *plan.WaitingForDesign
 		switch {
 		case errors.Is(err, plan.ErrNoPlan):
 			note = "This card is in " + o.cfg.Tracker.PlannedState + ", but this machine has no plan for it that you have seen. Move it to " +
@@ -832,6 +916,9 @@ func (o *Orchestrator) watchPlans(ctx context.Context) {
 		case errors.Is(err, plan.ErrStale):
 			note = "The idea was edited after its plan was proposed, so the plan is not used. Move the card to " +
 				o.cfg.Tracker.PlanningState + " to plan the new text."
+		case errors.As(err, &waiting):
+			note = fmt.Sprintf("The tasks are created once the design in pull request #%d is merged. Merge it to approve the design, "+
+				"or close it to go on without a design.", waiting.PRNumber)
 		case err != nil:
 			o.d.Log.Warn("tasks of an approved plan not created yet, will retry", "issue", is.Identifier, "error", err)
 			note = "The tasks of the approved plan could not all be created yet. The service keeps trying. Last error: `" +
@@ -839,6 +926,7 @@ func (o *Orchestrator) watchPlans(ctx context.Context) {
 		case summary != "":
 			delete(o.planNoted, is.ID)
 			o.comment(ctx, is, summary, "")
+			o.designDone(ctx, is)
 			continue
 		default:
 			continue
@@ -851,6 +939,25 @@ func (o *Orchestrator) watchPlans(ctx context.Context) {
 	for id := range o.planNoted {
 		if !seen[id] {
 			delete(o.planNoted, id)
+		}
+	}
+}
+
+// designDone tidies up after the tasks of a plan with a design were
+// created: the design's branch and workspace are not needed any more.
+func (o *Orchestrator) designDone(ctx context.Context, is issue.Issue) {
+	if o.d.Designs == nil || !o.d.Designs.HasDesign(is.ID) {
+		return
+	}
+	di := plan.DesignIssue(is)
+	if o.d.Reviews != nil {
+		if err := o.d.Reviews.DeleteBranch(ctx, di); err != nil {
+			o.d.Log.Warn("design branch not deleted", "issue", is.Identifier, "error", err)
+		}
+	}
+	if o.d.Workspaces != nil {
+		if err := o.d.Workspaces.Remove(ctx, di.Identifier); err != nil {
+			o.d.Log.Warn("design workspace not removed", "issue", is.Identifier, "error", err)
 		}
 	}
 }
@@ -993,6 +1100,9 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 			continue
 		}
 		switch st.State {
+		case ReviewNone:
+			delete(o.closedNoted, is.ID)
+			o.watchDesign(ctx, is)
 		case ReviewMerged:
 			// The branch goes first. If the state write then fails, the
 			// next run finds the merged pull request again and retries.

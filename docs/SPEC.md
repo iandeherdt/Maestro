@@ -334,6 +334,9 @@ Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sa
   otherwise empty, which switches the planning stage off (Section 22). It is polled like an active
   state and MUST NOT be one of the other configured states.
 - `planned_state` (string): default `"Planned"`. MUST be a state of its own.
+- `design_state` (string): default `"Design"` when `planning_state` is set, otherwise empty, which
+  switches the design stage off (Section 27). It is polled like an active state and MUST be a
+  state of its own. Setting it without `planning_state` is an error.
 - `allowed_authors` (list of provider identities): REQUIRED, non-empty. Issues created by anyone
   else are never dispatchable.
 - `allowed_commenters` (list): default equals `allowed_authors`. Only their comments are ever shown
@@ -726,6 +729,8 @@ Default state names. Each transition has exactly one owner.
 | Idea | Human Review | Orchestrator | A planning run ended with questions or with a plan. |
 | Human Review | Idea | Human | After answering questions or asking for another plan. |
 | Human Review | Planned | Human | Approves the plan. The only way a plan becomes tasks. |
+| Human Review | Design | Human, or orchestrator | Asks for a design of the plan (Section 27), or after commenting on it. The orchestrator makes this move only when an allowlisted reviewer comments on the design's pull request. The card stays in Design while the design is made. |
+| Design | Human Review | Orchestrator | A design run published its design. |
 | (new card) | Todo | Orchestrator | A task of a plan the owner approved, with exactly the text the owner was shown. |
 
 The orchestrator MUST NOT make any transition not listed with owner Orchestrator.
@@ -1730,6 +1735,16 @@ Built-in `flag` rules:
 - F5 Agent instruction files changed (`CLAUDE.md`, `AGENTS.md`).
 - F6 Commits whose author or committer identity is not the configured bot identity (informational).
 - F7 Paths in `policy.flag_paths`.
+- F8 Code that reaches outside the program. For every changed text file that is not prose
+  (`*.md`, `*.txt`, `*.rst`, `*.adoc`, `LICENSE*`, `NOTICE*`, `CHANGELOG*`), the added lines are
+  matched against four pattern sets: opening a network connection (an address with a network
+  scheme, or the usual client calls of the supported languages), starting another program, running
+  code that is built at run time, and a long encoded block (200 or more base64 characters, 40 or
+  more `\x` escapes, or 256 or more hexadecimal digits; not looked for in dependency manifests and
+  lockfiles). The finding gives the path and the number of lines per set, never the lines. Its
+  purpose is the residual risk of Section 18: code written under a prompt injection that a person
+  merges and then runs with their own rights. The rule informs the reviewer; it is a pattern
+  list, can be evaded, and MUST NOT be presented as proof that a change is harmless.
 
 ### 15.4 Secret Scan
 
@@ -2540,7 +2555,7 @@ For each adapter:
   not descending from `base_sha`, unchanged head.
 - A workspace containing hostile Git hooks, config, attributes and filters causes no execution in
   the control zone (canary file test).
-- Each deny rule D1 to D8 and each flag rule F1 to F7, with positive and negative cases.
+- Each deny rule D1 to D8 and each flag rule F1 to F8, with positive and negative cases.
 - Secret scan: built-in patterns and exact held-secret values.
 - Push only under the branch prefix. Force only with lease.
 - Pull request created once, updated after. Body template order. Agent text neutralized.
@@ -2922,6 +2937,94 @@ completely. `maestro skills remove NAME` deletes it. Nothing is ever updated wit
 - The store is read at every agent step; a change applies to the next step without a restart.
 - Programs in a skill run only as part of an agent step, under that step's limits and network
   profile.
+
+## 27. Design Stage
+
+Extension. Between a plan and its tasks the owner MAY ask for a design: mock-ups of the pages a
+web project gets, or a game design with mock screens and small sketches for a game. The owner
+sees the design as pictures on a pull request before anything is built, and the agents that build
+the tasks are told to follow it. The stage is optional for every idea: a plan can still be
+approved directly.
+
+### 27.1 Flow
+
+1. A plan was posted (22.1) and the card is in the hand-off state. The owner moves it to
+   `design_state` (`Design`).
+2. The orchestrator dispatches a design run. As with planning, the card is not moved while it
+   runs. An idea in the design state without a plan the owner saw is not dispatched; it gets one
+   comment saying so.
+3. The design run has a workspace and a branch of its own, named after the idea with the suffix
+   `-design` (`maestro/GH-12-design`), so that it can never be taken for the idea's own work. The
+   agent writes the design below `<design.folder>/<idea>/` (`design/GH-12/`) and commits it.
+4. The service checks it as in 27.3, takes pictures of its pages (27.4), pushes the branch and
+   opens or updates a pull request with the pictures. The project's verify command is not run.
+5. The orchestrator moves the card to the hand-off state, records the design next to the plan,
+   and comments with the pull request and the three ways on:
+   - merge the pull request and move the card to `planned_state`: the tasks follow the design;
+   - comment on the pull request (the card goes back to `Design` by itself, as in 15.8), or on
+     the issue and move the card back to `Design`: the design is made again with the comments,
+     on the same branch and pull request;
+   - close the pull request and move the card to `planned_state`: the tasks are made without it.
+6. For a card in `planned_state` whose latest plan has a design, the tasks are created only once
+   the design's pull request is merged or closed. While it is open, one comment says so. Whether
+   the design is used is decided once, before the first task is created, and recorded, so that
+   all tasks of one plan agree. With a merged design, every task's description says where the
+   design is and that it is to be followed. Merging put the design on the base branch, so every
+   task's workspace already has it.
+7. After the tasks are created, the design's branch and workspace are removed.
+
+A new plan for the idea drops its design: a design belongs to the plan it was made for.
+
+### 27.2 Design prompt
+
+Fixed instructions, the data rule of Section 13, the folder and `design.kind` from the settings
+(outside the blocks, since they do not come from the ticket), and delimited blocks for the
+idea's title and description, the plan's tasks, and what was said since the plan: the owner's
+comments on the issue and on the design's pull request, a note on an earlier design, and the
+reason the service refused the previous attempt. The workflow body is not part of it.
+
+The instructions ask for files that work offline from disk (no fonts, scripts or images from
+other sites, no build step), no binary files, an `index.html` overview and a `README.md` for the
+agents that build the tasks. `design.kind` is `web`, `game`, or `auto` (the agent decides from
+the repository and the idea). The run ends like a coding run, with a `MAESTRO_STATUS` line.
+
+### 27.3 What a design may change
+
+The import checks, the diff policy and the secret scan of Section 15 apply unchanged. On top of
+that, every changed path (and, for a rename, its old path) MUST be below the design's folder.
+Otherwise the commits are rejected as a whole with `design_outside_folder` and the paths are
+given to the next attempt. The pull request never closes or references the idea in a way that
+closes it, and it is opened ready for review, not as a draft: there are no checks to wait for.
+
+### 27.4 Pictures
+
+Taken as in Section 24, without network, from exactly the exported commits: `index.html` of the
+folder first, then the other `.html` files below it by path, at most `MaxScreenshots`, with the
+size of `screenshots.width` and `screenshots.height`. Names other than `[A-Za-z0-9._/-]+.html`
+are skipped. The sandbox image gets the browser when the design stage is on. A design without
+pictures is still published, and the pull request says why.
+
+### 27.5 Configuration
+
+```yaml
+tracker:
+  design_state: Design      # "" switches the stage off
+design:
+  kind: auto                # auto, web or game
+  folder: design            # each idea gets <folder>/<idea>/
+```
+
+The design run uses `claude.planning_model` when it is set, like planning.
+
+### 27.6 Trust
+
+- The design agent is as untrusted as the coding agent and gets nothing more: no token, no
+  network beyond the agent's own, and its commits pass the same gates.
+- A design reaches the base branch only when the owner merges it. It reaches the agents that
+  build the tasks only through that merge and through the line the service adds to each task.
+- The design is HTML and may hold scripts. It is opened by the service's headless browser in the
+  sandbox only, and by the owner in a browser of their own choosing. The review flags of Section
+  15 point out network and code-execution patterns as for any change.
 
 ## Appendix A. Linux Worker Deployment
 

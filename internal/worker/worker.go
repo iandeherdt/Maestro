@@ -39,8 +39,10 @@ const (
 	// The worker starts a fresh session with the full prompt, once.
 	SessionUnknown = "session_unknown"
 	// Planning runs (SPEC 22).
-	PlanBriefError      = "plan_brief_error"
-	PlanMalformed       = "plan_malformed"
+	PlanBriefError = "plan_brief_error"
+	PlanMalformed  = "plan_malformed"
+	// Design runs (SPEC 27).
+	DesignBriefError    = "design_brief_error"
 	afterRunGracePeriod = 2 * time.Minute
 	// maxOwnerComments is how many of the owner's most recent comments on a
 	// ticket are given to the agent.
@@ -120,6 +122,10 @@ type Gates interface {
 	// secret scan, pushes and opens the pull request. Exactly one of the
 	// record and the rejection is set when err is nil.
 	Publish(ctx context.Context, is issue.Issue, ws workspace.Workspace, v VerifyResult) (*orchestrator.PublishRecord, *Rejection, error)
+	// Design checks a design run's commits, takes pictures of its pages,
+	// pushes it and opens its pull request (SPEC 27). Exactly one of the
+	// design and the rejection is set when err is nil.
+	Design(ctx context.Context, is issue.Issue, ws workspace.Workspace, folder string) (*plan.Design, *Rejection, error)
 }
 
 // Workspaces is the part of the workspace manager an attempt needs.
@@ -142,6 +148,12 @@ type Planning interface {
 	Brief(ctx context.Context, is issue.Issue) (plan.Brief, error)
 }
 
+// Designing supplies what a design run needs besides the idea: the plan,
+// the folder and what was said since the plan.
+type Designing interface {
+	DesignBrief(ctx context.Context, is issue.Issue) (plan.DesignBrief, error)
+}
+
 // PullRequestNotes supplies what the owner wrote on the ticket's pull
 // request and has not been answered by a commit yet (SPEC 15.8).
 type PullRequestNotes interface {
@@ -157,6 +169,8 @@ type Worker struct {
 	Gates      Gates
 	// Planning is optional. Without it a planning attempt fails.
 	Planning Planning
+	// Designing is optional. Without it a design attempt fails.
+	Designing Designing
 	// Notes is optional. Without it comments on a pull request do not
 	// reach the agent.
 	Notes PullRequestNotes
@@ -211,7 +225,12 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	phase := func(p orchestrator.Phase) { sink.Event(orchestrator.Event{Kind: "phase", Phase: p}) }
 
 	phase(orchestrator.PreparingWorkspace)
-	ws, err := w.Workspaces.Ensure(ctx, is)
+	// A design has a workspace and a branch of its own, next to the idea's.
+	wsIssue := is
+	if a.Design {
+		wsIssue = plan.DesignIssue(is)
+	}
+	ws, err := w.Workspaces.Ensure(ctx, wsIssue)
 	if err != nil {
 		return failed(orDefault(workspace.CategoryOf(err), "workspace_error"), err)
 	}
@@ -229,6 +248,9 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	}
 	if a.Planning {
 		return w.plan(ctx, a, set, ws, sink)
+	}
+	if a.Design {
+		return w.design(ctx, a, set, ws, sink)
 	}
 	model := modelFor(cfg, is, false, sink)
 
@@ -443,6 +465,126 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 			return failed(PlanMalformed, err)
 		}
 		problem = fe.Msg
+	}
+}
+
+// design runs a design attempt: the agent writes a design for the idea's
+// plan into one folder, and the service checks it, takes pictures of it and
+// opens a pull request with it. The project's verify command is not run: a
+// design is not part of the product until the owner merges it.
+func (w *Worker) design(ctx context.Context, a orchestrator.Attempt, set Settings, ws workspace.Workspace, sink orchestrator.Sink) orchestrator.Outcome {
+	cfg, is := set.Config, a.Issue
+	phase := func(p orchestrator.Phase) { sink.Event(orchestrator.Event{Kind: "phase", Phase: p}) }
+	if w.Designing == nil {
+		return failed(DesignBriefError, errors.New("the design stage is not set up on this worker"))
+	}
+	model := modelFor(cfg, is, true, sink)
+	phase(orchestrator.BuildingPrompt)
+	brief, err := w.Designing.DesignBrief(ctx, is)
+	if err != nil {
+		return failed(DesignBriefError, err)
+	}
+	history := brief.History
+	if w.Notes != nil {
+		// Comments on the design's pull request that no commit answered.
+		notes, err := w.Notes.Feedback(ctx, plan.DesignIssue(is))
+		if err != nil {
+			return failed(RefreshError, err)
+		}
+		history = append(history, notes...)
+	}
+	// Why the service refused the commits of the attempt before.
+	history = append(history, a.Feedback...)
+	tasks := make([]prompt.DesignTask, len(brief.Tasks))
+	for i, t := range brief.Tasks {
+		tasks[i] = prompt.DesignTask{Title: t.Title, Description: t.Body}
+	}
+	first := func() (string, error) {
+		return set.Prompt.Design(prompt.DesignInput{Issue: is, RepoName: cfg.Workspace.Repo, Kind: cfg.Design.Kind,
+			Folder: brief.Folder, Tasks: tasks, History: history})
+	}
+	maxTurns := int(cfg.Agent.MaxTurns)
+	sessionID, reason := "", ""
+	sessionReset := false
+	for turn := 1; ; turn++ {
+		if ctx.Err() != nil {
+			return orchestrator.Outcome{Kind: orchestrator.Normal}
+		}
+		phase(orchestrator.BuildingPrompt)
+		var text string
+		if turn == 1 {
+			text, err = first()
+		} else {
+			text, err = set.Prompt.Continuation(turn, maxTurns, reason, nil)
+		}
+		if err != nil {
+			return failed(prompt.RenderError, err)
+		}
+		phase(orchestrator.LaunchingAgentProcess)
+		sink.Event(orchestrator.Event{Kind: "turn_start", TurnStart: true})
+		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID, Model: model}, sink.Event)
+		var lost *AgentError
+		if errors.As(err, &lost) && lost.Category == SessionUnknown && sessionID != "" && !sessionReset && ctx.Err() == nil {
+			sessionReset = true
+			sink.Event(orchestrator.Event{Kind: "session_reset"})
+			if text, err = first(); err != nil {
+				return failed(prompt.RenderError, err)
+			}
+			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, Model: model}, sink.Event)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return orchestrator.Outcome{Kind: orchestrator.Normal}
+			}
+			return agentOutcome(err)
+		}
+		sessionID = res.SessionID
+
+		// Is this still an idea the owner wants a design for, with the
+		// same text?
+		refreshed, err := w.Tracker.FetchIssuesByIDs(ctx, []string{is.ID})
+		if err != nil {
+			return failed(RefreshError, err)
+		}
+		if len(refreshed) == 0 || !stillWanted(cfg, refreshed[0]) || refreshed[0].ContentHash != is.ContentHash ||
+			issue.NormalizeState(refreshed[0].State) != issue.NormalizeState(cfg.Tracker.DesignState) {
+			return orchestrator.Outcome{Kind: orchestrator.Normal}
+		}
+
+		phase(orchestrator.Exporting)
+		exp, err := w.Gates.Export(ctx, ws)
+		if err != nil {
+			return failed(ExportError, err)
+		}
+		status := DeclaredStatus(res.ResultText)
+		if status == "blocked" {
+			return orchestrator.Outcome{Kind: orchestrator.Failed, Category: DeclaredBlocked, Message: res.ResultText}
+		}
+		if exp.NoChanges || status == "continue" {
+			if exp.NoChanges && status == "done" {
+				return failed(NoChanges, nil)
+			}
+			if turn >= maxTurns {
+				return failed(MaxTurnsExhausted, nil)
+			}
+			reason = prompt.ReasonContinue
+			if exp.NoChanges {
+				reason = prompt.ReasonNoChanges
+			}
+			continue
+		}
+
+		phase(orchestrator.Publishing)
+		d, rej, err := w.Gates.Design(ctx, is, ws, brief.Folder)
+		switch {
+		case err != nil:
+			return failed(PublishError, err)
+		case rej != nil:
+			return orchestrator.Outcome{Kind: orchestrator.Rejected, Category: rej.Category, Feedback: rej.Feedback}
+		case d == nil:
+			return failed(PublishError, errors.New("the design gate returned neither a design nor a rejection"))
+		}
+		return orchestrator.Outcome{Kind: orchestrator.Designed, Design: d}
 	}
 }
 

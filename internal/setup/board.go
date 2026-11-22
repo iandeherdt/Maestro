@@ -30,6 +30,7 @@ type column struct{ Name, Color, Description string }
 var columns = []column{
 	{"Backlog", "GRAY", "Not approved yet. Nothing happens here."},
 	{"Idea", "PINK", "Something bigger. An agent asks you questions and proposes a plan."},
+	{"Design", "PINK", "Optional, after a plan: an agent makes a design for you to see before anything is built."},
 	{"Planned", "PURPLE", "You approved the plan. Its tasks are created in Todo."},
 	{"Todo", "GREEN", "Approved. The service may start work."},
 	{"In Progress", "BLUE", "An agent is working on this."},
@@ -189,11 +190,15 @@ func (b *boardState) pick() {
 	}
 }
 
+// optionalColumns are columns a board works without. A board made before
+// they existed is not held up for them; setup only says how to add them.
+var optionalColumns = map[string]bool{"Design": true}
+
 // missingColumns are the columns the board still lacks.
 func (b *boardState) missingColumns() []string {
 	var out []string
 	for _, c := range columns {
-		if !b.Status.has(c.Name) {
+		if !b.Status.has(c.Name) && !optionalColumns[c.Name] {
 			out = append(out, c.Name)
 		}
 	}
@@ -526,7 +531,18 @@ func (b *Board) prepare(ctx context.Context, ui *UI, st *State, board *boardStat
 	if !board.Status.usable() {
 		return fmt.Errorf("the board has no field named %s to hold the columns. Create a new board with setup instead", statusField)
 	}
-	if miss := board.missingColumns(); len(miss) > 0 {
+	miss := board.missingColumns()
+	var optional []string
+	for _, c := range columns {
+		if optionalColumns[c.Name] && !board.Status.has(c.Name) {
+			optional = append(optional, c.Name)
+		}
+	}
+	if len(miss) == 0 && len(optional) > 0 && !empty {
+		ui.Say("  The board has no column %s yet. It is optional: to use it, open %s, click the three dots", strings.Join(optional, ", "), b.url(st))
+		ui.Say("  at the top right, then Settings, then %s, and add it as an option.", statusField)
+	}
+	if len(miss) > 0 || len(optional) > 0 && empty {
 		if !empty {
 			ui.Say("  The board already has cards, so setup does not rewrite its columns.")
 			ui.Say("  Open %s, click the three dots at the top right, then Settings,", b.url(st))
