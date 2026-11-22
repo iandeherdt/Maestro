@@ -73,6 +73,7 @@ type Adapter struct {
 	required     []string
 	firstActive  string
 	terminal     string
+	handoff      string            // normalized
 	ownedStates  map[string]string // normalized -> configured name
 	authors      map[string]bool
 	commenters   map[string]bool
@@ -220,6 +221,7 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 		required:    cfg.Tracker.RequiredLabels,
 		firstActive: norm(cfg.Tracker.ActiveStates[0]),
 		terminal:    cfg.Tracker.TerminalStates[0],
+		handoff:     norm(cfg.Tracker.HandoffState),
 		authors:     loginSet(cfg.Tracker.AllowedAuthors),
 		commenters:  loginSet(cfg.Tracker.AllowedCommenters),
 		ownedStates: map[string]string{},
@@ -494,6 +496,12 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue, on *card) (issue.Is
 	is.ContentHash = issue.ContentHash(is.Title, is.Description)
 
 	switch {
+	case gi.State == "closed" && a.board != nil && on != nil && a.handoff != "" && norm(on.status) == a.handoff:
+		// A merged pull request that says "Closes #n" closes the issue
+		// while its card still waits in the hand-off column. The card keeps
+		// that column, so the service sees the merge and finishes the
+		// ticket: the branch is deleted and the card moves to Done.
+		is.State = strings.TrimSpace(on.status)
 	case gi.State == "closed":
 		is.State = a.terminal
 	case a.board != nil:
