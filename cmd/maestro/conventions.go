@@ -19,11 +19,13 @@ import (
 const conventionsUsage = `usage:
   maestro conventions                      list the rule packs
   maestro conventions show PACK            the rules of a pack and what enforces each
-  maestro conventions apply PACK           write the pack's files into the checkout you are in
-        [--to DIR] [--replace]
-  maestro conventions enable PACK          switch the pack on in this machine's settings file
+  maestro conventions apply PACK...        write the packs' files into the checkout you are in
+        [--to DIR] [--replace]              (a new Godot project gets a starter project too)
+  maestro conventions enable PACK...       switch the packs on in this machine's settings file
         [--file WORKFLOW.md]
-  maestro conventions disable PACK         switch it off again`
+  maestro conventions disable PACK...      switch them off again
+
+Several packs at once: maestro conventions apply godot blender klad`
 
 // runConventions is the rule packs' command (SPEC 23).
 func runConventions(args []string, stdout, stderr io.Writer) int {
@@ -46,17 +48,44 @@ func runConventions(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, conventionsUsage)
 		return 2
 	}
-	p, err := conventions.Get(args[1])
-	if err != nil {
-		return report(stderr, explain("%v", err))
+	// The pack names come first, the flags after them.
+	n := 1
+	for n < len(args) && !strings.HasPrefix(args[n], "-") {
+		n++
+	}
+	var list []*conventions.Pack
+	for _, name := range args[1:n] {
+		for _, name := range strings.Split(name, ",") {
+			if name = strings.TrimSpace(name); name == "" {
+				continue
+			}
+			p, err := conventions.Get(name)
+			if err != nil {
+				return report(stderr, explain("%v", err))
+			}
+			if !slices.ContainsFunc(list, func(q *conventions.Pack) bool { return q.Name == p.Name }) {
+				list = append(list, p)
+			}
+		}
+	}
+	if len(list) == 0 {
+		fmt.Fprintln(stderr, conventionsUsage)
+		return 2
 	}
 	switch args[0] {
 	case "show":
-		return showConventions(p, stdout)
+		if len(list) == 1 && n == len(args) {
+			return showConventions(list[0], stdout)
+		}
 	case "apply":
-		return applyConventions(p, args[2:], stdout, stderr)
+		return applyConventions(list, args[n:], stdout, stderr)
 	case "enable", "disable":
-		return switchConventions(p, args[0] == "enable", args[2:], stdout, stderr)
+		for _, p := range list {
+			if code := switchConventions(p, args[0] == "enable", args[n:], stdout, stderr); code != 0 {
+				return code
+			}
+		}
+		return 0
 	}
 	fmt.Fprintln(stderr, conventionsUsage)
 	return 2
@@ -79,7 +108,7 @@ func showConventions(p *conventions.Pack, stdout io.Writer) int {
 	return 0
 }
 
-func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writer) int {
+func applyConventions(list []*conventions.Pack, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("conventions apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	to := fs.String("to", ".", "the checkout of the project")
@@ -88,6 +117,11 @@ func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, conventionsUsage)
 		return 2
 	}
+	var names []string
+	for _, p := range list {
+		names = append(names, p.Name)
+	}
+	all := strings.Join(names, " ")
 	dir, err := filepath.Abs(*to)
 	if err != nil {
 		return report(stderr, err)
@@ -95,33 +129,59 @@ func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writ
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return report(stderr, explain("%s is not a checkout of a Git repository.\n"+
 			"Go into a checkout of the project the conventions are for, and run this again:\n"+
-			"  git clone <the project's address>\n  cd <the project>\n  maestro conventions apply %s", dir, p.Name))
+			"  git clone <the project's address>     (or, for a new project: git init)\n  cd <the project>\n  maestro conventions apply %s", dir, all))
 	}
-	rep, err := p.Apply(dir, *replace)
-	if err != nil {
-		return report(stderr, err)
-	}
-	if len(rep.Conflicts) > 0 {
-		fmt.Fprintln(stderr, "Nothing was written, because these files exist with other content:")
-		for _, n := range rep.Conflicts {
-			fmt.Fprintln(stderr, "  "+n)
+	// Every pack is checked before any is written, so a missing project
+	// or a conflict leaves the checkout as it was.
+	for _, p := range list {
+		if r := p.Requires; r != nil {
+			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(r.Path))); err != nil {
+				return report(stderr, explain("Nothing was written. The %s pack needs %s, which %s does not have.\n%s", p.Name, r.Path, dir, r.Hint))
+			}
 		}
-		fmt.Fprintln(stderr, "Look at what they hold. To let the pack's version take their place, run:")
-		fmt.Fprintf(stderr, "  maestro conventions apply %s --replace\n", p.Name)
-		fmt.Fprintln(stderr, "Git keeps the old version, so you can compare with `git diff` before you commit.")
-		return 1
 	}
-	fmt.Fprintf(stdout, "The conventions pack %s is in %s.\n", p.Name, dir)
-	for _, n := range rep.Written {
-		fmt.Fprintln(stdout, "  wrote  "+n)
+	var reps []conventions.Report
+	for _, p := range list {
+		rep, err := p.Apply(dir, *replace)
+		var missing *conventions.MissingError
+		if errors.As(err, &missing) {
+			return report(stderr, explain("%v", err))
+		}
+		if err != nil {
+			return report(stderr, err)
+		}
+		if len(rep.Conflicts) > 0 {
+			fmt.Fprintf(stderr, "The %s pack was not written, because these files exist with other content:\n", p.Name)
+			for _, n := range rep.Conflicts {
+				fmt.Fprintln(stderr, "  "+n)
+			}
+			fmt.Fprintln(stderr, "Look at what they hold. To let the pack's version take their place, run:")
+			fmt.Fprintf(stderr, "  maestro conventions apply %s --replace\n", all)
+			fmt.Fprintln(stderr, "Git keeps the old version, so you can compare with `git diff` before you commit.")
+			return 1
+		}
+		reps = append(reps, rep)
 	}
-	for _, n := range rep.Unchanged {
-		fmt.Fprintln(stdout, "  same   "+n)
+	for i, p := range list {
+		rep := reps[i]
+		fmt.Fprintf(stdout, "The conventions pack %s is in %s.\n", p.Name, dir)
+		for _, n := range rep.Written {
+			fmt.Fprintln(stdout, "  wrote  "+n)
+		}
+		for _, n := range rep.Started {
+			fmt.Fprintln(stdout, "  new    "+n)
+		}
+		if len(rep.Started) > 0 {
+			fmt.Fprintln(stdout, "  (the new files start a new project off so its checks pass; they are yours to change)")
+		}
+		for _, n := range rep.Unchanged {
+			fmt.Fprintln(stdout, "  same   "+n)
+		}
+		if len(rep.Ignored) > 0 {
+			fmt.Fprintf(stdout, "  added to .gitignore: %s\n", strings.Join(rep.Ignored, ", "))
+		}
+		fmt.Fprintf(stdout, "The rules, each with the tool that enforces it, are in %s.\n", p.GuidePath())
 	}
-	if len(rep.Ignored) > 0 {
-		fmt.Fprintf(stdout, "  added to .gitignore: %s\n", strings.Join(rep.Ignored, ", "))
-	}
-	fmt.Fprintf(stdout, "The rules, each with the tool that enforces it, are in %s.\n", p.GuidePath())
 
 	step := 1
 	next := func(format string, a ...any) {
@@ -129,19 +189,37 @@ func applyConventions(p *conventions.Pack, args []string, stdout, stderr io.Writ
 		step++
 	}
 	fmt.Fprintln(stdout, "\nWhat is left, in this order:")
-	if len(p.AfterApply) > 0 {
-		next("Install the tools the rules use, in the project:")
-		for _, c := range p.AfterApply {
+	var after, checks, image []string
+	var runs []string
+	for _, p := range list {
+		after = append(after, p.AfterApply...)
+		checks = append(checks, p.Check)
+		runs = append(runs, p.Prepare, p.Verify)
+		if len(p.Image) > 0 {
+			image = append(image, p.ImageNote)
+		}
+	}
+	if len(after) > 0 {
+		next("What only you can do for the project:")
+		for _, c := range after {
 			fmt.Fprintln(stdout, "     "+c)
 		}
 	}
-	next("Check that the project passes its own rules, and fix what does not:\n     %s\n     %s", p.Prepare, p.Verify)
+	next("Check that the project passes its own rules, and fix what does not:\n     %s", strings.Join(runs, "\n     "))
 	next("Commit and push to the main branch yourself:\n     git add -A\n     git commit -m \"Add the %s conventions\"\n     git push\n"+
-		"   The service cannot do this for you: its App may not change CI workflows, on purpose.", p.Name)
-	next("On GitHub, make the check required: the repository's Settings, Branches (or Rules),\n"+
+		"   The service cannot do this for you: its App may not change CI workflows, on purpose.", strings.Join(names, ", "))
+	next("On GitHub, make the checks required: the repository's Settings, Branches (or Rules),\n"+
 		"   protect the main branch, require status checks, and pick %s.\n"+
-		"   From then on nothing can be merged that breaks a rule.", p.Check)
-	next("Switch the pack on, on every machine that runs agents for this project:\n     maestro conventions enable %s", p.Name)
+		"   From then on nothing can be merged that breaks a rule.", strings.Join(checks, ", "))
+	enable := "maestro conventions enable " + all
+	if len(image) > 0 {
+		enable += " && maestro image\n   The sandbox image then gets " + strings.Join(image, "; ") + "."
+	}
+	them := "packs"
+	if len(list) == 1 {
+		them = "pack"
+	}
+	next("Switch the %s on, on every machine that runs agents for this project:\n     %s", them, enable)
 	return 0
 }
 

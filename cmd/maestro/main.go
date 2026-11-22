@@ -43,6 +43,7 @@ const usage = `usage:
   maestro service uninstall              stop running in the background
   maestro conventions                    rule packs per kind of project, enforced by tools
   maestro skills                         give the agents extra skills and agent files
+  maestro unity                          the Unity licence the checks of a Unity project use
   maestro assistant                      let Claude Code on this machine ask and pause the service
   maestro version                        print the version
 
@@ -72,6 +73,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runConventions(args[1:], stdout, stderr)
 		case "skills":
 			return runSkills(args[1:], os.Stdin, stdout, stderr)
+		case "unity":
+			return runUnity(args[1:], os.Stdin, stdout, stderr)
 		case "mcp":
 			return runMCP(args[1:], os.Stdin, stdout, stderr)
 		case "assistant":

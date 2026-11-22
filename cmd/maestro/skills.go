@@ -165,10 +165,13 @@ func addSkills(store skills.Store, arg, ref, sub string, yes bool, stdin io.Read
 			}
 			fmt.Fprintf(stdout, "         programs the agent may run: %s\n", plain(strings.Join(shown, ", "), 400))
 		}
+		if len(f.Settings) > 0 {
+			fmt.Fprintf(stdout, "         sets more than instructions: %s\n", plain(strings.Join(f.Settings, ", "), 300))
+		}
 	}
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Every agent will follow these like it follows your own instructions, so add only what you have read or trust.")
-	fmt.Fprintln(stdout, "Their programs run inside the agent's container, never on this machine. To read them first:")
+	fmt.Fprintln(stdout, "Their programs, hooks and MCP servers run inside the agent's container, never on this machine. To read them first:")
 	fmt.Fprintf(stdout, "  %s\n", plain(readHint(src), 300))
 	if !yes {
 		ok, err := setup.Terminal(stdin, stdout).Confirm(fmt.Sprintf("Add %s?", count(len(found))))

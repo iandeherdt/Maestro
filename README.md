@@ -443,13 +443,17 @@ project hold: every rule in a pack names the tool that checks it, and the checks
 agent cannot skip them.
 
 ```sh
-maestro conventions                 # the packs: dotnet, typescript
+maestro conventions                 # the packs: blender, dotnet, godot, klad, typescript, unity
 maestro conventions show dotnet     # every rule, and the tool that enforces it
 ```
 
 | Pack | For | Rules, in short |
 |---|---|---|
+| `blender` | 3D models made by Python scripts that Blender runs without a screen | every generator runs without an error and writes something, every model loads back into Blender, an optional triangle limit. Comes with the skill `blender-art`. See [Generated art](#game-development) |
+| `godot` | A Godot 4 project in GDScript, with GUT | the project on the image's Godot version, every script parses, gdformat, gdlint, every asset imported with its `.uid` and `.import` files, GUT tests pass. Comes with the skill `godot-dev`. See [Game development](#game-development) |
 | `dotnet` | C# with one solution in the root | `dotnet format`, warnings as errors with the .NET analyzers and SonarAnalyzer, security rules, limits on file and method size, tests, 80% coverage per test project, no vulnerable packages |
+| `unity` | A Unity project in the root, on the Unity version of the image | every asset has its `.meta` file and no GUID is used twice, assets saved as text, the project on the Editor's version, scripts compile in Unity, EditMode and PlayMode tests pass, packages changed by the owner only. Comes with the skill `unity-dev`. Needs a Unity licence: see [Game development](#game-development) |
+| `klad` | 2D art painted with [klad](https://github.com/klad-app/klad) through its command line | every drawing exports, every committed picture is exactly what its drawing exports to now. Comes with the skill `klad-art`. See [Generated art](#game-development) |
 | `typescript` | TypeScript with React, Next.js or TanStack, npm or pnpm | Prettier, ESLint without warnings (typescript-eslint strict, React, hooks, accessibility, SonarJS, security, the framework's own rules), limits on size and complexity, strict type check, tests with vitest, 80% coverage of all source files, no vulnerable packages |
 
 A rule is enforced in three places:
@@ -487,6 +491,141 @@ at the top of `conventions/<pack>/verify.sh`.
 Limits for now: an agent cannot add a new package by itself, because its sandbox does not reach
 package registries. Add the dependency yourself, or the ticket fails its checks. Monorepos are
 not covered, and the TypeScript pack measures coverage with vitest only.
+
+## Game development
+
+Maestro can run cards for games: the agent writes code, scenes and tests, and can make art when
+the art is made by scripts or commands. Four rule packs cover it, each with checks the agent
+cannot skip; pick the ones that fit the project.
+
+| Pack | For | Needs a licence | The agent can |
+|---|---|---|---|
+| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks |
+| `godot` | A Godot 4 project in GDScript | No | write GDScript, scenes and resources as text, run Godot, the linter and the tests itself |
+| `blender` | 3D models made by Python scripts | No | write a generator, build it, look at its render |
+| `klad` | 2D art painted with klad | No | paint through klad's commands, export, look at the picture |
+
+### Start a game project
+
+Several packs go on in one command. For a new Godot game with art made by scripts:
+
+```sh
+mkdir my-game && cd my-game && git init
+maestro conventions apply godot blender klad   # a new Godot project gets a starter project and test
+sh conventions/godot/get-gut.sh                # the GUT test framework, checked by its commit
+git add -A && git commit -m "Start the game" && git push   # to a new repository on GitHub
+maestro conventions enable godot blender klad && maestro image
+```
+
+For Unity, make the project in Unity Hub first (Editor 6000.3.29f1), run `git init` in its folder,
+and then `maestro conventions apply unity`: the pack adds a first EditMode test, so the project
+passes its checks from its first commit. Then `maestro unity activate` once. `apply` prints
+what is left for the packs you named, in order, and writes nothing when one of them cannot be
+applied. The art packs name their output folders as the only places binary files may go (see
+below), with no settings to write.
+
+What it does not do: play the game, judge how it feels, or run anything that needs a screen or a
+GPU (the sandbox has neither; Blender renders on the CPU). Art drawn by hand stays yours: commit
+it and the agent works with it. Git LFS is not supported yet, so files kept in LFS arrive in the
+workspace as pointer files.
+
+Each game pack comes with a skill. The agents get it from Maestro, next to the skills you added
+with `maestro skills`, because the agent's Claude Code does not read skills from the repository.
+The pack also writes the skill into the repository (`.claude/skills/`), so your own Claude Code
+uses it in that project too. A skill of your own with the same name wins.
+
+### Unity
+
+The `unity` pack puts the Unity Editor for Linux (6000.3.29f1, about 8 GB) in the sandbox image.
+Unity needs a licence to open a project and run its tests, so the pack also needs one:
+
+```sh
+maestro conventions enable unity && maestro image
+maestro unity activate          # once, with a Unity account; or --file Unity_lic.ulf
+maestro unity                   # whether this machine has a licence
+```
+
+The licence is kept on this machine and given read-only to the steps that run the project's own
+scripts (preparing the project and the checks), never to the agent's container, and only to
+repositories that have the `unity` pack enabled. The secret scan of a pull request also looks for
+the licence's serial and signature, so an agent cannot copy it into a change it sends. Your password
+is not kept. The checks do run code the agent wrote, and that code can read the licence: use a
+Unity account that holds nothing else, such as a free Personal account made for this.
+
+The agent has no licence, but it has the quick checks: `sh conventions/unity/check.sh` checks the
+`.meta` files and compiles every script with the compiler that comes with the Editor, and
+`sh conventions/unity/new-meta.sh` writes the `.meta` files, with new GUIDs, for scripts, scenes,
+prefabs and folders it adds. Textures, models and audio it leaves to you: their import settings
+are made in the Editor. The skill
+`unity-dev` tells the agent how to work without the editor: scenes and prefabs are edited as
+text, every new asset gets a `.meta` file with a new GUID, packages are left to you.
+
+Not yet run against Unity's servers: the activation, the package download in `prepare.sh` and the
+tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the
+workspace as pointer files.
+
+### Godot
+
+The `godot` pack puts Godot 4.7.2 (from its GitHub release, checked against the published
+checksums) and gdtoolkit in the sandbox image. Godot needs no licence and runs without a screen,
+so the agent runs everything the checks run:
+
+```sh
+maestro conventions apply godot      # a new project gets a starter; then sh conventions/godot/get-gut.sh
+maestro conventions enable godot && maestro image
+```
+
+The checks: the project is made for the Godot version of the image, every script parses with
+the project's classes known, `gdformat` and `gdlint` pass, every asset imports and its `.uid`
+and `.import` files are committed, and the GUT tests under `test/` pass. The skill `godot-dev`
+tells the agent how to work without the editor: scenes are edited as text, and Godot is run
+with `--headless`. Only GDScript is covered; Godot's C# version is not.
+
+### Art made by scripts: Blender and klad
+
+Art that is made by scripts or by commands is code to Maestro: an agent can make a new piece,
+look at it, and try again. Two packs set this up for any project, each with a skill that teaches
+the agent the way of working, and checks the agent cannot skip:
+
+- **`blender`**: one Python generator per model, which Blender runs without a screen. The pack
+  adds Blender 5.0.1 to the image (from blender.org, checked against its checksum), the helper
+  module `maestro_art` (export for Unity, a material, a preview render), and the skill
+  `blender-art`.
+- **`klad`**: drawings painted with [klad](https://github.com/klad-app/klad), each exported to a
+  PNG file. The pack builds klad from its source into the image, and adds the skill `klad-art`,
+  which starts the agent on klad's own skills (`klad skill`, `klad skill drawing`).
+
+```sh
+maestro conventions apply blender     # in a checkout of the project; then set the folders in
+                                      # conventions/blender/settings.sh
+maestro conventions enable blender && maestro image
+```
+
+As with the other game packs, the agents get the skill from Maestro, and the repository gets a
+copy for your own Claude Code.
+
+The models and pictures are binary files, which Maestro refuses by default. The packs allow
+them in their output folders only, `art/models/` and `art/textures/`. When you move those in
+`settings.sh`, name the new folders in the settings file:
+
+```yaml
+policy:
+  binary_paths: ["models/**"]   # in addition to the packs' own folders
+  binary_max_file_bytes: 52428800     # per file there; the default
+screenshots:
+  command: sh conventions/blender/previews.sh   # renders of what the change touched, on the pull request
+```
+
+A text file in such a folder is read and limited like any other, so the secret scan still sees
+it.
+
+The Blender check builds everything into a throwaway folder, because an FBX export carries the
+time it was made and Maestro fails a check that changes files. It fails when two generators
+write the same file, and when a generator was changed but its committed models were not built
+again (a glTF export is the same every time, so an unchanged one passes). klad renders the same
+pixels on every machine, so its check compares the committed pictures with a fresh export and
+fails when one is out of date. The pack pins klad's version, and the check fails when the klad
+in the image is another one. A project with no generators or drawings yet passes.
 
 ## Configure
 
@@ -589,6 +728,9 @@ Last updated 2026-11-22.
 | Model per card, for planning and by default | Written and tested against stand-ins for the board and for Claude Code. Not yet run with a real card. |
 | Pointing out code that reaches outside the program | Done. Patterns for C#, TypeScript and JavaScript, Go, Python, C and shell, tested on examples. A pattern list can be evaded by someone who knows it, so it is an aid for the reviewer and not a guarantee. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
+| Unity (pack `unity`, `maestro unity`) | Written. The `.meta`, version and quick compile checks were run against a sample project in the Unity 6.3 image, and shown to fail on a violation. The Editor was shown to start under the sandbox's settings and stop for want of a licence. The licence is shown to reach the hooks and verify read-only and not the agent. Not yet run with a real licence, against Unity's servers, or in an image built with `maestro image`. |
+| Packs `blender` and `klad`, binary folders (`policy.binary_paths`) | Written. Both packs were run under the sandbox's settings (no network, its user, no capabilities) against sample projects: Blender 5.0.1 with a good generator, one that raises, one that writes nothing, and a triangle limit; klad v0.4.0 (built from source here) with a missing, a current and an out-of-date picture. The image lines that download Blender and build klad have not been built with `maestro image`. |
+| Pack `godot` | Written. Run under the sandbox's settings against a sample project with Godot 4.7.2, gdtoolkit 4.5.0 and GUT 9.7.1: a script that does not parse, unformatted code, a lint error, a passing and a failing test. The image line has not been built with `maestro image`. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |

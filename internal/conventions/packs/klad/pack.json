@@ -1,0 +1,81 @@
+{
+  "name": "klad",
+  "title": "klad (2D art painted through its command line)",
+  "applies": "A project whose 2D art (textures, sprites, icons) is painted with klad: .klad drawings in the folder named in conventions/klad/settings.sh, each exported to a PNG file that is committed next to the drawing's source.",
+  "rules": [
+    {
+      "id": "drawings-export",
+      "rule": "Every drawing opens and exports without an error.",
+      "enforced_by": [
+        "klad export",
+        "conventions/klad/build.sh"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "pictures-current",
+      "rule": "Every committed picture is exactly what its drawing exports to now, and no drawing is missing its picture.",
+      "enforced_by": [
+        "klad export (the same pixels on every machine)",
+        "conventions/klad/verify.sh"
+      ],
+      "where": [
+        "verify",
+        "ci"
+      ]
+    },
+    {
+      "id": "binary-files",
+      "rule": "Binary files are committed only in the folders the owner names; everywhere else they are refused.",
+      "enforced_by": [
+        "the diff policy of the Maestro service (policy.binary_paths)"
+      ],
+      "where": [
+        "service"
+      ]
+    },
+    {
+      "id": "secrets",
+      "rule": "No credentials in the change.",
+      "enforced_by": [
+        "the secret scan of the Maestro service"
+      ],
+      "where": [
+        "service"
+      ]
+    },
+    {
+      "id": "rules-stay",
+      "rule": "The agent cannot change these rules, the scripts that check them, the skill, or the CI workflows.",
+      "enforced_by": [
+        "the diff policy of the Maestro service (protected paths)"
+      ],
+      "where": [
+        "service"
+      ]
+    }
+  ],
+  "protect": [
+    "conventions/**",
+    ".claude/skills/klad-art/**"
+  ],
+  "hosts": [],
+  "prepare": "sh conventions/klad/prepare.sh",
+  "verify": "sh conventions/klad/verify.sh",
+  "check": "conventions-klad",
+  "gitignore": [],
+  "image": [
+    "ARG TARGETARCH",
+    "RUN set -eu; \\\n    apt-get update; \\\n    apt-get install -y --no-install-recommends build-essential pkg-config python3; \\\n    case \"$TARGETARCH\" in amd64) t=x86_64-unknown-linux-gnu ;; arm64) t=aarch64-unknown-linux-gnu ;; *) echo \"no Rust for $TARGETARCH\" >&2; exit 1 ;; esac; \\\n    export RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo; \\\n    cd /tmp; \\\n    curl -fsSL --proto '=https' --tlsv1.2 -o rustup-init \"https://static.rust-lang.org/rustup/dist/$t/rustup-init\"; \\\n    curl -fsSL --proto '=https' --tlsv1.2 -o rustup-init.sha256 \"https://static.rust-lang.org/rustup/dist/$t/rustup-init.sha256\"; \\\n    echo \"$(cut -d ' ' -f 1 rustup-init.sha256)  rustup-init\" | sha256sum -c -; \\\n    chmod +x rustup-init; \\\n    ./rustup-init -y --profile minimal --no-modify-path; \\\n    git clone --quiet --depth 1 --branch v0.4.0 https://github.com/klad-app/klad /tmp/klad; \\\n    cd /tmp/klad; \\\n    test \"$(git rev-parse HEAD)\" = 971a89b671ebbed0f806e2969f5da1a4c6735abb; \\\n    /tmp/cargo/bin/cargo build --release --locked --no-default-features -p klad-cli; \\\n    install -s target/release/klad /usr/local/bin/klad; \\\n    cd /; \\\n    rm -rf /tmp/klad /tmp/rustup /tmp/cargo /tmp/rustup-init /tmp/rustup-init.sha256; \\\n    apt-get purge -y build-essential pkg-config; \\\n    apt-get autoremove -y; \\\n    rm -rf /var/lib/apt/lists/*"
+  ],
+  "image_note": "klad v0.4.0, built from its source on this machine (a few minutes, once). klad is source-available: the build is for your own use; do not publish the image",
+  "after_apply": [
+    "Set KLAD_SOURCE and KLAD_OUTPUT in conventions/klad/settings.sh to your folders.",
+    "Let the agent commit the pictures: in the settings file, policy.binary_paths: [\"<KLAD_OUTPUT>/**\"]. Everywhere else binary files stay refused.",
+    "For pictures on the pull request: screenshots.command: sh conventions/klad/previews.sh"
+  ],
+  "binary_paths": ["art/textures/**"]
+}

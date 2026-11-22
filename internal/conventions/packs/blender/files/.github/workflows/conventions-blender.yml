@@ -1,0 +1,30 @@
+# The same checks the Maestro service runs before it pushes. Make this check
+# required in the branch protection of the main branch.
+name: conventions-blender
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  conventions-blender:
+    runs-on: ubuntu-latest
+    env:
+      BLENDER_VERSION: "5.0.1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Blender
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libopengl0 libegl1 libsm6 libice6 libxi6 libxkbcommon0 libxrender1 libxt6 libxfixes3 libxxf86vm1
+          base="https://download.blender.org/release/Blender${BLENDER_VERSION%.*}"
+          file="blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          curl -fsSL -o "$file" "$base/$file"
+          curl -fsSL -o blender.sha256 "$base/blender-${BLENDER_VERSION}.sha256"
+          grep " $file\$" blender.sha256 | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/blender"
+          tar -xJf "$file" -C "$RUNNER_TEMP/blender" --strip-components=1
+          echo "BLENDER=$RUNNER_TEMP/blender/blender" >> "$GITHUB_ENV"
+      - name: Every generator runs, every model loads
+        run: sh conventions/blender/verify.sh

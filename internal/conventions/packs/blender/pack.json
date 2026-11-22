@@ -1,0 +1,64 @@
+{
+  "name": "blender",
+  "title": "Blender (3D art made by Python scripts)",
+  "applies": "A project whose 3D models are made by Python generator scripts that Blender runs without a screen, one script per piece, in the folder named in conventions/blender/settings.sh.",
+  "rules": [
+    {
+      "id": "generators-run",
+      "rule": "Every generator runs in Blender without an error and writes at least one file.",
+      "enforced_by": ["Blender with --python-exit-code 1", "conventions/blender/build.sh"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "models-load",
+      "rule": "Every model a generator writes (FBX, glTF, OBJ) loads back into Blender and holds at least one mesh.",
+      "enforced_by": ["conventions/blender/check.py"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "triangles",
+      "rule": "No model has more triangles than ART_MAX_TRIANGLES in conventions/blender/settings.sh, when it is set.",
+      "enforced_by": ["conventions/blender/check.py"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "binary-files",
+      "rule": "Binary files are committed only in the folders the owner names; everywhere else they are refused.",
+      "enforced_by": ["the diff policy of the Maestro service (policy.binary_paths)"],
+      "where": ["service"]
+    },
+    {
+      "id": "secrets",
+      "rule": "No credentials in the change.",
+      "enforced_by": ["the secret scan of the Maestro service"],
+      "where": ["service"]
+    },
+    {
+      "id": "rules-stay",
+      "rule": "The agent cannot change these rules, the scripts that check them, the skill, or the CI workflows.",
+      "enforced_by": ["the diff policy of the Maestro service (protected paths)"],
+      "where": ["service"]
+    }
+  ],
+  "protect": [
+    "conventions/**",
+    ".claude/skills/blender-art/**"
+  ],
+  "hosts": [],
+  "prepare": "sh conventions/blender/prepare.sh",
+  "verify": "sh conventions/blender/verify.sh",
+  "check": "conventions-blender",
+  "gitignore": [],
+  "image": [
+    "ARG TARGETARCH",
+    "RUN set -eu; \\\n    apt-get update; \\\n    apt-get install -y --no-install-recommends xz-utils libgl1 libopengl0 libegl1 libsm6 libice6 libxi6 \\\n      libxkbcommon0 libxrender1 libxt6 libxfixes3 libxext6 libx11-6 libxxf86vm1; \\\n    rm -rf /var/lib/apt/lists/*; \\\n    case \"$TARGETARCH\" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo \"Blender has no build for $TARGETARCH\" >&2; exit 1 ;; esac; \\\n    base=https://download.blender.org/release/Blender5.0; \\\n    file=\"blender-5.0.1-linux-$arch.tar.xz\"; \\\n    cd /tmp; \\\n    curl -fsSL --proto '=https' --tlsv1.2 -o \"$file\" \"$base/$file\"; \\\n    curl -fsSL --proto '=https' --tlsv1.2 -o blender.sha256 \"$base/blender-5.0.1.sha256\"; \\\n    grep \" $file\\$\" blender.sha256 | sha256sum -c -; \\\n    mkdir -p /opt/blender; \\\n    tar -xJf \"$file\" -C /opt/blender --strip-components=1; \\\n    rm -f \"$file\" blender.sha256; \\\n    ln -s /opt/blender/blender /usr/local/bin/blender",
+    "ENV BLENDER=/opt/blender/blender"
+  ],
+  "image_note": "Blender 5.0.1 from blender.org, checked against its published checksum (about 1 GB)",
+  "after_apply": [
+    "Set ART_SOURCE and ART_OUTPUT in conventions/blender/settings.sh to your folders.",
+    "Let the agent commit the models: in the settings file, policy.binary_paths: [\"<ART_OUTPUT>/**\"]. Everywhere else binary files stay refused.",
+    "For pictures on the pull request: screenshots.command: sh conventions/blender/previews.sh"
+  ],
+  "binary_paths": ["art/models/**"]
+}

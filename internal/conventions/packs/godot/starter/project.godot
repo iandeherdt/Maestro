@@ -1,0 +1,10 @@
+; Engine configuration file.
+; Written by `maestro conventions apply godot` for a new project. Open the
+; project in Godot 4.7 to change its settings; Godot keeps this file.
+
+config_version=5
+
+[application]
+
+config/name="New Game"
+config/features=PackedStringArray("4.7")

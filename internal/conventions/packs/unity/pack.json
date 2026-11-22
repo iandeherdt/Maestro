@@ -1,0 +1,85 @@
+{
+  "name": "unity",
+  "title": "Unity (C#)",
+  "applies": "A Unity project in the root of the repository (Assets/, Packages/ and ProjectSettings/ at the top), saved with the Unity version of the Maestro image.",
+  "rules": [
+    {
+      "id": "meta-files",
+      "rule": "Every asset under Assets/ has its .meta file, no .meta file is left without its asset, and no two assets share a GUID.",
+      "enforced_by": ["conventions/unity/meta.sh"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "text-assets",
+      "rule": "Scenes, prefabs and other assets are saved as text (Force Text), with visible meta files, so a change to them can be read and reviewed.",
+      "enforced_by": ["conventions/unity/meta.sh", "ProjectSettings/EditorSettings.asset"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "editor-version",
+      "rule": "The project is saved with the Unity version that checks it, so opening it never upgrades it.",
+      "enforced_by": ["conventions/unity/meta.sh", "ProjectSettings/ProjectVersion.txt"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "compile",
+      "rule": "Every script compiles in Unity without errors.",
+      "enforced_by": ["the Unity Editor in batch mode", "conventions/unity/compile.sh, the quick check without a licence"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "tests",
+      "rule": "All EditMode and PlayMode tests pass, and the project has at least one test.",
+      "enforced_by": ["Unity Test Framework (-runTests)", "conventions/unity/verify.sh"],
+      "where": ["verify", "ci"]
+    },
+    {
+      "id": "packages",
+      "rule": "The agent does not add, remove or change packages; the owner does.",
+      "enforced_by": ["the diff policy of the Maestro service (Packages/manifest.json is protected)"],
+      "where": ["service"]
+    },
+    {
+      "id": "secrets",
+      "rule": "No credentials in the change.",
+      "enforced_by": ["the secret scan of the Maestro service"],
+      "where": ["service"]
+    },
+    {
+      "id": "rules-stay",
+      "rule": "The agent cannot change these rules, the scripts that check them, or the CI workflows.",
+      "enforced_by": ["the diff policy of the Maestro service (protected paths)"],
+      "where": ["service"]
+    }
+  ],
+  "protect": [
+    "conventions/**",
+    "Packages/manifest.json",
+    "Packages/packages-lock.json",
+    "ProjectSettings/ProjectVersion.txt",
+    "ProjectSettings/EditorSettings.asset",
+    ".gitattributes",
+    ".claude/skills/unity-dev/**"
+  ],
+  "hosts": ["packages.unity.com", "download.packages.unity.com"],
+  "prepare": "sh conventions/unity/prepare.sh",
+  "verify": "sh conventions/unity/verify.sh",
+  "check": "conventions-unity",
+  "gitignore": ["Library/", "Temp/", "Obj/", "obj/", "Logs/", "UserSettings/", "Build/", "Builds/", "MemoryCaptures/", "*.csproj", "*.sln"],
+  "image": [
+    "COPY --from=docker.io/unityci/editor:ubuntu-6000.3.29f1-base-4.0.0@sha256:41e91f1929220bfe7eec1518c4ba22b749216ddc0bc33006141640945ad5a091 /opt/unity /opt/unity",
+    "COPY --from=docker.io/unityci/editor:ubuntu-6000.3.29f1-base-4.0.0@sha256:41e91f1929220bfe7eec1518c4ba22b749216ddc0bc33006141640945ad5a091 /usr/lib/game-ci /usr/lib/game-ci",
+    "RUN apt-get update \\\n && apt-get install -y --no-install-recommends xvfb xauth libgtk-3-0 libgl1 libglu1-mesa libgbm1 libvulkan1 libasound2 libnss3 libxtst6 libxss1 libcap2 libicu72 libssl3 \\\n && rm -rf /var/lib/apt/lists/* \\\n && printf '6d61657374726f2d756e697479303031\\n' > /etc/machine-id"
+  ],
+  "image_note": "the Unity Editor 6000.3.29f1 for Linux (about 8 GB)",
+  "after_apply": [
+    "In Unity, set Edit > Project Settings > Editor > Asset Serialization to Force Text and Version Control to Visible Meta Files, if they are not already.",
+    "Run `maestro unity activate` on every machine that runs agents for the project. The licence stays on that machine and is given to the checks only, never to the agent.",
+    "For CI, add the repository secret UNITY_LICENSE (see the comment at the top of .github/workflows/conventions-unity.yml)."
+  ],
+  "requires": {
+    "path": "ProjectSettings/ProjectVersion.txt",
+    "hint": "Make the project first: in Unity Hub, New project, with Editor 6000.3.29f1 (the version of the Maestro image). Close Unity, run `git init` in the project's folder (or move the project into this checkout), and run this again there."
+  },
+  "starter_unless": "Assets/Tests"
+}

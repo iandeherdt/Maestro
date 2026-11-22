@@ -64,7 +64,22 @@ type Found struct {
 	// ones a skill could have the agent run.
 	Files, Scripts []string
 	Bytes          int64
+	// Settings are the front matter fields that change what the agent
+	// runs or may do, beyond the instructions: hooks, MCP servers,
+	// tools, the model. The person sees them before adding.
+	Settings []string
 }
+
+// powerFields are the front matter fields of Claude Code skills and agent
+// files that start programs or change the agent's tools, permissions or
+// model.
+var powerFields = []string{"allowed-tools", "disallowed-tools", "tools", "disallowedTools", "hooks",
+	"mcpServers", "permissionMode", "model", "effort", "context", "agent", "skills", "memory",
+	"isolation", "background", "maxTurns", "initialPrompt"}
+
+// MaxDescription is the longest description a skill may have in the
+// Agent Skills format; Claude Code cuts the list of skills off near it.
+const MaxDescription = 1024
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
@@ -231,53 +246,75 @@ func copyFile(src, dst string) error {
 
 // front reads the name and description at the top of a skill or agent
 // file.
-func front(path string) (name, description string, err error) {
+func front(path string) (name, description string, settings []string, err error) {
 	st, err := os.Lstat(path)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	if !st.Mode().IsRegular() || st.Size() > 1<<20 {
-		return "", "", fmt.Errorf("%s is not a regular file of a normal size", path)
+		return "", "", nil, fmt.Errorf("%s is not a regular file of a normal size", path)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
-		return "", "", errors.New("no front matter")
+		return "", "", nil, errors.New("no front matter")
 	}
 	head, _, ok := strings.Cut(text[4:], "\n---")
 	if !ok {
-		return "", "", errors.New("the front matter is not closed")
+		return "", "", nil, errors.New("the front matter is not closed")
 	}
 	var m struct {
 		Name        string `yaml:"name"`
 		Description string `yaml:"description"`
 	}
 	if err := yaml.Unmarshal([]byte(head), &m); err != nil {
-		return "", "", fmt.Errorf("the front matter is not valid: %w", err)
+		return "", "", nil, fmt.Errorf("the front matter is not valid: %w", err)
 	}
-	return strings.TrimSpace(m.Name), strings.Join(strings.Fields(m.Description), " "), nil
+	var all map[string]any
+	_ = yaml.Unmarshal([]byte(head), &all)
+	for _, k := range powerFields {
+		if _, ok := all[k]; ok {
+			settings = append(settings, k)
+		}
+	}
+	return strings.TrimSpace(m.Name), strings.Join(strings.Fields(m.Description), " "), settings, nil
+}
+
+// descriptionProblem says what is wrong with a skill's description, if
+// anything: the Agent Skills format allows 1024 characters and no tags.
+func descriptionProblem(desc string) error {
+	if desc == "" {
+		return errors.New("SKILL.md has no description, so the agent would never use it")
+	}
+	if n := len([]rune(desc)); n > MaxDescription {
+		return fmt.Errorf("the description is %d characters; at most %d, or it is cut off in the agent's list of skills", n, MaxDescription)
+	}
+	if strings.ContainsAny(desc, "<>") {
+		return errors.New("the description holds < or >, which the Agent Skills format does not allow")
+	}
+	return nil
 }
 
 var scriptRE = regexp.MustCompile(`(?i)\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php|ps1|exe|bin)$`)
 
 // skillAt describes the skill in dir.
 func skillAt(dir string) (Found, error) {
-	name, desc, err := front(filepath.Join(dir, "SKILL.md"))
+	name, desc, settings, err := front(filepath.Join(dir, "SKILL.md"))
 	if err != nil {
 		return Found{}, fmt.Errorf("SKILL.md: %w", err)
 	}
 	if name == "" {
 		name = strings.ToLower(filepath.Base(dir))
 	}
-	f := Found{Entry: Entry{Kind: Skill, Name: name, Description: desc}, Path: dir}
+	f := Found{Entry: Entry{Kind: Skill, Name: name, Description: desc}, Path: dir, Settings: settings}
 	if !nameRE.MatchString(name) {
 		return f, fmt.Errorf("the name %q has to be lower-case letters, digits and dashes", name)
 	}
-	if desc == "" {
-		return f, errors.New("SKILL.md has no description, so the agent would never use it")
+	if err := descriptionProblem(desc); err != nil {
+		return f, err
 	}
 	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -345,7 +382,7 @@ func Discover(root string) (found []Found, problems []string) {
 		if filepath.Base(filepath.Dir(p)) != "agents" || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
 		}
-		name, desc, err := front(p)
+		name, desc, settings, err := front(p)
 		if err != nil || name == "" || desc == "" {
 			return nil // a README or another note, not an agent file
 		}
@@ -354,7 +391,7 @@ func Discover(root string) (found []Found, problems []string) {
 			return nil
 		}
 		info, _ := d.Info()
-		found = append(found, Found{Entry: Entry{Kind: Agent, Name: name, Description: desc}, Path: p, Bytes: info.Size()})
+		found = append(found, Found{Entry: Entry{Kind: Agent, Name: name, Description: desc}, Path: p, Bytes: info.Size(), Settings: settings})
 		return nil
 	})
 	sort.Slice(found, func(i, j int) bool {

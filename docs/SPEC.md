@@ -453,6 +453,11 @@ Replaces upstream `codex`.
 - `max_diff_bytes` (integer): default `2097152`.
 - `max_file_bytes` (integer): default `1048576`.
 - `allow_binary` (boolean): default `false`.
+- `binary_paths` (list of glob patterns): default empty. Binary files are allowed under these
+  paths, up to `binary_max_file_bytes` each, and add nothing to the diff size. Whether a file is
+  binary is decided by a NUL byte in its first 8000 bytes; a text file under these paths keeps
+  `max_file_bytes` and is scanned for secrets.
+- `binary_max_file_bytes` (integer): default `52428800`.
 - `allow_symlinks` (boolean): default `false`.
 - `test_paths` (list of glob patterns): default
   `["**/test/**", "**/tests/**", "**/*_test.*", "**/*.test.*", "**/*.spec.*", "**/Tests/**"]`.
@@ -1708,7 +1713,8 @@ Built-in `deny` rules (cannot be disabled):
   covers setuid and setgid bits.
 - D5 More than `policy.max_changed_files` files, a total diff above `policy.max_diff_bytes`, or a
   single added file above `policy.max_file_bytes`.
-- D6 Binary files added or modified, unless `policy.allow_binary`.
+- D6 Binary files added or modified, unless `policy.allow_binary`, or the file is under
+  `policy.binary_paths`.
 - D7 Secret scan hit in added lines (Section 15.4).
 - D8 Paths that differ only by case or Unicode normalization from an existing path, and paths
   containing control characters or invisible formatting characters (including the bidirectional

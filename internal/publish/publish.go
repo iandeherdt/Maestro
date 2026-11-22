@@ -188,7 +188,8 @@ func (p *Publisher) admit(ctx context.Context, cfg *config.Config, ws workspace.
 	}
 
 	diff, err := p.Mirror.Diff(ctx, ws.BaseSHA, imp.Head, mirror.Limits{
-		MaxChangedFiles: cfg.Policy.MaxChangedFiles, MaxDiffBytes: cfg.Policy.MaxDiffBytes, MaxFileBytes: cfg.Policy.MaxFileBytes})
+		MaxChangedFiles: cfg.Policy.MaxChangedFiles, MaxDiffBytes: cfg.Policy.MaxDiffBytes, MaxFileBytes: cfg.Policy.MaxFileBytes,
+		BinaryPaths: cfg.Policy.BinaryPaths, BinaryMaxFileBytes: cfg.Policy.BinaryMaxFileBytes})
 	if err != nil {
 		return nil, nil, fmt.Errorf("diff: %w", err)
 	}

@@ -249,10 +249,15 @@ func Evaluate(cfg config.Policy, in Input) Result {
 		}
 
 		// D5, per file. D6.
-		if c.Status != 'D' && c.NewSize > cfg.MaxFileBytes {
-			deny("D5", c.Path, fmt.Sprintf("file is %d bytes, the limit is %d", c.NewSize, cfg.MaxFileBytes))
+		binaryHere := c.Binary && matchAny(cfg.BinaryPaths, c.Path)
+		limit := cfg.MaxFileBytes
+		if binaryHere {
+			limit = cfg.BinaryMaxFileBytes
 		}
-		if c.Binary && c.Status != 'D' && !cfg.AllowBinary {
+		if c.Status != 'D' && c.NewSize > limit {
+			deny("D5", c.Path, fmt.Sprintf("file is %d bytes, the limit is %d", c.NewSize, limit))
+		}
+		if c.Binary && c.Status != 'D' && !cfg.AllowBinary && !binaryHere {
 			deny("D6", c.Path, "binary file added or modified")
 		}
 

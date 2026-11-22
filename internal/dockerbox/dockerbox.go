@@ -43,6 +43,7 @@ const (
 	workDir    = "/workspace"
 	repoDir    = "/workspace/repo"
 	mirrorDir  = "/mirror"
+	licenceDir = "/unity-licence"
 	claudeDir  = "/claude"
 	handoffDir = "/handoff"
 	bundleName = "out.bundle"
@@ -72,6 +73,12 @@ type Box struct {
 	// for them. Mounting them, also when empty, means that what an agent
 	// writes there itself is never seen by a later run.
 	SkillsDir, AgentsDir string
+	// UnityLicenceDir holds an activated Unity licence (`maestro unity
+	// activate`). It is mounted read-only into the steps that run the
+	// repository's own scripts, hooks and verify, so Unity can open the
+	// project there. It is never mounted into the agent's step. Empty
+	// means no licence.
+	UnityLicenceDir string
 	// Memory ("6g"), CPUs ("3.0") and PIDs bound every step.
 	Memory, CPUs string
 	PIDs         int64
@@ -192,6 +199,7 @@ type spec struct {
 	mirror  bool
 	claude  bool
 	handoff string // host directory, or ""
+	licence bool   // mount UnityLicenceDir
 	env     map[string]string
 }
 
@@ -205,6 +213,8 @@ func (b *Box) check() error {
 		return fail("the mirror and hand-off directories must be absolute paths")
 	case strings.ContainsAny(b.MirrorDir+b.HandoffDir, ",\n"):
 		return fail("the mirror and hand-off paths must not contain commas")
+	case b.UnityLicenceDir != "" && (!filepath.IsAbs(b.UnityLicenceDir) || strings.ContainsAny(b.UnityLicenceDir, ",\n")):
+		return fail("the Unity licence directory must be an absolute path without commas")
 	}
 	return nil
 }
@@ -264,6 +274,9 @@ func (b *Box) runArgs(name string, s spec) []string {
 	}
 	if s.handoff != "" {
 		args = append(args, "--mount", b.bind(s.handoff, handoffDir, false))
+	}
+	if s.licence {
+		args = append(args, "--mount", b.bind(b.UnityLicenceDir, licenceDir, true))
 	}
 	keys := make([]string, 0, len(s.env))
 	for k := range s.env {
@@ -407,6 +420,7 @@ func (b *Box) launch(ctx context.Context, req sandbox.Request, stdin []byte, std
 		if profile == sandbox.NetAgent {
 			return sandbox.Result{}, fail("only an agent step uses the agent network profile")
 		}
+		s.licence = b.UnityLicenceDir != ""
 	default:
 		return sandbox.Result{}, fail("unknown step")
 	}

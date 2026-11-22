@@ -567,3 +567,14 @@ func TestModelFor(t *testing.T) {
 		t.Errorf("no model anywhere: %q %q", m, r)
 	}
 }
+
+func TestBinaryPaths(t *testing.T) {
+	c := mustBuild(t, with("", "", "policy:\n  binary_paths: [\"art/models/**\"]\n  binary_max_file_bytes: 1000\n"))
+	if !slices.Equal(c.Policy.BinaryPaths, []string{"art/models/**"}) || c.Policy.BinaryMaxFileBytes != 1000 {
+		t.Errorf("policy %+v", c.Policy)
+	}
+	c = mustBuild(t, minimal)
+	if len(c.Policy.BinaryPaths) != 0 || c.Policy.BinaryMaxFileBytes != 52428800 {
+		t.Errorf("defaults %+v", c.Policy)
+	}
+}

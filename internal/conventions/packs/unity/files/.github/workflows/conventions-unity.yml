@@ -1,0 +1,31 @@
+# The same checks the Maestro service runs before it pushes. Make this check
+# required in the branch protection of the main branch.
+#
+# Unity needs a licence here too. Put the contents of an activated licence
+# file (Unity_lic.ulf) for this runner in the repository secret
+# UNITY_LICENSE; see the GameCI documentation on activation. A licence file
+# activated on your own machine is tied to that machine and is not accepted
+# here.
+name: conventions-unity
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  conventions-unity:
+    runs-on: ubuntu-latest
+    container: unityci/editor:ubuntu-6000.3.29f1-base-4.0.0@sha256:41e91f1929220bfe7eec1518c4ba22b749216ddc0bc33006141640945ad5a091
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Packages
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        run: sh conventions/unity/prepare.sh
+      - name: Meta files, compile, EditMode and PlayMode tests
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        run: sh conventions/unity/verify.sh

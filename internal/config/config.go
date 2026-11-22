@@ -188,9 +188,13 @@ type Policy struct {
 	MaxDiffBytes    int64
 	MaxFileBytes    int64
 	AllowBinary     bool
-	AllowSymlinks   bool
-	TestPaths       []string
-	SecretScan      bool
+	// BinaryPaths are where binary files are allowed, such as generated
+	// models, up to BinaryMaxFileBytes each.
+	BinaryPaths        []string
+	BinaryMaxFileBytes int64
+	AllowSymlinks      bool
+	TestPaths          []string
+	SecretScan         bool
 }
 
 type Budget struct {
@@ -872,6 +876,8 @@ func (b *builder) policy(s *section) {
 	p.MaxDiffBytes = b.positive("policy.max_diff_bytes", s.integer("max_diff_bytes", 2097152))
 	p.MaxFileBytes = b.positive("policy.max_file_bytes", s.integer("max_file_bytes", 1048576))
 	p.AllowBinary = s.boolean("allow_binary", false)
+	p.BinaryPaths = append(trimAll(s.strList("binary_paths", nil)), b.packs.BinaryPaths...)
+	p.BinaryMaxFileBytes = b.positive("policy.binary_max_file_bytes", s.integer("binary_max_file_bytes", 52428800))
 	p.AllowSymlinks = s.boolean("allow_symlinks", false)
 	p.TestPaths = trimAll(s.strList("test_paths", []string{
 		"**/test/**", "**/tests/**", "**/*_test.*", "**/*.test.*", "**/*.spec.*", "**/Tests/**"}))

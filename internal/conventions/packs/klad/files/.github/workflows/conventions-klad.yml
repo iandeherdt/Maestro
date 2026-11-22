@@ -1,0 +1,36 @@
+# The same checks the Maestro service runs before it pushes. Make this check
+# required in the branch protection of the main branch.
+#
+# klad is source-available: building it for your own use (and a company's
+# with less than 500,000 euros a year in revenue) is allowed; publishing the
+# build is not. This job builds it on the runner and keeps it there.
+name: conventions-klad
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  conventions-klad:
+    runs-on: ubuntu-latest
+    env:
+      KLAD_VERSION: v0.4.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/klad-bin
+          key: klad-${{ env.KLAD_VERSION }}
+      - name: klad
+        run: |
+          if [ ! -x ~/klad-bin/klad ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends pkg-config libfreetype-dev libfontconfig1-dev
+            git clone --depth 1 --branch "$KLAD_VERSION" https://github.com/klad-app/klad "$RUNNER_TEMP/klad"
+            (cd "$RUNNER_TEMP/klad" && cargo build --release --no-default-features -p klad-cli)
+            mkdir -p ~/klad-bin && cp "$RUNNER_TEMP/klad/target/release/klad" ~/klad-bin/
+          fi
+          echo "KLAD=$HOME/klad-bin/klad" >> "$GITHUB_ENV"
+      - name: Every drawing exports, every picture is up to date
+        run: sh conventions/klad/verify.sh

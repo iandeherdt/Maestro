@@ -1,6 +1,7 @@
 package conventions_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,7 +15,7 @@ import (
 
 func TestEveryPackIsValidAndEveryRuleNamesItsTool(t *testing.T) {
 	names := Names()
-	if !slices.Contains(names, "dotnet") || !slices.Contains(names, "typescript") {
+	if !slices.Contains(names, "dotnet") || !slices.Contains(names, "typescript") || !slices.Contains(names, "unity") || !slices.Contains(names, "blender") || !slices.Contains(names, "klad") || !slices.Contains(names, "godot") {
 		t.Fatalf("packs: %v", names)
 	}
 	for _, n := range names {
@@ -43,7 +44,7 @@ func TestEveryPackIsValidAndEveryRuleNamesItsTool(t *testing.T) {
 			t.Errorf("%s: the workflow has no job named %s", n, p.Check)
 		}
 	}
-	if _, err := Get("cobol"); err == nil || !strings.Contains(err.Error(), "dotnet, typescript") {
+	if _, err := Get("cobol"); err == nil || !strings.Contains(err.Error(), "blender, dotnet, godot, klad, typescript, unity") {
 		t.Errorf("an unknown pack: %v", err)
 	}
 	if _, err := Get("../dotnet"); err == nil {
@@ -162,5 +163,75 @@ func TestDerive(t *testing.T) {
 	}
 	if s := Derive(nil); s.Prepare != "" || s.Verify != "" {
 		t.Errorf("no packs: %+v", s)
+	}
+}
+
+func TestSyncSkills(t *testing.T) {
+	dir := t.TempDir()
+	blender, _ := Get("blender")
+	godot, _ := Get("godot")
+	os.MkdirAll(filepath.Join(dir, "godot-dev"), 0o755)
+	os.WriteFile(filepath.Join(dir, "godot-dev", "SKILL.md"), []byte("the owner's own"), 0o644)
+	if err := SyncSkills(dir, []*Pack{blender, godot}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(dir, "blender-art", "SKILL.md")); err != nil || !strings.Contains(string(raw), "name: blender-art") {
+		t.Fatalf("blender-art: %v", err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "godot-dev", "SKILL.md")); string(raw) != "the owner's own" {
+		t.Errorf("an owner's skill was replaced: %q", raw)
+	}
+	if err := SyncSkills(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blender-art")); err == nil {
+		t.Error("the skill of a pack that is switched off stayed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "godot-dev", "SKILL.md")); err != nil {
+		t.Error("an owner's skill was removed")
+	}
+}
+
+func TestStarterAndRequires(t *testing.T) {
+	dir := t.TempDir()
+	unity, err := Get("unity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing *MissingError
+	if _, err := unity.Apply(dir, false); !errors.As(err, &missing) || missing.Path != "ProjectSettings/ProjectVersion.txt" {
+		t.Fatalf("a folder with no Unity project: %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("something was written: %v", entries)
+	}
+
+	godot, err := Get("godot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := godot.Apply(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(rep.Started, "project.godot") || !slices.Contains(rep.Started, "test/test_project.gd") {
+		t.Fatalf("a new Godot project gets no starter: %+v", rep.Started)
+	}
+	// Once the project exists, the starter is never written again, and
+	// the owner's own files are never touched.
+	os.WriteFile(filepath.Join(dir, "project.godot"), []byte("mine"), 0o644)
+	os.Remove(filepath.Join(dir, "test", "test_project.gd"))
+	rep, err = godot.Apply(dir, false)
+	if err != nil || len(rep.Started) != 0 || len(rep.Conflicts) != 0 {
+		t.Fatalf("an existing project: %+v %v", rep, err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "project.godot")); string(raw) != "mine" {
+		t.Error("project.godot was overwritten")
+	}
+
+	blender, _ := Get("blender")
+	klad, _ := Get("klad")
+	if got := Derive([]*Pack{blender, klad}).BinaryPaths; strings.Join(got, " ") != "art/models/** art/textures/**" {
+		t.Errorf("binary paths: %v", got)
 	}
 }

@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Work with Maestro, the service on this machine that turns approved GitHub tickets into pull requests made by Claude Code agents. Use when the person asks what Maestro is doing, why a ticket is stuck, to pause or resume it, or to write a ticket for it.
+description: Operates Maestro, the service on this machine that turns approved GitHub tickets into pull requests made by Claude Code agents. Use when the person asks what Maestro is doing, why a ticket is stuck, to pause or resume it, or to write a ticket for it.
 ---
 
 # Maestro
