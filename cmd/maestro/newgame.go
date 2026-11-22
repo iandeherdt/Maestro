@@ -1160,6 +1160,12 @@ func (s *gameImage) Check(ctx context.Context, st *setup.State) (setup.Status, e
 			return setup.Status{Detail: "The image has no tools for " + n + " yet; it is built again with them."}, nil
 		}
 	}
+	if packs, err := conventions.Resolve(in.cfg.Conventions); err == nil {
+		extra := imageExtra(packs, len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "")
+		if lines, _ := in.box.ImageLabel(ctx, imageLinesLabel); lines != linesHash(extra) {
+			return setup.Status{Detail: "This version of Maestro puts more in the image; it is built again."}, nil
+		}
+	}
 	return setup.Status{Done: true, Detail: "The image has the tools of " + strings.Join(s.packs(), ", ") + "."}, nil
 }
 
