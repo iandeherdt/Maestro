@@ -24,6 +24,7 @@ type world struct {
 	failHook string // hook that exits 1
 	hangHook string // hook that never returns
 	cloneOut string
+	ffOut    string
 }
 
 func (w *world) handle(ctx context.Context, req sandbox.Request) (sandbox.Result, error) {
@@ -54,6 +55,8 @@ func (w *world) handle(ctx context.Context, req sandbox.Request) (sandbox.Result
 			out = sha + "\n"
 		}
 		return sandbox.Result{Stdout: []byte(out)}, nil
+	case sandbox.OpFastForward:
+		return sandbox.Result{Stdout: []byte(w.ffOut)}, nil
 	case sandbox.OpRemove:
 		delete(w.exists, req.WorkspaceKey)
 	}
@@ -303,5 +306,25 @@ func TestErrorShowsTheLastLineOfTheOutput(t *testing.T) {
 	long := (&Error{Category: HookFailed, Msg: "x", Output: strings.Repeat("é", 1000)}).Error()
 	if n := len([]rune(long)); n > 350 {
 		t.Errorf("the line was not shortened: %d characters", n)
+	}
+}
+
+func TestAReusedWorkspaceWithoutWorkMovesToTheNewestBase(t *testing.T) {
+	m, f, w := setup(config.Hooks{})
+	w.exists["GH-1"] = true
+	newer := strings.Repeat("b", 40)
+	w.ffOut = newer + "\n"
+	ws, err := m.Ensure(context.Background(), gh("GH-1"))
+	if err != nil || ws.BaseSHA != newer {
+		t.Fatalf("%+v, %v", ws, err)
+	}
+	ff := f.Calls()[1].Req.Populate
+	if ff.Op != sandbox.OpFastForward || ff.Branch != "maestro/GH-1" || ff.BaseBranch != "main" {
+		t.Fatalf("fast-forward request %+v", ff)
+	}
+	// An answer that is not a commit keeps the base from the probe.
+	w.ffOut = "nonsense"
+	if ws, _ := m.Ensure(context.Background(), gh("GH-1")); ws.BaseSHA != sha {
+		t.Fatalf("base %s", ws.BaseSHA)
 	}
 }
