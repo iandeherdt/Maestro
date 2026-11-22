@@ -192,6 +192,22 @@ func TestUsageAccumulatesAcrossTurnsOfOneSession(t *testing.T) {
 	}
 }
 
+// A turn can name its own model; without one the configured model is used.
+func TestTurnModelOverridesTheDefault(t *testing.T) {
+	g := newRig(0, "", initLine, result("success", "ok", ""))
+	g.cfg.Claude.Model = "sonnet"
+	if _, err := g.turn(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.r.RunTurn(ctx, worker.Turn{WorkspaceKey: "GH-1", Prompt: "x", Model: "opus"}, func(orchestrator.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	first, second := strings.Join(g.sb.Calls()[0].Req.Argv, " "), strings.Join(g.sb.Calls()[1].Req.Argv, " ")
+	if !strings.Contains(first, "--model sonnet") || !strings.Contains(second, "--model opus") || strings.Contains(second, "sonnet") {
+		t.Fatalf("argv:\n%s\n%s", first, second)
+	}
+}
+
 func TestResumeMayContinueUnderANewSessionID(t *testing.T) {
 	g := newRig(0, "", `{"type":"system","subtype":"init","session_id":"`+sid2+`"}`,
 		`{"type":"result","subtype":"success","result":"ok","session_id":"`+sid2+`"}`)

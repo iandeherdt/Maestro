@@ -84,8 +84,13 @@ type Agent struct {
 }
 
 type Claude struct {
-	Command            string
-	Model              string
+	Command string
+	Model   string
+	// PlanningModel is used while an idea is planned; empty means Model.
+	PlanningModel string
+	// CardModels are the models a ticket may ask for with a model: label or
+	// the board's Model field. Empty allows every well-formed name.
+	CardModels         []string
 	MaxStepsPerTurn    int64
 	PermissionMode     string
 	DisallowedTools    []string
@@ -563,10 +568,49 @@ func (b *builder) agent(s *section) {
 	b.lenient(s)
 }
 
+// ModelLabelPrefix starts the label with which a ticket asks for a model.
+// On a board the adapter makes it from the card's Model field.
+const ModelLabelPrefix = "model:"
+
+// modelRE is what may follow --model: an alias or a model name. It cannot
+// start with a dash, so it is never read as an option.
+var modelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,79}$`)
+
+// ModelFor picks the model for a ticket: what the ticket asks for, else the
+// planning model while planning, else the default. An empty answer leaves
+// the choice to Claude Code. refused is a model the ticket asked for that
+// is not a model name or not in card_models; the default is used then.
+func (c Claude) ModelFor(labels []string, planning bool) (model, refused string) {
+	model = c.Model
+	if planning && c.PlanningModel != "" {
+		model = c.PlanningModel
+	}
+	for _, l := range labels {
+		want, ok := strings.CutPrefix(l, ModelLabelPrefix)
+		if want = strings.TrimSpace(want); !ok || want == "" {
+			continue
+		}
+		allowed := modelRE.MatchString(want)
+		if allowed && len(c.CardModels) > 0 {
+			allowed = false
+			for _, m := range c.CardModels {
+				allowed = allowed || m == strings.ToLower(want)
+			}
+		}
+		if !allowed {
+			return model, want
+		}
+		return want, ""
+	}
+	return model, ""
+}
+
 func (b *builder) claude(s *section) {
 	c := &b.cfg.Claude
 	c.Command = strings.TrimSpace(s.str("command", "claude"))
-	c.Model = s.str("model", "")
+	c.Model = strings.TrimSpace(s.str("model", ""))
+	c.PlanningModel = strings.TrimSpace(s.str("planning_model", ""))
+	c.CardModels = trimAll(s.strList("card_models", nil))
 	c.MaxStepsPerTurn = b.positive("claude.max_steps_per_turn", s.integer("max_steps_per_turn", 150))
 	c.PermissionMode = s.str("permission_mode", "bypassPermissions")
 	c.DisallowedTools = trimAll(s.strList("disallowed_tools", []string{"WebFetch", "WebSearch"}))
@@ -582,6 +626,17 @@ func (b *builder) claude(s *section) {
 	} else if strings.ContainsAny(c.Command, " \t\n;|&$`'\"<>") {
 		// The service builds the argument vector itself. No shell is involved.
 		b.fail("claude.command", "must be an executable name or path, not a shell command")
+	}
+	for key, m := range map[string]string{"claude.model": c.Model, "claude.planning_model": c.PlanningModel} {
+		if m != "" && !modelRE.MatchString(m) {
+			b.fail(key, "%q is not a model name; use an alias such as opus, sonnet or haiku, or a full model name", m)
+		}
+	}
+	for i, m := range c.CardModels {
+		c.CardModels[i] = strings.ToLower(m)
+		if !modelRE.MatchString(m) {
+			b.fail("claude.card_models", "%q is not a model name", m)
+		}
 	}
 	if !permModes[c.PermissionMode] {
 		b.fail("claude.permission_mode", "unsupported value %q", c.PermissionMode)

@@ -530,3 +530,38 @@ func TestScreenshots(t *testing.T) {
 		}
 	}
 }
+
+func TestModelFor(t *testing.T) {
+	c := Claude{Model: "sonnet", PlanningModel: "opus"}
+	for _, tc := range []struct {
+		labels   []string
+		planning bool
+		model    string
+		refused  string
+	}{
+		{nil, false, "sonnet", ""},
+		{nil, true, "opus", ""},
+		{[]string{"bug", "model:haiku"}, false, "haiku", ""},
+		{[]string{"model:haiku"}, true, "haiku", ""},
+		{[]string{"model:claude-opus-4-5[1m]"}, false, "claude-opus-4-5[1m]", ""},
+		{[]string{"model:--dangerously-skip-permissions"}, false, "sonnet", "--dangerously-skip-permissions"},
+		{[]string{"model:opus 4"}, false, "sonnet", "opus 4"},
+		{[]string{"model:"}, false, "sonnet", ""},
+	} {
+		if m, r := c.ModelFor(tc.labels, tc.planning); m != tc.model || r != tc.refused {
+			t.Errorf("%v planning=%v: %q, %q", tc.labels, tc.planning, m, r)
+		}
+	}
+	// With a list, only what is on it.
+	c.CardModels = []string{"sonnet", "haiku"}
+	if m, r := c.ModelFor([]string{"model:opus"}, false); m != "sonnet" || r != "opus" {
+		t.Errorf("not on the list: %q %q", m, r)
+	}
+	if m, r := c.ModelFor([]string{"model:haiku"}, false); m != "haiku" || r != "" {
+		t.Errorf("on the list: %q %q", m, r)
+	}
+	// Nothing configured and nothing asked: Claude Code decides.
+	if m, r := (Claude{}).ModelFor(nil, true); m != "" || r != "" {
+		t.Errorf("no model anywhere: %q %q", m, r)
+	}
+}

@@ -373,6 +373,19 @@ Replaces upstream `codex`.
 - `command` (string): default `claude`. An executable name or absolute path. Not a shell string.
   The service builds the argument vector itself (Section 10.1).
 - `model` (string or null): default null (CLI default).
+- `planning_model` (string or null): default null. The model for planning attempts (Section 22);
+  null means `model`.
+- `card_models` (list of strings): default empty. The models an issue may ask for. Empty allows
+  every well-formed model name.
+
+  An issue asks for a model with a label `model:<name>`. In project mode the adapter derives that
+  label from the card's single-select field named by `tracker.provider.project.model_field`
+  (default `Model`) and MUST ignore a label of that form on the issue itself. The value `default`
+  and an empty field ask for nothing. The model of an attempt is, in this order: what the issue
+  asks for, `planning_model` for a planning attempt, `model`. A model name MUST match
+  `^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,79}$`, so that it is never read as an option. A request that
+  does not match, or is not in a non-empty `card_models`, is not honoured: the attempt runs with
+  the model it would have had without the request and reports a `model_refused` event.
 - `max_steps_per_turn` (positive integer): default `150`. Passed as the CLI's own step limit.
 - `permission_mode` (string): default `bypassPermissions`. One of `acceptEdits`, `auto`,
   `bypassPermissions`, `manual`, `dontAsk`, `plan`. Any value other than `plan` requires
@@ -616,6 +629,8 @@ skip dispatch for that tick and keep reconciling.
 - `agent.max_concurrent_agents_by_state`: default `{}`
 - `claude.command`: default `claude`
 - `claude.model`: default null
+- `claude.planning_model`: default null
+- `claude.card_models`: default `[]`
 - `claude.max_steps_per_turn`: default `150`
 - `claude.permission_mode`: default `bypassPermissions`
 - `claude.disallowed_tools`: default `[WebFetch, WebSearch]`
@@ -1392,7 +1407,7 @@ Provider keys:
 - `state_source`: `project` or `labels`. REQUIRED.
 - `project` (object, for `state_source: project`): `number` (REQUIRED, the number in the
   Project's address), `owner` (default: the owner of `repo`), `status_field` (default `Status`),
-  `worker_field` (default `Worker`). Unknown keys are rejected.
+  `worker_field` (default `Worker`), `model_field` (default `Model`). Unknown keys are rejected.
 - `state_label_prefix` (for `state_source: labels`): default `status:`.
 - `bot_login`: REQUIRED. The login the service acts as, for example `my-app[bot]`. Used for the
   two rules marked "own account" below.

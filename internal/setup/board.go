@@ -20,6 +20,7 @@ const (
 	boardTitle  = "Maestro"
 	statusField = "Status"
 	workerField = "Worker"
+	modelField  = "Model"
 )
 
 type column struct{ Name, Color, Description string }
@@ -112,6 +113,15 @@ mutation($field: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]) {
   updateProjectV2Field(input: {fieldId: $field, singleSelectOptions: $options}) { clientMutationId }
 }`
 
+// modelOptions are the choices of a new Model field: the names Claude Code
+// itself keeps pointing at its newest models. Others can be added on the
+// board.
+var modelOptions = []option{
+	{"opus", "RED", "The most capable model. Uses the most of your subscription."},
+	{"sonnet", "BLUE", "The everyday model."},
+	{"haiku", "GREEN", "The fastest and lightest model, for small changes."},
+}
+
 const createFieldMutation = `
 mutation($project: ID!, $name: String!, $options: [ProjectV2SingleSelectFieldOptionInput!]) {
   createProjectV2Field(input: {projectId: $project, dataType: SINGLE_SELECT, name: $name, singleSelectOptions: $options}) { clientMutationId }
@@ -156,9 +166,11 @@ type boardState struct {
 	Fields struct {
 		Nodes []selectField `json:"nodes"`
 	} `json:"fields"`
-	// Status and Worker are picked from Fields by name; nil when absent.
+	// Status, Worker and Model are picked from Fields by name; nil when
+	// absent.
 	Status *selectField `json:"-"`
 	Worker *selectField `json:"-"`
+	Model  *selectField `json:"-"`
 }
 
 // pick finds the fields the service uses, whatever their type.
@@ -170,6 +182,8 @@ func (b *boardState) pick() {
 			b.Status = f
 		case b.Worker == nil && strings.EqualFold(f.Name, workerField):
 			b.Worker = f
+		case b.Model == nil && strings.EqualFold(f.Name, modelField):
+			b.Model = f
 		}
 	}
 }
@@ -311,6 +325,8 @@ func (b *Board) Check(ctx context.Context, st *State) (Status, error) {
 		return Status{Detail: "The board lacks columns: " + strings.Join(board.missingColumns(), ", ") + "."}, nil
 	case !board.Worker.usable() || !board.Worker.has(st.Worker):
 		return Status{Detail: "The board's Worker field does not list " + st.Worker + " yet."}, nil
+	case board.Model == nil:
+		return Status{Detail: "The board has no Model field yet, with which a card can ask for a model."}, nil
 	}
 	return Status{Done: true, Detail: "The board " + b.url(st) + " has the columns and knows the worker " + st.Worker + "."}, nil
 }
@@ -556,6 +572,17 @@ func (b *Board) prepare(ctx context.Context, ui *UI, st *State, board *boardStat
 		ui.Say("  then %s in the list on the left. Add the option %s and save.", workerField, st.Worker)
 		ui.Say("  Then run setup again.")
 		return ErrAborted
+	}
+	// A card can ask for a model. An empty field means the default from the
+	// settings file, so the field is never required.
+	switch {
+	case board.Model == nil:
+		if err := b.graphql(ctx, st, createFieldMutation, map[string]any{"project": board.ID, "name": modelField, "options": inputs(modelOptions)}, nil); err != nil {
+			return fmt.Errorf("the field %s could not be created: %w", modelField, err)
+		}
+		ui.Say("  Field %s with the choices opus, sonnet and haiku. Leave it empty on a card for the default.", modelField)
+	case !board.Model.usable():
+		ui.Say("  The board has a field named %s that is not a single-select field, so cards cannot ask for a model.", modelField)
 	}
 	return nil
 }
