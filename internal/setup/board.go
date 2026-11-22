@@ -359,7 +359,7 @@ func (b *Board) Run(ctx context.Context, ui *UI, st *State) error {
 		def = defaultWorker(goos)
 	}
 	ui.Say("  Each machine that runs agents has a name. A card says which machine takes it.")
-	name, err := ui.Ask("  What should this machine be called?", def, validWorker)
+	name, err := ui.Ask("  What should this machine be called?", def, st.checkWorker)
 	if err != nil {
 		return err
 	}

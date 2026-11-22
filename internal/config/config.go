@@ -224,6 +224,10 @@ type Options struct {
 	Env Env
 	// HomeDir is used for "~" expansion.
 	HomeDir string
+	// DefaultImage is the sandbox image when the file names none. Empty
+	// means maestro-sandbox:latest. Each project on a machine gets its own,
+	// because the image is built for the project's rule packs.
+	DefaultImage string
 }
 
 var (
@@ -690,7 +694,11 @@ func (b *builder) claude(s *section) {
 func (b *builder) sandbox(s *section) {
 	sb := &b.cfg.Sandbox
 	sb.Backend = s.str("backend", "")
-	sb.Image = s.str("image", "maestro-sandbox:latest")
+	image := b.opt.DefaultImage
+	if image == "" {
+		image = "maestro-sandbox:latest"
+	}
+	sb.Image = s.str("image", image)
 	sb.MemoryMax = s.str("memory_max", "6G")
 	sb.CPUQuota = s.str("cpu_quota", "300%")
 	sb.TasksMax = b.positive("sandbox.tasks_max", s.integer("tasks_max", 2048))

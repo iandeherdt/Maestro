@@ -126,6 +126,9 @@ func runNew(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return report(stderr, err)
 	}
+	if ps, err := listProjects(); err == nil {
+		st.TakenWorkers = workersOf(ps, abs)
+	}
 	home, _ := os.UserHomeDir()
 	g := &game{setupDir: abs, st: st, stdin: stdin, rawIn: stdin, stdout: stdout, stderr: stderr,
 		home: home, look: exec.LookPath, goos: runtime.GOOS, arch: runtime.GOARCH}
@@ -681,9 +684,11 @@ func (s *gameRepo) Run(_ context.Context, ui *setup.UI, st *setup.State) error {
 		st.Repo = s.repo
 		return st.Save()
 	}
-	ui.Say("  One machine runs agents for one repository. Switching keeps the GitHub App: the next step")
-	ui.Say("  gives it access to %s too. The settings file of %s is kept under another name.", s.repo, st.Repo)
-	ok, err := ui.Confirm("  Switch Maestro on this machine to " + s.repo + "?")
+	ui.Say("  This project runs agents for %s. To keep it as it is and give the game a project of its own,", st.Repo)
+	ui.Say("  answer n and run `maestro new` again: it asks whether the game is a new project.")
+	ui.Say("  Switching keeps the GitHub App: the next step gives it access to %s too. The settings file", s.repo)
+	ui.Say("  of %s is kept under another name.", st.Repo)
+	ok, err := ui.Confirm("  Switch this project to " + s.repo + "?")
 	if err != nil {
 		return err
 	}
