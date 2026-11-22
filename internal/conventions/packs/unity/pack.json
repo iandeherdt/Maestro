@@ -58,7 +58,8 @@
     "Packages/packages-lock.json",
     "ProjectSettings/ProjectVersion.txt",
     "ProjectSettings/EditorSettings.asset",
-    ".gitattributes"
+    ".gitattributes",
+    ".claude/skills/unity-dev/**"
   ],
   "hosts": ["packages.unity.com", "download.packages.unity.com"],
   "prepare": "sh conventions/unity/prepare.sh",

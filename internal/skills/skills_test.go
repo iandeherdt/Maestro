@@ -239,3 +239,35 @@ func TestFetch(t *testing.T) {
 		cleanup()
 	}
 }
+
+func TestSkillFrontMatterLimits(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, text string) {
+		t.Helper()
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("skills/long/SKILL.md", "---\nname: long\ndescription: "+strings.Repeat("word ", 300)+"\n---\nbody\n")
+	write("skills/tag/SKILL.md", "---\nname: tag\ndescription: Uses <b>tags</b>.\n---\nbody\n")
+	write("skills/hooked/SKILL.md", "---\nname: hooked\ndescription: Formats code after each edit.\nallowed-tools: Bash\nhooks:\n  PostToolUse: []\n---\nbody\n")
+	write("agents/runner.md", "---\nname: runner\ndescription: Runs things.\nmodel: opus\nmcpServers:\n  x: {command: x}\n---\nbody\n")
+	found, problems := Discover(root)
+	all := strings.Join(problems, "\n")
+	for _, want := range []string{"long: the description is", "tag: the description holds"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("problems lack %q:\n%s", want, all)
+		}
+	}
+	got := map[string]string{}
+	for _, f := range found {
+		got[f.Name] = strings.Join(f.Settings, ",")
+	}
+	if got["hooked"] != "allowed-tools,hooks" || got["runner"] != "mcpServers,model" || len(found) != 2 {
+		t.Errorf("settings: %v", got)
+	}
+}

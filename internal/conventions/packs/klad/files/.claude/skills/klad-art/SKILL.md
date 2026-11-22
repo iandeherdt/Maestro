@@ -1,6 +1,6 @@
 ---
 name: klad-art
-description: Paint or change 2D art in this project (textures, sprites, icons, props) with klad. Use when a task asks for a new picture or a change to one.
+description: Paints and changes 2D art in this project with the klad command line, and exports it to PNG. Use when a task asks for a new or changed texture, sprite, sprite sheet, icon or other picture, or touches a .klad drawing.
 ---
 
 # 2D art painted with klad

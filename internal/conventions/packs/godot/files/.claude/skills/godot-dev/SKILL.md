@@ -1,6 +1,6 @@
 ---
 name: godot-dev
-description: Work on this Godot 4 project: GDScript, scenes, tests. Use for any change to the game's code, scenes or project settings.
+description: Works on this Godot 4 project without the editor: GDScript, .tscn scenes and .tres resources as text, imports, gdformat, gdlint and GUT tests. Use for any change to the game's code, scenes, resources or project settings.
 ---
 
 # Working on this Godot project

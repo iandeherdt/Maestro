@@ -1,6 +1,6 @@
 ---
 name: blender-art
-description: Make or change 3D art in this project. The models come from Python generator scripts that Blender runs without a screen. Use when a task asks for a new model, prop, character or level piece, or a change to one.
+description: Makes and changes 3D models in this project with Python generator scripts that Blender runs without a screen, exporting FBX or glTF and rendering previews. Use when a task asks for a new or changed model, mesh, prop, character, level or kit piece, or touches the Blender generators.
 ---
 
 # 3D art made by scripts
@@ -50,8 +50,8 @@ sh conventions/blender/verify.sh           # the checks, as the service runs the
 ```
 
 Look at the pictures before you finish: they are how you see what you made. Commit the generator
-and the files `build.sh` wrote for it (only for the generators you changed: every export carries
-the time it was made, so rebuilding others changes them for nothing).
+and the files `build.sh` wrote for it (only for the generators you changed: an FBX export carries
+the time it was made, so rebuilding others changes their files for nothing).
 
 ## How to work
 

@@ -452,7 +452,7 @@ maestro conventions show dotnet     # every rule, and the tool that enforces it
 | `blender` | 3D models made by Python scripts that Blender runs without a screen | every generator runs without an error and writes something, every model loads back into Blender, an optional triangle limit. Comes with the skill `blender-art`. See [Generated art](#game-development) |
 | `godot` | A Godot 4 project in GDScript, with GUT | the project on the image's Godot version, every script parses, gdformat, gdlint, every asset imported with its `.uid` and `.import` files, GUT tests pass. Comes with the skill `godot-dev`. See [Game development](#game-development) |
 | `dotnet` | C# with one solution in the root | `dotnet format`, warnings as errors with the .NET analyzers and SonarAnalyzer, security rules, limits on file and method size, tests, 80% coverage per test project, no vulnerable packages |
-| `unity` | A Unity project in the root, on the Unity version of the image | every asset has its `.meta` file and no GUID is used twice, assets saved as text, the project on the Editor's version, scripts compile in Unity, EditMode and PlayMode tests pass, packages changed by the owner only. Needs a Unity licence: see [Game development](#game-development) |
+| `unity` | A Unity project in the root, on the Unity version of the image | every asset has its `.meta` file and no GUID is used twice, assets saved as text, the project on the Editor's version, scripts compile in Unity, EditMode and PlayMode tests pass, packages changed by the owner only. Comes with the skill `unity-dev`. Needs a Unity licence: see [Game development](#game-development) |
 | `klad` | 2D art painted with [klad](https://github.com/klad-app/klad) through its command line | every drawing exports, every committed picture is exactly what its drawing exports to now. Comes with the skill `klad-art`. See [Generated art](#game-development) |
 | `typescript` | TypeScript with React, Next.js or TanStack, npm or pnpm | Prettier, ESLint without warnings (typescript-eslint strict, React, hooks, accessibility, SonarJS, security, the framework's own rules), limits on size and complexity, strict type check, tests with vitest, 80% coverage of all source files, no vulnerable packages |
 
@@ -534,7 +534,9 @@ is not kept. The checks do run code the agent wrote, and that code can read the 
 Unity account that holds nothing else, such as a free Personal account made for this.
 
 The agent has no licence, but it has the quick checks: `sh conventions/unity/check.sh` checks the
-`.meta` files and compiles every script with the compiler that comes with the Editor.
+`.meta` files and compiles every script with the compiler that comes with the Editor. The skill
+`unity-dev` tells the agent how to work without the editor: scenes and prefabs are edited as
+text, every new asset gets a `.meta` file with a new GUID, packages are left to you.
 
 Not yet run against Unity's servers: the activation, the package download in `prepare.sh` and the
 tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the
