@@ -200,9 +200,15 @@ func (in *install) docker(ctx context.Context) error {
 		return nil
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
+		if inWSL() {
+			return explain(wslDockerHint)
+		}
 		return explain("the `docker` command was not found. Install Docker Desktop (Mac) or Docker Engine (Linux) and try again.")
 	}
 	if err := exec.CommandContext(c, "docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+		if inWSL() {
+			return explain("Docker does not answer. " + wslDockerHint)
+		}
 		return explain("Docker is installed but not running. Start Docker Desktop, wait until it says it is running, and try again.")
 	}
 	return nil

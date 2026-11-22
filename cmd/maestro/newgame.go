@@ -170,7 +170,7 @@ func runGame(ctx context.Context, ui *setup.UI, g *game) int {
 	steps := []setup.Step{
 		&gameKind{g}, &gameFolder{g}, &gameGit{g}, &gamePacks{g}, &gameCommit{g}, &gameGitHub{g},
 		&gameRepo{g},
-		&setup.Machine{}, &setup.CreateApp{Port: setup.DefaultPort}, &setup.InstallApp{}, &setup.Tickets{},
+		&setup.Machine{Dir: g.setupDir}, &setup.CreateApp{Port: setup.DefaultPort}, &setup.InstallApp{}, &setup.Tickets{},
 		&setup.WorkflowFile{PackTests: func() string { return "sh conventions/" + g.engine + "/verify.sh" }},
 		&gameEnable{g}, &gameHostUnity{g}, &gameImage{g}, &gameLicence{g},
 	}

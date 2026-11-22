@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iandeherdt/Maestro/internal/wsl"
 )
 
 // Machine checks that the programs the service needs are present. It
@@ -20,6 +22,10 @@ type Machine struct {
 	Output   func(ctx context.Context, name string, args ...string) (string, error)
 	GOOS     string
 	Exists   func(path string) bool
+	// WSL reads what tells a WSL distribution apart. Tests replace it.
+	WSL wsl.Host
+	// Dir is the setup folder, which must not be on a Windows drive in WSL.
+	Dir string
 }
 
 func (m *Machine) defaults() {
@@ -67,6 +73,8 @@ func (m *Machine) problems(ctx context.Context) []string {
 	switch engine := Engine(m.GOOS, m.LookPath); {
 	case engine == "" && m.GOOS == "darwin":
 		out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it")
+	case engine == "" && m.GOOS == "linux" && m.WSL.Version() == 2:
+		out = append(out, "No container engine is reachable in this WSL distribution. Start Docker Desktop on Windows and turn on Settings, Resources, WSL integration for this distribution, or install Podman or Docker Engine inside it")
 	case engine == "":
 		out = append(out, "Neither Podman nor Docker is installed. The agent runs in a container. On RHEL and Fedora: sudo dnf install podman. Elsewhere, install Docker Engine as described at https://docs.docker.com/engine/install/")
 	default:
@@ -75,9 +83,40 @@ func (m *Machine) problems(ctx context.Context) []string {
 		}
 	}
 	switch m.GOOS {
-	case "linux", "darwin":
+	case "linux":
+		out = append(out, WSLProblems(m.WSL, m.Dir)...)
+	case "darwin":
 	default:
-		out = append(out, "This operating system is not supported. The service runs on Linux and macOS.")
+		out = append(out, "This operating system is not supported. The service runs on Linux and macOS, and on Windows inside WSL 2.")
+	}
+	return out
+}
+
+// WSLProblems lists what has to change before Maestro can run in this WSL
+// distribution; nothing when this is not WSL. dirs are folders Maestro
+// keeps files in.
+func WSLProblems(h wsl.Host, dirs ...string) []string {
+	switch h.Version() {
+	case 0:
+		return nil
+	case 1:
+		name := h.Distro()
+		if name == "" {
+			name = "<distribution>"
+		}
+		return []string{"This is WSL 1, which cannot run containers. In a Windows terminal run: wsl --set-version " + name + " 2"}
+	}
+	var out []string
+	if !h.Systemd() {
+		out = append(out, "systemd is off in this WSL distribution, and the service needs it. Add these two lines to /etc/wsl.conf "+
+			"(sudo nano /etc/wsl.conf): [boot] and systemd=true. Then run wsl --shutdown in a Windows terminal and open the distribution again")
+	}
+	for _, d := range dirs {
+		if d != "" && h.OnWindowsDrive(d) {
+			out = append(out, d+" is on a Windows drive. There Maestro is slow and cannot keep its key private. "+
+				"Use a folder on the distribution's own disk instead, such as one in your Linux home (cd ~)")
+			break
+		}
 	}
 	return out
 }

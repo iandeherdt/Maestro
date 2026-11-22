@@ -266,8 +266,17 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 			return report(stderr, err)
 		}
 		fmt.Fprintf(stdout, "The background service is stopped and %s is removed.\n", u.Path())
+		wslAfterUninstall(ctx, func(s string) { fmt.Fprintln(stdout, s) }, in.cfg.Worker.Name)
 		fmt.Fprintln(stdout, "Your settings, the workspaces and the Claude login are untouched. `maestro run` still works.")
 		return 0
+	}
+	if p := in.wslReady(); len(p) > 0 {
+		fmt.Fprintln(stderr, "Before the service can run in this WSL distribution:")
+		for _, line := range p {
+			fmt.Fprintf(stderr, "  - %s.\n", strings.TrimSuffix(line, "."))
+		}
+		fmt.Fprintln(stderr, "Nothing was changed.")
+		return 1
 	}
 	if err := in.docker(ctx); err != nil {
 		return report(stderr, err)
@@ -315,9 +324,12 @@ func runBackground(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		ui.Say("  Its log:        tail -f %q", u.LogFile)
 	} else {
 		ui.Say("  Its log:        journalctl --user -u %s -f", u.Label())
-		ui.Say("  To keep it running while you are logged out: sudo loginctl enable-linger $USER")
+		if !inWSL() {
+			ui.Say("  To keep it running while you are logged out: sudo loginctl enable-linger $USER")
+		}
 	}
 	ui.Say("  What it does:   %s", mention("maestro status"))
 	ui.Say("  To remove it:   %s", mention("maestro service uninstall"))
+	wslAfterInstall(ctx, ui, in.cfg.Worker.Name)
 	return 0
 }
