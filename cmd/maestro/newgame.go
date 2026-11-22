@@ -859,14 +859,41 @@ func (s *gameGitHub) mergeRemote(ui *setup.UI) error {
 	return nil
 }
 
+// port443 moves an SSH remote to GitHub's SSH service on port 443 when the
+// network lets nothing through on port 22, and reports whether git can
+// reach the repository then.
+func (s *gameGitHub) port443(ui *setup.UI, failure string) bool {
+	url, _ := s.git("config", "--get", "remote.origin.url")
+	if !strings.HasPrefix(url, "git@github.com:") && !strings.HasPrefix(url, "ssh://git@github.com/") {
+		return false
+	}
+	if !strings.Contains(failure, "port 22") && !strings.Contains(failure, "Connection closed") && !strings.Contains(failure, "timed out") {
+		return false
+	}
+	alt := "ssh://git@ssh.github.com:443/" + s.origin() + ".git"
+	if _, err := s.git("remote", "set-url", "origin", alt); err != nil {
+		return false
+	}
+	if _, err := s.git("ls-remote", "--heads", "origin"); err != nil {
+		s.git("remote", "set-url", "origin", url)
+		return false
+	}
+	ui.Say("  This network lets no SSH through on port 22, so Git now uses GitHub's SSH on port 443: %s", alt)
+	return true
+}
+
 // access makes sure git can reach the repository without a password,
 // which GitHub no longer takes: with the gh command's login, or with an
 // SSH key.
 func (s *gameGitHub) access(ui *setup.UI) error {
-	if _, err := s.git("ls-remote", "--heads", "origin"); err == nil {
+	out, err := s.git("ls-remote", "--heads", "origin")
+	if err == nil {
 		return nil
 	}
 	repo := s.origin()
+	if s.port443(ui, out) {
+		return nil
+	}
 	url, _ := s.git("config", "--get", "remote.origin.url")
 	ui.Say("  Git cannot sign in to GitHub by itself yet. GitHub takes no passwords for Git, only a login")
 	ui.Say("  through the gh command or an SSH key.")
@@ -894,8 +921,13 @@ func (s *gameGitHub) access(ui *setup.UI) error {
 	if len(keys) > 0 {
 		options = append(options, "Use my SSH key ("+tildePath(strings.TrimSuffix(keys[0], ".pub"), s.home)+")")
 		acts = append(acts, func() error {
-			_, err := s.git("remote", "set-url", "origin", "git@github.com:"+repo+".git")
-			return err
+			if _, err := s.git("remote", "set-url", "origin", "git@github.com:"+repo+".git"); err != nil {
+				return err
+			}
+			if out, err := s.git("ls-remote", "--heads", "origin"); err != nil {
+				s.port443(ui, out)
+			}
+			return nil
 		})
 	}
 	options = append(options, "I will set it up myself, then run maestro new again")
