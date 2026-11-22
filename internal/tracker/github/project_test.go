@@ -371,6 +371,18 @@ func TestBoardClosedIssueIsTerminal(t *testing.T) {
 	}
 }
 
+// Merging a pull request that closes the issue leaves the card in Human
+// Review; the service still has to see it there to move it to Done.
+func TestBoardClosedIssueInHandoffKeepsItsColumn(t *testing.T) {
+	h := newBoardHub(t)
+	h.card(1, "ian", "Human Review", "linux").state = "closed"
+	a := boardAdapter(t, h)
+	got, err := a.FetchIssuesByStates(ctx, []string{"Human Review"})
+	if err != nil || len(got) != 1 || got[0].State != "Human Review" || got[0].Dispatchable {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
+
 func TestBoardPagination(t *testing.T) {
 	h := newBoardHub(t)
 	h.pageSize = 2
