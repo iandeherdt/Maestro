@@ -344,6 +344,67 @@ func TestFlags(t *testing.T) {
 	}
 }
 
+// Code that reaches outside the program is pointed out, never refused, and
+// the finding names what it does without repeating the line.
+func TestReachingOutsideIsFlagged(t *testing.T) {
+	blob := strings.Repeat("QUJD", 60)
+	for name, tc := range map[string]struct {
+		path string
+		line string
+		want string
+	}{
+		"miner pool":      {"src/Worker.cs", `var pool = "stratum+tcp://pool.example.net:3333";`, "open a network connection"},
+		"http client c#":  {"src/Api.cs", `using var c = new HttpClient();`, "open a network connection"},
+		"fetch":           {"web/api.ts", `const r = await fetch(url)`, "open a network connection"},
+		"go dial":         {"pkg/a.go", `conn, err := net.Dial("tcp", addr)`, "open a network connection"},
+		"python requests": {"tool.py", `requests.post(u, data=open(p).read())`, "open a network connection"},
+		"unity request":   {"Assets/Scripts/Net.cs", `var req = UnityWebRequest.Get(u);`, "open a network connection"},
+		"go exec":         {"pkg/a.go", `out, _ := exec.Command("sh", "-c", s).Output()`, "start another program"},
+		"node spawn":      {"web/run.js", `const p = spawn("xmrig", args)`, "start another program"},
+		"c# process":      {"src/Run.cs", `Process.Start("cmd.exe", args);`, "start another program"},
+		"python system":   {"tool.py", `os.system(cmd)`, "start another program"},
+		"c system":        {"src/a.c", `system(cmd);`, "start another program"},
+		"eval":            {"web/x.js", `eval(atob(payload))`, "run code that is built at run time"},
+		"python exec":     {"tool.py", `exec(code)`, "run code that is built at run time"},
+		"assembly load":   {"src/L.cs", `var a = Assembly.Load(bytes);`, "run code that is built at run time"},
+		"base64 blob":     {"src/data.go", `var payload = "` + blob + `"`, "hold a long encoded block"},
+		"hex escapes":     {"src/sc.c", `char sc[] = "` + strings.Repeat(`\x90`, 48) + `";`, "hold a long encoded block"},
+		"plain code":      {"src/app.go", `total := price * count`, ""},
+		"regexp exec":     {"web/parse.js", `const m = re.exec(line)`, ""},
+		"method system":   {"src/a.cs", `var s = this.system(1);`, ""},
+		"short hash":      {"src/a.go", `const sum = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"`, ""},
+		"readme link":     {"README.md", `See https://example.com/docs for more.`, ""},
+		"lockfile hashes": {"web/package-lock.json", `"integrity": "sha512-` + blob + `"`, ""},
+		"relative import": {"web/a.ts", `import { x } from "./http"`, ""},
+	} {
+		r := eval(cfg(), mod(tc.path, tc.line))
+		if !r.OK() {
+			t.Errorf("%s: denied %v", name, r.Denied)
+		}
+		var got string
+		for _, f := range r.Flags {
+			if f.Rule == "F8" {
+				got = f.Detail
+			}
+		}
+		switch {
+		case tc.want == "" && got != "":
+			t.Errorf("%s: flagged: %s", name, got)
+		case tc.want != "" && !strings.Contains(got, "1 added line(s) that "+tc.want):
+			t.Errorf("%s: %q lacks %q", name, got, tc.want)
+		case strings.Contains(got, "pool.example") || strings.Contains(got, blob[:20]):
+			t.Errorf("%s: the finding repeats the line: %s", name, got)
+		}
+	}
+	// Removed lines do not count, and several kinds are named together.
+	both := mod("src/x.py", "requests.get(u)", "subprocess.run(c)", "requests.get(v)")
+	both.Removed = []string{"eval(x)"}
+	r := eval(cfg(), both)
+	if len(r.Flags) != 1 || r.Flags[0].Detail != "reaches outside the program: 2 added line(s) that open a network connection, 1 added line(s) that start another program" {
+		t.Errorf("%v", r.Flags)
+	}
+}
+
 func TestCommitIdentityFlag(t *testing.T) {
 	sha := strings.Repeat("ab", 20)
 	good := Commit{SHA: sha, AuthorName: "bot", AuthorEmail: "bot@example.com", CommitterName: "bot", CommitterEmail: "bot@example.com"}

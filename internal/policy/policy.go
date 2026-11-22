@@ -67,7 +67,7 @@ type Input struct {
 
 // Finding is one rule result. Detail never contains file content.
 type Finding struct {
-	Rule   string // "D1".."D8", "F1".."F7"
+	Rule   string // "D1".."D8", "F1".."F8"
 	Path   string
 	Detail string
 }
@@ -322,6 +322,25 @@ var (
 	instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "GEMINI.md", ".cursorrules", ".cursor/**"}
 )
 
+// outsideRules find added code that does something outside the program
+// itself. Honest code does these things too, so they are shown to the
+// reviewer and deny nothing. Their purpose is that code written under a
+// prompt injection (a miner, a downloader, something that sends files
+// away) is not buried in an ordinary-looking diff.
+var outsideRules = []struct {
+	does      string
+	skipLocks bool
+	re        *regexp.Regexp
+}{
+	{"open a network connection", false, regexp.MustCompile(`(?i)(\b(https?|wss?|ftp|ssh|stratum\+tcp)://[^\s"'<>)]*[a-z0-9]|\bfetch\s*\(|\bXMLHttpRequest\b|\baxios\b|\bhttp\.(Get|Post|Head|NewRequest)\w*\(|\bnet\.(Dial|Listen)\w*\(|\b(Http|Web|Tcp|Udp)Client\b|\bnew\s+(Web)?Socket\b|\bUnityWebRequest\b|\brequests\.(get|post|put|request)\(|\burllib\b|\bsocket\.(socket|create_connection)\(|\bnet/http\b|\b(curl|wget|nc)\s+-)`)},
+	{"start another program", false, regexp.MustCompile(`(?i)(\bexec\.Command\w*\(|\bos/exec\b|\bchild_process\b|\b(spawn|execFile)(Sync)?\s*\(|\bexecSync\s*\(|\bProcess\.Start\b|\bProcessStartInfo\b|\bsubprocess\.\w+|\bos\.(system|popen|exec\w*)\(|\bRuntime\.getRuntime\(|\bProcessBuilder\b|\bShellExecute\w*|\bpopen\s*\(|(^|[^.\w])system\s*\()`)},
+	{"run code that is built at run time", false, regexp.MustCompile(`(?i)(\beval\s*\(|(^|[^.\w])exec\s*\(|\bnew\s+Function\s*\(|\bAssembly\.Load\w*\(|\bReflection\.Emit\b|\b__import__\s*\(|\bimportlib\.import_module\(|\bdlopen\s*\(|\bDllImport\b|\bvm\.runIn\w+\(|\bplugin\.Open\(|\bCSharpCodeProvider\b|\bcompile\s*\([^)]*exec)`)},
+	{"hold a long encoded block", true, regexp.MustCompile(`([A-Za-z0-9+/]{200,}={0,2}|(\\x[0-9a-fA-F]{2}){40,}|\b[0-9a-fA-F]{256,}\b)`)},
+}
+
+// proseFiles are files in which an address is only text.
+var proseFiles = []string{"*.md", "*.markdown", "*.txt", "*.rst", "*.adoc", "LICENSE*", "NOTICE*", "CHANGELOG*"}
+
 func looksLikeTest(path string) bool {
 	l := strings.ToLower(path)
 	return strings.Contains(l, "test") || strings.Contains(l, "spec")
@@ -373,6 +392,21 @@ func flagChange(cfg config.Policy, c Change, flag func(rule, path, detail string
 		}
 		if matchAny(cfg.FlagPaths, p) {
 			flag("F7", p, "path listed in policy.flag_paths")
+		}
+	}
+	// F8
+	if !c.Binary && !matchAny(proseFiles, c.Path) {
+		var what []string
+		for _, r := range outsideRules {
+			if r.skipLocks && matchAny(dependencyFiles, c.Path) {
+				continue
+			}
+			if n := count(r.re, c.Added); n > 0 {
+				what = append(what, fmt.Sprintf("%d added line(s) that %s", n, r.does))
+			}
+		}
+		if len(what) > 0 {
+			flag("F8", c.Path, "reaches outside the program: "+strings.Join(what, ", "))
 		}
 	}
 	// A file that becomes executable is a script, whatever its name.

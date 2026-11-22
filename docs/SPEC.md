@@ -1724,6 +1724,16 @@ Built-in `flag` rules:
 - F5 Agent instruction files changed (`CLAUDE.md`, `AGENTS.md`).
 - F6 Commits whose author or committer identity is not the configured bot identity (informational).
 - F7 Paths in `policy.flag_paths`.
+- F8 Code that reaches outside the program. For every changed text file that is not prose
+  (`*.md`, `*.txt`, `*.rst`, `*.adoc`, `LICENSE*`, `NOTICE*`, `CHANGELOG*`), the added lines are
+  matched against four pattern sets: opening a network connection (an address with a network
+  scheme, or the usual client calls of the supported languages), starting another program, running
+  code that is built at run time, and a long encoded block (200 or more base64 characters, 40 or
+  more `\x` escapes, or 256 or more hexadecimal digits; not looked for in dependency manifests and
+  lockfiles). The finding gives the path and the number of lines per set, never the lines. Its
+  purpose is the residual risk of Section 18: code written under a prompt injection that a person
+  merges and then runs with their own rights. The rule informs the reviewer; it is a pattern
+  list, can be evaded, and MUST NOT be presented as proof that a change is harmless.
 
 ### 15.4 Secret Scan
 
@@ -2534,7 +2544,7 @@ For each adapter:
   not descending from `base_sha`, unchanged head.
 - A workspace containing hostile Git hooks, config, attributes and filters causes no execution in
   the control zone (canary file test).
-- Each deny rule D1 to D8 and each flag rule F1 to F7, with positive and negative cases.
+- Each deny rule D1 to D8 and each flag rule F1 to F8, with positive and negative cases.
 - Secret scan: built-in patterns and exact held-secret values.
 - Push only under the branch prefix. Force only with lease.
 - Pull request created once, updated after. Body template order. Agent text neutralized.

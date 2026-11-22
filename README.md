@@ -65,6 +65,7 @@ instead: `status:todo`, `status:in progress` and so on. Everything else is the s
 | The agent's word is not trusted | The service runs the verify command, checks the diff and waits for CI before a ticket reaches you. |
 | Nothing reaches the main branch without you | The service cannot merge or approve. It only opens pull requests, and only on branches under its own prefix. |
 | Only you can start work | A ticket is picked up only if an allowlisted account wrote it and it was approved: its card stands in Todo on a board only you can change, or you applied its labels. Comments from anyone else never reach the agent. |
+| What you run yourself was pointed out first | Once you merge and run the code, it runs with your rights, and the sandbox no longer helps. So the pull request starts with what deserves a look: added code that opens a network connection, starts another program, runs code built at run time or holds a long encoded block; changed dependencies and build scripts; weakened tests. Compiled files are refused outright. This helps you review. It does not replace reading the diff. |
 | Cost is bounded | Per-ticket retry limit, daily run limits, and `pause`. |
 
 The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
@@ -547,6 +548,7 @@ Last updated 2026-11-22.
 | Tools and a skill for your own Claude Code (`maestro assistant`, `maestro mcp`) | Written. The server is tested here by speaking the protocol to it against a stand-in for the running service. Not yet added to a real Claude Code. |
 | Skills and agent files for the agents (`maestro skills`) | Written. Finding, checking, storing and removing them is tested, also fetching from a git repository. The read-only mount is tested with a real container in CI. Not yet tried with a real Claude Code run: that the agent picks a skill up from that place is taken from Claude Code's documentation. |
 | Model per card, for planning and by default | Written and tested against stand-ins for the board and for Claude Code. Not yet run with a real card. |
+| Pointing out code that reaches outside the program | Done. Patterns for C#, TypeScript and JavaScript, Go, Python, C and shell, tested on examples. A pattern list can be evaded by someone who knows it, so it is an aid for the reviewer and not a guarantee. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |
