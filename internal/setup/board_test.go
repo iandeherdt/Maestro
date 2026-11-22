@@ -24,6 +24,9 @@ type fakeBoard struct {
 	worker     []option
 	hasWorker  bool
 	workerKind string
+	model      []option
+	hasModel   bool
+	modelKind  string
 }
 
 func names(opts []option) string {
@@ -99,6 +102,9 @@ func (g *github) graphql(w http.ResponseWriter, r *http.Request) {
 			if str("project") == "PVT_"+b.title && str("name") == "Worker" && !b.hasWorker {
 				b.hasWorker, b.worker = true, options()
 			}
+			if str("project") == "PVT_"+b.title && str("name") == "Model" && !b.hasModel {
+				b.hasModel, b.model = true, options()
+			}
 		}
 		answer(map[string]any{"createProjectV2Field": map[string]any{"clientMutationId": nil}})
 	case strings.Contains(in.Query, "projectsV2("):
@@ -118,6 +124,9 @@ func (g *github) graphql(w http.ResponseWriter, r *http.Request) {
 					field("Status", b.status, "F_status_"+b.title, "")}
 				if b.hasWorker {
 					fields = append(fields, field("Worker", b.worker, "F_worker_"+b.title, b.workerKind))
+				}
+				if b.hasModel {
+					fields = append(fields, field("Model", b.model, "F_model_"+b.title, b.modelKind))
 				}
 				project = map[string]any{"id": "PVT_" + b.title, "title": b.title, "closed": b.closed,
 					"items": map[string]int{"totalCount": b.items}, "fields": map[string]any{"nodes": fields}}
@@ -158,7 +167,7 @@ func TestBoardStepCreatesTheBoard(t *testing.T) {
 	if st.Board != 1 || names(b.status) != allColumns || names(b.worker) != "linux" {
 		t.Fatalf("board %d, columns %q, workers %q", st.Board, names(b.status), names(b.worker))
 	}
-	if strings.Join(g.mutations, ",") != "board,columns,field" {
+	if strings.Join(g.mutations, ",") != "board,columns,field,field" || names(b.model) != "fable,opus,sonnet,haiku" {
 		t.Errorf("mutations %v", g.mutations)
 	}
 	for _, want := range []string{"/orgs/ian/projects/1", "Layout choose Board", "Only issues that you wrote"} {
@@ -176,7 +185,7 @@ func TestBoardStepCreatesTheBoard(t *testing.T) {
 
 	// A second run changes nothing.
 	u, out = ui("")
-	if err := Run(ctx, u, st, []Step{step}); err != nil || !strings.Contains(out.String(), "Already done.") || len(g.mutations) != 3 {
+	if err := Run(ctx, u, st, []Step{step}); err != nil || !strings.Contains(out.String(), "Already done.") || len(g.mutations) != 4 {
 		t.Fatalf("second run: %v %v\n%s", err, g.mutations, out)
 	}
 	// A board that was closed in the meantime is replaced.
@@ -218,8 +227,8 @@ func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
 		full = append(full, option(c))
 	}
 	g.boards = []*fakeBoard{
-		{number: 1, title: "Partial", items: 2, status: full[:3]},
-		{number: 2, title: "Shared", items: 5, status: full, hasWorker: true, worker: []option{{"mac", "BLUE", "x"}}},
+		{number: 1, title: "Partial", items: 2, status: full[:3], hasModel: true},
+		{number: 2, title: "Shared", items: 5, status: full, hasWorker: true, worker: []option{{"mac", "BLUE", "x"}}, hasModel: true},
 		{number: 3, title: "Odd", status: full, hasWorker: true, workerKind: "ProjectV2Field"},
 	}
 	for pick, want := range map[string]string{
@@ -244,6 +253,19 @@ func TestBoardStepNeverRewritesABoardWithCards(t *testing.T) {
 		g.boards[0].status, g.boards[0].hasWorker = full[:3], false
 		g.boards[1].worker = g.boards[1].worker[:1]
 	}
+	// A board from before cards could ask for a model gets the field. That
+	// adds a field and rewrites nothing, so cards do not stand in the way.
+	g.boards[1].hasModel = false
+	g.boards[1].worker = append(g.boards[1].worker, option{"linux", "BLUE", "x"})
+	st2, step2 := onOrg(t, g)
+	u2, out2 := ui("\nian\n2\n")
+	if err := Run(ctx, u2, st2, []Step{step2}); err != nil || strings.Join(g.mutations, ",") != "field" || names(g.boards[1].model) != "fable,opus,sonnet,haiku" {
+		t.Fatalf("adding the Model field: %v, mutations %v\n%s", err, g.mutations, out2)
+	}
+	if s, _ := step2.Check(ctx, st2); !s.Done {
+		t.Errorf("not done after the Model field was added: %s", s.Detail)
+	}
+	g.mutations = nil
 	st, step := onOrg(t, g)
 	u, _ := ui("\nian\n3\n")
 	if err := step.Run(ctx, u, st); err == nil || !strings.Contains(err.Error(), "not a single-select field") {

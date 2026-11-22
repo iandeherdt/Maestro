@@ -242,6 +242,29 @@ Things to know:
   `command: node shots.mjs` instead of `pages`. The command writes PNG files into the folder
   named by `$SCREENSHOT_DIR`.
 
+### Choosing the model
+
+Without any setting, every ticket is worked on with `opus`. You can decide it in three places,
+and the more specific one wins:
+
+1. **On the card.** The board has a field **Model** with the choices `fable`, `opus`, `sonnet`
+   and `haiku`. Set it on a card and that ticket is planned and worked on with that model. Leave it
+   empty for the default. With labels instead of a board, put a label such as `model:opus` on the
+   issue.
+2. **For planning**, in the settings file: `claude: {planning_model: opus}`. Planning is where a
+   stronger model pays off most.
+3. **The default**, in the settings file: `claude: {model: sonnet}`. It is `opus` when you set
+   nothing.
+
+`fable`, `opus`, `sonnet` and `haiku` are Claude Code's own names for its newest model of each
+kind, so
+they stay right when new models come out. A full model name works too: add it as a choice to the
+Model field on the board (the three dots at the top right, Settings, Model).
+
+If your board was made before this existed, run `maestro setup` again: it adds the field and
+changes nothing else. To limit what a card may ask for, set `claude: {card_models: [sonnet,
+haiku]}`; a card that asks for something else gets the default.
+
 ### Something bigger: let it plan first
 
 For an idea that is too big or too vague for one pull request, move the card to **Idea** instead
@@ -484,6 +507,9 @@ changed ones:
 | `publish.rework_on_comments` | `true` | Your comments on a pull request send the card back to work, see [Asking for changes](#asking-for-changes) |
 | `publish.review_quiet_ms` | `120000` | How long you have to be quiet on the pull request before that happens, in milliseconds |
 | `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
+| `claude.model` | `opus` | The model for every ticket, see [Choosing the model](#choosing-the-model) |
+| `claude.planning_model` | `claude.model` | The model while an idea is planned |
+| `claude.card_models` | any | The models a card may ask for |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
 | `budget.max_failure_attempts` | 3 | Failed attempts before a ticket is blocked |
 | `budget.max_runs_per_day` | 20 | Daily limit on agent runs |
@@ -520,6 +546,7 @@ Last updated 2026-11-22.
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
 | Tools and a skill for your own Claude Code (`maestro assistant`, `maestro mcp`) | Written. The server is tested here by speaking the protocol to it against a stand-in for the running service. Not yet added to a real Claude Code. |
 | Skills and agent files for the agents (`maestro skills`) | Written. Finding, checking, storing and removing them is tested, also fetching from a git repository. The read-only mount is tested with a real container in CI. Not yet tried with a real Claude Code run: that the agent picks a skill up from that place is taken from Claude Code's documentation. |
+| Model per card, for planning and by default | Written and tested against stand-ins for the board and for Claude Code. Not yet run with a real card. |
 | Conventions (rule packs `dotnet` and `typescript`) | Written. Every rule of both packs was run against a sample project in a container, without network, and shown to fail on a violation. The command and the settings are tested. Not yet run through the service on a real project, and the sandbox image with the .NET SDK has not been built with `maestro image` yet. |
 | Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
 | `maestro unblock`, `doctor`, start-up self-test | Not started |

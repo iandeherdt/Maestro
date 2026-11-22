@@ -18,6 +18,7 @@ const boardOrg = "ian-org"
 type fakeCard struct {
 	status   string
 	worker   string
+	model    string
 	archived bool
 	kind     string // "", "draft", "pr" or "elsewhere"
 }
@@ -78,13 +79,16 @@ func (h *hub) gqlIssue(fi *fakeIssue) map[string]any {
 }
 
 func (h *hub) gqlCard(n int, c *fakeCard, status string) map[string]any {
-	m := map[string]any{"id": fmt.Sprintf("PVTI_%d", n), "isArchived": c.archived, "status": nil, "worker": nil,
+	m := map[string]any{"id": fmt.Sprintf("PVTI_%d", n), "isArchived": c.archived, "status": nil, "worker": nil, "model": nil,
 		"project": map[string]any{"number": h.board.number, "owner": map[string]string{"__typename": "Organization", "login": boardOrg}}}
 	if status != "" {
 		m["status"] = map[string]string{"name": status}
 	}
 	if c.worker != "" {
 		m["worker"] = map[string]string{"name": c.worker}
+	}
+	if c.model != "" {
+		m["model"] = map[string]string{"name": c.model}
 	}
 	return m
 }
@@ -176,7 +180,7 @@ func (h *hub) graphql(w http.ResponseWriter, r *http.Request) {
 			fail("NOT_FOUND")
 			return
 		}
-		if str("status") != "Status" || str("worker") != "Worker" {
+		if str("status") != "Status" || str("worker") != "Worker" || str("model") != "Model" {
 			fail("UNPROCESSABLE")
 			return
 		}
@@ -304,6 +308,34 @@ func TestBoardColumnIsTheStateAndWorkerFieldRoutes(t *testing.T) {
 	}
 	if h.count("/issues?") != 0 || h.count("GET /repos/"+owner+"/app/issues ") != 0 {
 		t.Error("the issue list was read in board mode")
+	}
+}
+
+// The card's Model field becomes a model: label, which the worker reads. A
+// label of that shape on the issue itself does not count on a board: an
+// issue's labels can be set by more people than the board's fields.
+func TestBoardModelFieldPicksTheModel(t *testing.T) {
+	h := newBoardHub(t)
+	h.card(1, "ian", "Todo", "linux")
+	h.board.cards[1].model = "Opus"
+	h.card(2, "ian", "Todo", "linux")
+	h.label(2, "ian", "model:opus")
+	h.card(3, "ian", "Todo", "linux")
+	h.board.cards[3].model = "Default"
+	got, err := boardAdapter(t, h).FetchIssuesByStates(ctx, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := byIdent(got)
+	if one := m["GH-1"]; !one.HasLabels([]string{"model:opus"}) {
+		t.Errorf("GH-1 labels %v", one.Labels)
+	}
+	for _, id := range []string{"GH-2", "GH-3"} {
+		for _, l := range m[id].Labels {
+			if strings.HasPrefix(l, "model:") {
+				t.Errorf("%s got %s", id, l)
+			}
+		}
 	}
 }
 

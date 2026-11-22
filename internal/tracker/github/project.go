@@ -26,6 +26,7 @@ import (
 const (
 	defaultStatusField = "Status"
 	defaultWorkerField = "Worker"
+	defaultModelField  = "Model"
 	boardTTL           = 5 * time.Minute
 	maxMessage         = 200
 )
@@ -36,6 +37,9 @@ type board struct {
 	number      int
 	statusField string
 	workerField string
+	// modelField is the single-select field in which a card asks for a
+	// model. A board without it works; every card then gets the default.
+	modelField string
 
 	mu     sync.Mutex
 	meta   *boardMeta
@@ -59,6 +63,7 @@ type card struct {
 	item   string
 	status string
 	worker string
+	model  string
 }
 
 var fieldRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _-]{0,49}$`)
@@ -68,10 +73,10 @@ func newBoard(raw any, repoOwner string) (*board, error) {
 	if !ok {
 		return nil, cfgErr("tracker.provider.project is required with state_source: project, with at least the board's number")
 	}
-	b := &board{owner: repoOwner, statusField: defaultStatusField, workerField: defaultWorkerField}
+	b := &board{owner: repoOwner, statusField: defaultStatusField, workerField: defaultWorkerField, modelField: defaultModelField}
 	for k, v := range m {
 		switch k {
-		case "owner", "status_field", "worker_field":
+		case "owner", "status_field", "worker_field", "model_field":
 			s, ok := v.(string)
 			if !ok {
 				return nil, cfgErr("tracker.provider.project.%s must be a string", k)
@@ -81,6 +86,8 @@ func newBoard(raw any, repoOwner string) (*board, error) {
 				b.owner = s
 			case "status_field":
 				b.statusField = s
+			case "model_field":
+				b.modelField = s
 			default:
 				b.workerField = s
 			}
@@ -107,8 +114,11 @@ func newBoard(raw any, repoOwner string) (*board, error) {
 	if !loginRE.MatchString(b.owner) || strings.HasSuffix(b.owner, "]") {
 		return nil, cfgErr("tracker.provider.project.owner must be the account that owns the board")
 	}
-	if !fieldRE.MatchString(b.statusField) || !fieldRE.MatchString(b.workerField) {
-		return nil, cfgErr("tracker.provider.project: status_field and worker_field must be plain field names")
+	if !fieldRE.MatchString(b.statusField) || !fieldRE.MatchString(b.workerField) || !fieldRE.MatchString(b.modelField) {
+		return nil, cfgErr("tracker.provider.project: status_field, worker_field and model_field must be plain field names")
+	}
+	if norm(b.modelField) == norm(b.statusField) || norm(b.modelField) == norm(b.workerField) {
+		return nil, cfgErr("tracker.provider.project: model_field must be a field of its own")
 	}
 	if norm(b.statusField) == norm(b.workerField) {
 		return nil, cfgErr("tracker.provider.project: status_field and worker_field must be two different fields")
@@ -132,6 +142,7 @@ fragment cardFields on ProjectV2Item {
   id isArchived
   status: fieldValueByName(name: $status) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
   worker: fieldValueByName(name: $worker) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+  model: fieldValueByName(name: $model) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
 }`
 
 // The fields are listed and picked by name: asking GitHub for a field by a
@@ -156,7 +167,7 @@ query($owner: String!, $number: Int!) {
 }`
 
 const cardsQuery = `
-query($owner: String!, $number: Int!, $status: String!, $worker: String!, $after: String) {
+query($owner: String!, $number: Int!, $status: String!, $worker: String!, $model: String!, $after: String) {
   repositoryOwner(login: $owner) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -173,7 +184,7 @@ query($owner: String!, $number: Int!, $status: String!, $worker: String!, $after
 }` + cardFields + issueFields
 
 const issueQuery = `
-query($owner: String!, $repo: String!, $n: Int!, $status: String!, $worker: String!) {
+query($owner: String!, $repo: String!, $n: Int!, $status: String!, $worker: String!, $model: String!) {
   repository(owner: $owner, name: $repo) {
     issue(number: $n) {
       ...issueFields
@@ -250,6 +261,7 @@ type gqlCard struct {
 	IsArchived bool     `json:"isArchived"`
 	Status     *gqlName `json:"status"`
 	Worker     *gqlName `json:"worker"`
+	Model      *gqlName `json:"model"`
 	Content    *struct {
 		Typename string `json:"__typename"`
 		gqlIssue
@@ -267,6 +279,9 @@ func (c gqlCard) card() *card {
 	}
 	if c.Worker != nil {
 		out.worker = c.Worker.Name
+	}
+	if c.Model != nil {
+		out.model = c.Model.Name
 	}
 	return out
 }
@@ -286,7 +301,7 @@ func (g gqlIssue) rest() ghIssue {
 }
 
 func (a *Adapter) vars(extra map[string]any) map[string]any {
-	v := map[string]any{"status": a.board.statusField, "worker": a.board.workerField}
+	v := map[string]any{"status": a.board.statusField, "worker": a.board.workerField, "model": a.board.modelField}
 	for k, x := range extra {
 		v[k] = x
 	}

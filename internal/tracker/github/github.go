@@ -466,9 +466,10 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue, on *card) (issue.Is
 	var stateLabels []string
 	for _, l := range gi.Labels {
 		name := norm(l.Name)
-		if name == "" || a.board != nil && strings.HasPrefix(name, routePrefix) {
-			// On a board the Worker field routes a card. A label that looks
-			// like a routing label must not.
+		if name == "" || a.board != nil && (strings.HasPrefix(name, routePrefix) || strings.HasPrefix(name, config.ModelLabelPrefix)) {
+			// On a board the Worker field routes a card and the Model
+			// field picks its model. A label that looks like either must
+			// not.
 			continue
 		}
 		is.Labels = append(is.Labels, name)
@@ -484,6 +485,9 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue, on *card) (issue.Is
 		is.NativeRef["project_item_id"] = on.item
 		if on.worker != "" {
 			is.Labels = append(is.Labels, routePrefix+norm(on.worker))
+		}
+		if m := norm(on.model); m != "" && m != "default" {
+			is.Labels = append(is.Labels, config.ModelLabelPrefix+m)
 		}
 	}
 	sort.Strings(is.Labels)

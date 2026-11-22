@@ -53,6 +53,8 @@ type Turn struct {
 	Prompt       string
 	// ResumeSessionID is empty for the first turn of an attempt.
 	ResumeSessionID string
+	// Model is the model for this turn; empty means the configured default.
+	Model string
 }
 
 // TurnResult is a turn that ended normally.
@@ -228,6 +230,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	if a.Planning {
 		return w.plan(ctx, a, set, ws, sink)
 	}
+	model := modelFor(cfg, is, false, sink)
 
 	// What the owner wrote on the ticket belongs to the task: a
 	// clarification, or what to change when the ticket came back for
@@ -279,7 +282,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 
 		phase(orchestrator.LaunchingAgentProcess)
 		sink.Event(orchestrator.Event{Kind: "turn_start", TurnStart: true})
-		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID}, sink.Event)
+		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID, Model: model}, sink.Event)
 		var lost *AgentError
 		if errors.As(err, &lost) && lost.Category == SessionUnknown && sessionID != "" && !sessionReset && ctx.Err() == nil {
 			// The agent lost the session (SPEC 10.2). The work in the
@@ -290,7 +293,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 			if text, err = first(); err != nil {
 				return failed(prompt.RenderError, err)
 			}
-			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text}, sink.Event)
+			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, Model: model}, sink.Event)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -377,6 +380,7 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 	if w.Planning == nil {
 		return failed(PlanBriefError, errors.New("planning is not set up on this worker"))
 	}
+	model := modelFor(cfg, is, true, sink)
 	phase(orchestrator.BuildingPrompt)
 	brief, err := w.Planning.Brief(ctx, is)
 	if err != nil {
@@ -402,7 +406,7 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 		}
 		phase(orchestrator.LaunchingAgentProcess)
 		sink.Event(orchestrator.Event{Kind: "turn_start", TurnStart: true})
-		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID}, sink.Event)
+		res, err := w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, ResumeSessionID: sessionID, Model: model}, sink.Event)
 		var lost *AgentError
 		if errors.As(err, &lost) && lost.Category == SessionUnknown && sessionID != "" && !sessionReset && ctx.Err() == nil {
 			sessionReset = true
@@ -410,7 +414,7 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 			if text, err = first(); err != nil {
 				return failed(prompt.RenderError, err)
 			}
-			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text}, sink.Event)
+			res, err = w.Runner.RunTurn(ctx, Turn{WorkspaceKey: ws.Key, Prompt: text, Model: model}, sink.Event)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -465,6 +469,19 @@ func agentOutcome(err error) orchestrator.Outcome {
 
 // stillWanted mirrors the scheduler's rule: the issue is in an active
 // state, approved, and labelled for this worker.
+// modelFor picks the model for the ticket and reports it, so that the log
+// and the status page show which one ran and whether a wish was refused.
+func modelFor(cfg *config.Config, is issue.Issue, planning bool, sink orchestrator.Sink) string {
+	model, refused := cfg.Claude.ModelFor(is.Labels, planning)
+	switch {
+	case refused != "":
+		sink.Event(orchestrator.Event{Kind: "model_refused", Message: "the ticket asks for a model that is not allowed here; the default is used"})
+	case model != "":
+		sink.Event(orchestrator.Event{Kind: "model", Message: "model " + model})
+	}
+	return model
+}
+
 func stillWanted(cfg *config.Config, is issue.Issue) bool {
 	state := issue.NormalizeState(is.State)
 	active := false

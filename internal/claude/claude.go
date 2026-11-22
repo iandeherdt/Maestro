@@ -204,6 +204,9 @@ func (r *Runner) RunTurn(ctx context.Context, t worker.Turn, onEvent func(orches
 	var none worker.TurnResult
 	cfg := r.Config()
 	c := cfg.Claude
+	if t.Model != "" {
+		c.Model = t.Model
+	}
 	id, resume := t.ResumeSessionID, t.ResumeSessionID != ""
 	if !resume {
 		newID := r.NewID
