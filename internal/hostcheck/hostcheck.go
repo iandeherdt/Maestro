@@ -398,7 +398,7 @@ func Profile(dir, home string, secret, read []string) (string, error) {
 	w(`    (subpath "/private/tmp")`)
 	w(`    (subpath "/private/var/folders")`)
 	w("    (subpath %s)", q(real(dir)))
-	for _, l := range []string{"Unity", "Logs/Unity", "Application Support/Unity"} {
+	for _, l := range []string{"Unity", "Logs/Unity", "Application Support/Unity", "Caches/Unity"} {
 		w("    (subpath %s)", q(filepath.Join(lib, l)))
 	}
 	for _, l := range []string{"Caches", "Saved Application State", "Application Support"} {
@@ -428,6 +428,8 @@ func Profile(dir, home string, secret, read []string) (string, error) {
 	for _, l := range []string{"Unity", "UnityHub"} {
 		w("    (subpath %s)", q(filepath.Join(lib, "Application Support", l)))
 	}
+	// The Package Manager keeps its cache here and does not start without it.
+	w("    (subpath %s)", q(filepath.Join(lib, "Caches", "Unity")))
 	w("    (regex %s)", re(lib+"/", `[^/]+/[^/]*[Uu]nity3d`))
 	for _, r := range read {
 		w("    (subpath %s)", q(real(r)))
