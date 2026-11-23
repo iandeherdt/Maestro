@@ -682,6 +682,10 @@ func (g *gh) Import(context.Context, string, string, string) (mirror.Imported, e
 func (g *gh) Diff(context.Context, string, string, mirror.Limits) (mirror.Diff, error) {
 	return mirror.Diff{}, nil
 }
+func (g *gh) OnBranch(context.Context, string, string, string) (bool, error) { return true, nil }
+func (g *gh) HistoryAdded(context.Context, string, string, int64) ([]string, bool, error) {
+	return nil, true, nil
+}
 func (g *gh) Push(context.Context, string, string, string, string) error { return nil }
 func (g *gh) ForgetPush(_ context.Context, key string) error {
 	g.forgot = append(g.forgot, key)

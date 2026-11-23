@@ -63,6 +63,10 @@ type Input struct {
 	// HeldSecrets are the credential values the control zone holds. They
 	// are searched for by exact match and never appear in a finding.
 	HeldSecrets []string
+	// HistoryAdded are the lines and file names that the commits add one
+	// by one, also those a later commit removes again. The change from
+	// base to head does not show them, and a push sends every commit.
+	HistoryAdded []string
 }
 
 // Finding is one rule result. Detail never contains file content.
@@ -184,6 +188,10 @@ func Evaluate(cfg config.Policy, in Input) Result {
 		}
 	}
 
+	// reported are the kinds of credential found in the change from base
+	// to head. The history is only asked about the other kinds.
+	reported := map[string]bool{}
+
 	// D5, totals.
 	if int64(len(in.Changes)) > cfg.MaxChangedFiles {
 		deny("D5", "", fmt.Sprintf("%d files changed, the limit is %d", len(in.Changes), cfg.MaxChangedFiles))
@@ -265,17 +273,31 @@ func Evaluate(cfg config.Policy, in Input) Result {
 		if cfg.SecretScan {
 			if c.Status != 'D' {
 				for _, hit := range scanText(c.Path, in.HeldSecrets) {
+					reported[hit] = true
 					deny("D7", "", "file name looks like a credential ("+hit+")")
 				}
 			}
 			for i, line := range c.Added {
 				for _, hit := range scanText(line, in.HeldSecrets) {
+					reported[hit] = true
 					deny("D7", c.Path, fmt.Sprintf("added line %d looks like a credential (%s)", i+1, hit))
 				}
 			}
 		}
 
 		flagChange(cfg, c, flag)
+	}
+
+	if cfg.SecretScan {
+		for _, line := range in.HistoryAdded {
+			for _, hit := range scanText(line, in.HeldSecrets) {
+				if !reported[hit] {
+					reported[hit] = true
+					deny("D7", "", "an earlier commit adds something that looks like a credential, and a later one removes it; "+
+						"the earlier commit would be pushed too. Make the change again from the base commit, without it ("+hit+")")
+				}
+			}
+		}
 	}
 
 	for _, cm := range in.Commits {

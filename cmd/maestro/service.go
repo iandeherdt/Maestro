@@ -675,6 +675,9 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	spaces := workspace.New(cur.config(), in.box, log)
 	host := in.hostChecks(cur.config, log)
+	gates := &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub, Host: host}
+	// What is pushed is the commit the export step named and verify ran on.
+	pub.ExportedHead = gates.ExportedHead
 	wk := &worker.Worker{
 		Settings: func() worker.Settings {
 			l := cur.p.Load()
@@ -684,7 +687,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		Workspaces: &synced{Manager: spaces, sync: syncMirror, log: log, host: host},
 		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
 			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} }},
-		Gates: &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub, Host: host},
+		Gates: gates,
 		Notes: pub,
 	}
 	// The planning stage needs a board. The names of its states are read
