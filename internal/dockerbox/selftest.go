@@ -275,7 +275,7 @@ func (p prober) run(profile, canary, deny string, pids, memory int64) []ProbeChe
 	var leaked []string
 	for _, kv := range p.environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if (canary != "" && name == canary) || credRE.MatchString(strings.ToUpper(name)) {
+		if (canary != "" && name == canary) || sandbox.Credential(name) {
 			leaked = append(leaked, name)
 		}
 	}

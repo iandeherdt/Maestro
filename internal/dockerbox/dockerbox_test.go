@@ -219,7 +219,7 @@ func TestExportProducesABundleTheMirrorCanRead(t *testing.T) {
 	// One committed change and one uncommitted change.
 	sh(t, b, key, sandbox.NetNone, `echo a > a.txt && git add a.txt && git commit -q -m a && echo b > b.txt`)
 	fields := strings.Fields(export())
-	if len(fields) != 2 || fields[1] != "2" || !shaRE.MatchString(fields[0]) {
+	if len(fields) != 2 || fields[1] != "2" || !sandbox.ValidCommit(fields[0]) {
 		t.Fatalf("export: %v", fields)
 	}
 	heads := git(b.MirrorDir, "bundle", "list-heads", final)

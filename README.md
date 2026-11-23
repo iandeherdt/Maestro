@@ -928,7 +928,7 @@ Last updated 2026-11-23, at release 0.5.17.
 | Closing ways past the gates (release 0.5.17) | Done: a base commit that moved after the run, changes hidden from git, and a secret in an earlier commit of the branch are all refused (#78). The mirror and the hand-off folders are closed to other users of the machine (#79). Setup says when the GitHub App could push to an unprotected base branch, and how to close that (#80). On a Mac, Unity's checks read only Unity's part of the home folder and write only Unity's folders (#81, #82). |
 | `maestro doctor`, start-up self-test | Written. The self-test runs in real containers in the tests, on Docker, and the service's end-to-end test starts through it. Not yet run on Podman on RHEL, or on a Mac. The SPEC 11.6 checks for leftover processes after a step and for exceeding the limits are not part of it yet. |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
-| Native Linux sandbox (systemd) | Not started |
+| Native Linux sandbox (systemd) | Started: the root launcher `maestro-launch` is written and tested with a simulated systemd. The service does not use it yet. |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, with `maestro setup` for Linear and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
 | Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
