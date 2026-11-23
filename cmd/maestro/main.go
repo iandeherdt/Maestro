@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/iandeherdt/Maestro/internal/config"
@@ -234,7 +235,7 @@ func runProxy(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: maestro proxy --listen ADDR --profile NAME --allow-file FILE")
 		return 2
 	}
-	ln, err := net.Listen("tcp", *listen)
+	ln, err := proxyListen(*listen)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -246,6 +247,43 @@ func runProxy(args []string, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// proxyListen listens on a TCP address, or on a unix socket with
+// "unix:/path". The systemd sandbox binds the socket into each unit with
+// network (SPEC 11.3). Its folder must be closed to other users: the socket
+// itself is open to all, because the sandbox user connects to it.
+func proxyListen(addr string) (net.Listener, error) {
+	path, ok := strings.CutPrefix(addr, "unix:")
+	if !ok {
+		return net.Listen("tcp", addr)
+	}
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("%s: the socket path must be absolute", path)
+	}
+	fi, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("%s: the folder of the socket must be closed to other users (chmod 700)", filepath.Dir(path))
+	}
+	// A socket left by an earlier run; nothing else is removed.
+	if fi, err := os.Lstat(path); err == nil {
+		if fi.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("%s exists and is not a socket", path)
+		}
+		os.Remove(path)
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return ln, nil
 }
 
 func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {

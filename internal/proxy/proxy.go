@@ -251,7 +251,8 @@ func (p *Proxy) handle(c net.Conn) {
 }
 
 func closeWrite(c net.Conn) {
-	if t, ok := c.(*net.TCPConn); ok {
+	// TCP and unix connections both half-close.
+	if t, ok := c.(interface{ CloseWrite() error }); ok {
 		t.CloseWrite()
 	}
 }
