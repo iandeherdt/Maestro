@@ -7,9 +7,11 @@
 // own and runs the pack's verify script there, inside macOS's sandbox
 // (sandbox-exec): no network but the loopback, where a proxy lets through
 // only Unity's hosts and the allowlist of the hooks; no writes outside the
-// check's folder and Unity's own folders; and no reads of Maestro's setup
-// and state, where the keys are. It is a weaker fence than the container:
-// the code the agent wrote runs as the user who runs Maestro.
+// check's folder and Unity's own folders; no reads of the home folder
+// outside Unity's part of its Library; and no starting or steering of
+// other apps. It is a weaker fence than the container: the code the agent
+// wrote runs as the user who runs Maestro, and what the profile does not
+// name is allowed.
 package hostcheck
 
 import (
@@ -172,7 +174,12 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 	argv := []string{"/bin/sh", "-c", script}
 	if !r.noSandbox {
 		profile := filepath.Join(dir, "sandbox.sb")
-		text, err := Profile(dir, home, r.Secret)
+		// An Editor below the home folder has to stay readable.
+		root := editor
+		if i := strings.Index(filepath.ToSlash(editor), "/Editor/"+version+"/"); i >= 0 {
+			root = editor[:i+len("/Editor/"+version)]
+		}
+		text, err := Profile(dir, home, r.Secret, []string{root})
 		if err != nil {
 			return Result{}, err
 		}
@@ -337,8 +344,13 @@ exec "$@"
 }
 
 // Profile is the sandbox-exec profile of a check in dir.
-func Profile(dir, home string, secret []string) (string, error) {
-	for _, p := range append([]string{dir, home}, secret...) {
+//
+// It starts from "allow" and takes away: the network, the writes and the
+// reads of the home folder, each given back only where the check and Unity
+// need it. read are folders outside those that the check has to read, such
+// as an Editor that Unity Hub installed below the home folder.
+func Profile(dir, home string, secret, read []string) (string, error) {
+	for _, p := range append(append([]string{dir, home}, secret...), read...) {
 		if !filepath.IsAbs(p) || strings.ContainsAny(p, "\"\\\n") {
 			return "", fmt.Errorf("the path %q cannot be put in a sandbox profile", p)
 		}
@@ -352,7 +364,11 @@ func Profile(dir, home string, secret []string) (string, error) {
 		return p
 	}
 	q := func(p string) string { return `"` + p + `"` }
-	re := func(p string) string { return `#"^` + regexp.QuoteMeta(p) + `"` }
+	// re is a regular expression for paths that start with p. more is
+	// appended to it as it is.
+	re := func(p string, more ...string) string {
+		return `#"^` + regexp.QuoteMeta(p) + strings.Join(more, "") + `"`
+	}
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 	w("(version 1)")
@@ -366,29 +382,65 @@ func Profile(dir, home string, secret []string) (string, error) {
 	w(`(deny network-outbound (remote unix-socket (path-regex #"^/private/tmp/com\.apple\.launchd\.")))`)
 	w(`(deny network-outbound (remote unix-socket (path-regex %s)))`, re(real(home)+"/.docker/"))
 	w(`(deny network-outbound (remote unix-socket (path-literal "/private/var/run/docker.sock")))`)
-	w(";; No starting of programs outside the fence through Launch Services or Apple events.")
+	w(";; No starting of programs outside the fence, and no steering of the user's apps:")
+	w(";; not by name, not through Launch Services and not with Apple events.")
 	w(`(deny process-exec (literal "/usr/bin/open") (literal "/usr/bin/osascript"))`)
-	w(";; Writes: the check's folder, the temporary folders and Unity's own folders.")
+	w("(deny lsopen)")
+	w("(deny appleevent-send)")
+	lib := filepath.Join(real(home), "Library")
+	w(";; Writes: the check's folder, the temporary folders and Unity's own folders. Not the")
+	w(";; caches and settings of other programs, which they trust: a build cache that was")
+	w(";; written here would run as the user the next time they build. Not Unity Hub's settings,")
+	w(";; which say where the Editors are.")
 	w("(deny file-write*)")
 	w("(allow file-write*")
 	w(`    (subpath "/dev")`)
 	w(`    (subpath "/private/tmp")`)
 	w(`    (subpath "/private/var/folders")`)
 	w("    (subpath %s)", q(real(dir)))
-	for _, l := range []string{"Library/Unity", "Library/Caches", "Library/Logs",
-		"Library/Application Support/Unity", "Library/Application Support/UnityHub", "Library/Saved Application State"} {
-		w("    (subpath %s)", q(filepath.Join(real(home), l)))
+	for _, l := range []string{"Unity", "Logs/Unity", "Application Support/Unity"} {
+		w("    (subpath %s)", q(filepath.Join(lib, l)))
+	}
+	for _, l := range []string{"Caches", "Saved Application State", "Application Support"} {
+		w("    (regex %s)", re(filepath.Join(lib, l)+"/", `[^/]*[Uu]nity3d`))
 	}
 	w(")")
-	w(";; Reads: not Maestro's keys, and not the usual places of the user's own.")
+	w(";; Reads: nothing of the home folder but its Library, where Unity keeps its licence, its")
+	w(";; packages and its settings. Not the user's documents, projects and dot files.")
+	w("(deny file-read* (subpath %s))", q(real(home)))
+	w("(allow file-read-metadata (literal %s))", q(real(home)))
+	w("(allow file-read* (subpath %s))", q(lib))
+	w(";; Of the Library, not what other programs keep there about the user.")
+	private := []string{"Accounts", "Application Support", "Caches", "Calendars", "CloudStorage", "Containers", "Cookies",
+		"Group Containers", "HTTPStorages", "IdentityServices", "Mail", "Messages", "Mobile Documents", "Safari"}
 	w("(deny file-read*")
-	for _, s := range secret {
-		w("    (subpath %s)", q(real(s)))
-	}
-	for _, s := range []string{".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config/gh", ".config/gcloud", ".netrc", ".git-credentials"} {
-		w("    (subpath %s)", q(filepath.Join(real(home), s)))
+	for _, l := range private {
+		w("    (subpath %s)", q(filepath.Join(lib, l)))
 	}
 	w(")")
+	w(";; Those folders can still be passed through, and Unity's own in them be read.")
+	w("(allow file-read-metadata")
+	for _, l := range private {
+		w("    (literal %s)", q(filepath.Join(lib, l)))
+	}
+	w(")")
+	w("(allow file-read*")
+	for _, l := range []string{"Unity", "UnityHub"} {
+		w("    (subpath %s)", q(filepath.Join(lib, "Application Support", l)))
+	}
+	w("    (regex %s)", re(lib+"/", `[^/]+/[^/]*[Uu]nity3d`))
+	for _, r := range read {
+		w("    (subpath %s)", q(real(r)))
+	}
+	w(")")
+	w(";; Not Maestro's keys, wherever they are.")
+	if len(secret) > 0 {
+		w("(deny file-read*")
+		for _, s := range secret {
+			w("    (subpath %s)", q(real(s)))
+		}
+		w(")")
+	}
 	w(";; The check's own folder, even when it lies below one of those.")
 	w("(allow file-read* (subpath %s))", q(real(dir)))
 	return b.String(), nil
