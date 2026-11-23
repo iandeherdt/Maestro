@@ -117,6 +117,8 @@ func (h *fakeHub) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
 	case key == "GET "+repo:
 		send(map[string]any{"default_branch": "main"})
+	case key == "GET "+repo+"/rules/branches/main":
+		send([]map[string]any{{"type": "pull_request"}})
 	case key == "GET "+repo+"/issues":
 		want := strings.ToLower(r.URL.Query().Get("labels"))
 		var items []map[string]any

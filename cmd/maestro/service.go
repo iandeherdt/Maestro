@@ -758,6 +758,16 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		}
 		fmt.Fprintf(stdout, "The agents have these extra skills and agent files: %s (maestro skills)\n", strings.Join(names, ", "))
 	}
+	// GitHub lets the App's key do more than the service ever does.
+	if t, err := code.Token(ctx); err == nil {
+		switch guarded, err := baseGuarded(ctx, gh.api, cfg.Workspace.Repo, base, t); {
+		case err != nil:
+			log.Warn("whether GitHub requires a pull request for the base branch could not be read", "branch", base, "error", err)
+		case !guarded:
+			log.Warn("GitHub does not require a pull request for the base branch; the service's key could push to it", "branch", base)
+			fmt.Fprint(stdout, unguardedNote(gh.git, cfg.Workspace.Repo, base))
+		}
+	}
 	fmt.Fprintf(stdout, "From another terminal: %s, %s, %s.\n", mention("maestro status"), mention("maestro pause"), mention("maestro resume"))
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
