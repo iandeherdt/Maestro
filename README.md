@@ -64,7 +64,7 @@ instead: `status:todo`, `status:in progress` and so on. Everything else is the s
 |---|---|
 | The agent holds nothing worth stealing | It runs as a separate user in a sandbox with no tokens. Pushing and all GitHub calls are done by the service, outside the sandbox. |
 | The agent's word is not trusted | The service runs the verify command, checks the diff and waits for CI before a ticket reaches you. |
-| Nothing reaches the main branch without you | The service cannot merge or approve. It only opens pull requests, and only on branches under its own prefix. |
+| Nothing reaches the main branch without you | The service has no code that merges, approves or pushes to the main branch. It only opens pull requests, and only on branches under its own prefix. GitHub itself would let the App's key push or merge, so add a rule on the main branch that requires a pull request and one approval: `maestro run` tells you when there is none and how to add it. |
 | Only you can start work | A ticket is picked up only if an allowlisted account wrote it and it was approved: its card stands in Todo on a board only you can change, or you applied its labels. Comments from anyone else never reach the agent. |
 | What you run yourself was pointed out first | Once you merge and run the code, it runs with your rights, and the sandbox no longer helps. So the pull request starts with what deserves a look: added code that opens a network connection, starts another program, runs code built at run time or holds a long encoded block; changed dependencies and build scripts; weakened tests. Compiled files are refused outright. This helps you review. It does not replace reading the diff. |
 | Cost is bounded | Per-ticket retry limit, daily run limits, and `pause`. |
@@ -126,8 +126,9 @@ What the setup does:
 2. **Creates a GitHub App for the service.** You say which repository the agents work on, open a
    local page and press one button on github.com. The App's key is saved on your machine in a
    file only you can read. The App can open pull requests and read check results, and in an
-   organization it can use the boards. It cannot change settings, workflows or secrets, and it
-   cannot merge.
+   organization it can use the boards. It cannot change settings, workflows or secrets.
+   Maestro never merges, but GitHub would let the App: writing code is the permission that opening
+   a pull request takes. A rule on the main branch that requires a pull request closes that.
 3. **Installs the App on one repository** of your choice and confirms that it can obtain a token
    for it.
 4. **Sets up the board**, for a repository in an organization: it asks what this machine is

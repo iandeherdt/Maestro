@@ -207,7 +207,10 @@ func (c *CreateApp) Run(ctx context.Context, ui *UI, st *State) error {
 		ui.Say("    - read and write code, pull requests and issues, and read check results,")
 		ui.Say("      only in repositories you install it on in the next step.")
 	}
-	ui.Say("  It cannot change repository settings, workflows or secrets, and it cannot merge.")
+	ui.Say("  It cannot change repository settings, workflows or secrets.")
+	ui.Say("  Maestro never merges and never pushes to your main branch. GitHub would let this App do both,")
+	ui.Say("  because opening a pull request takes the permission to write code. A rule on the main branch that")
+	ui.Say("  requires a pull request makes GitHub refuse it too: maestro run says how when there is none.")
 	ok, err := ui.Confirm("  Continue?")
 	if err != nil {
 		return err
