@@ -633,6 +633,9 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		defer cancel()
 		in.box.Down(c)
 	}()
+	if err := startupSelfTest(ctx, in, log); err != nil {
+		return err
+	}
 	yes, err := in.box.LoggedIn(ctx, cfg.Claude.Command)
 	if err != nil {
 		return err
@@ -793,5 +796,36 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
+	return nil
+}
+
+// startupSelfTest runs the sandbox's self-test before any work (SPEC 11.6).
+// A required check that fails stops the start; an advisory one is logged.
+func startupSelfTest(ctx context.Context, in *install, log *slog.Logger) error {
+	rep, err := in.box.SelfTest(ctx)
+	if err != nil {
+		return explain("the sandbox's self-test could not run: %s\nSee more with: %s", errText(err), mention("maestro doctor"))
+	}
+	if rep.OldImage {
+		return explain("the sandbox image %s was built by an older Maestro, which cannot run the sandbox's self-test.\n"+
+			"Build it again with: %s", in.cfg.Sandbox.Image, mention("maestro image"))
+	}
+	if failed := rep.Failed(); len(failed) > 0 {
+		var b strings.Builder
+		b.WriteString("the sandbox's self-test failed, so the service does not start:\n")
+		for _, c := range failed {
+			fmt.Fprintf(&b, "  - %s (network %s)", c.Name, c.Profile)
+			if c.Detail != "" {
+				fmt.Fprintf(&b, ": %s", c.Detail)
+			}
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "See more with: %s", mention("maestro doctor"))
+		return explain("%s", b.String())
+	}
+	for _, c := range rep.Warnings() {
+		log.Warn("sandbox self-test: "+c.Name, "network", c.Profile, "detail", c.Detail)
+	}
+	log.Info("sandbox self-test passed", "checks", len(rep.Checks), "warnings", len(rep.Warnings()))
 	return nil
 }

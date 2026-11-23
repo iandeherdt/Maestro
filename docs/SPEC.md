@@ -1337,8 +1337,41 @@ when the command is there, and `docker` otherwise.
 Limits of this backend, to be clear about what it is: on macOS the containers run in Docker
 Desktop's Linux VM, so the agent cannot build or test software that needs macOS itself (Xcode,
 Unity). On Linux, a user who may use Docker is equivalent to root on that machine; the service
-user must be treated as such. The self-test of Section 11.6 is not run at startup yet; the
-properties are covered by the package's tests, which run real containers.
+user must be treated as such. The self-test of Section 11.6 runs at every start and in `maestro
+doctor` (Section 11.9). The properties are also covered by the package's tests, which run real
+containers.
+
+### 11.9 Self-Test of the Container Backend
+
+The container backend implements Section 11.6 as follows. A scratch workspace volume is created,
+and the image's own binary runs `maestro probe` in a container started by the same code, with the
+same arguments, as a step: once with no network, once on the hooks network and once on the agent
+network (without the Claude volume). The container command is given an extra environment variable
+that the probe must not see. Each check is one JSON line on standard output. The volume is
+removed afterwards.
+
+Required, the service does not start if one fails:
+
+- the process runs as a user other than root; its effective and bounding capability sets are
+  empty; `NoNewPrivs` is 1, so a setuid binary cannot raise privileges;
+- the environment has neither the canary variable nor a name the sandbox refuses as a credential;
+- `/`, `/etc`, `/usr/bin` and `/usr/local/bin` cannot be written; the workspace can;
+- nothing is mounted on the mirror, hand-off, Claude or licence paths, and no Docker or Podman
+  socket is present;
+- no TCP connection to `1.1.1.1:443`, `8.8.8.8:53`, `169.254.169.254:80` or the default gateway
+  succeeds;
+- with no network, a public name does not resolve;
+- through the profile's proxy, a tunnel to `example.org`, which no allowlist has a reason to name,
+  is refused.
+
+Advisory, logged as warnings: on a proxied network, whether a public name resolves (the engine's
+DNS may forward, which is a narrow channel out); whether `pids.max` and the memory limit are set
+as configured (rootless Podman on cgroups v1 ignores them); and whether the agent's proxy grants
+a tunnel to `api.anthropic.com`.
+
+An image whose binary has no `probe` command was built by an older release; the service then
+refuses to start and asks for `maestro image`. Not covered yet: a process left running after a
+step ends, and a step that exceeds `TasksMax` or `MemoryMax`.
 
 ## 12. Issue Tracker Integration Contract
 
@@ -2022,12 +2055,16 @@ As upstream Section 13.7, loopback only:
 - `maestro check [path-to-WORKFLOW.md]`: validate a workflow file without starting anything.
 - `maestro status`: print the state from the loopback API. Text that an agent may have written
   is stripped of control characters before it reaches the terminal.
-- `maestro doctor [--repo]`: configuration, sandbox self-test, token scopes, branch protection,
-  repository readiness (Appendix C).
+- `maestro doctor`: configuration, the container engine (network backend, cgroups and their
+  controllers under rootless Podman), the image, the Claude login, the sandbox self-test
+  (Section 11.9), the App's token for the repository, the pull-request rule on the base branch,
+  and whether the service runs and lingers. Exit status 1 when anything that stops the service
+  fails. Not built yet: `--repo`, the readiness check of Appendix C.
 - `maestro pause [reason]`, `maestro resume`: through the loopback API. A pause is stored and
   survives a restart.
-- `maestro unblock <identifier>`: reset `failure_attempts` for an issue. (not built; moving the
-  issue back to an active state does the same)
+- `maestro unblock <identifier>`: through the loopback API, reset `failure_attempts` for an issue.
+  An issue in `blocked_state` that is routed to this worker is also moved back to the first active
+  state, with a status comment. The identifier may be given as its number alone (`12`, `#12`).
 - Exit status: `0` on normal shutdown, nonzero on startup failure or abnormal exit.
 
 ### 16.8 Guided Setup
@@ -2088,7 +2125,7 @@ Steps:
 6. Service: the users, directories and the systemd or launchd unit are installed after the
    wizard has shown what it will write. Outside the wizard for now: the operator runs
    `maestro image`, `maestro login` and then `maestro run` or `maestro service install`.
-7. Self-test: `maestro doctor`. (not built)
+7. Self-test: `maestro doctor`, run by hand after `maestro login`.
 
 Steps 1 to 5 ran on a Mac against github.com on 2026-11-21 and completed: GitHub accepted the
 loopback `redirect_url`, the code exchange needed no authentication, a repository-limited token

@@ -54,7 +54,13 @@ done
 // own verify.sh against an exported commit, with an Editor where Unity
 // Hub puts one, without macOS's sandbox (these tests run on Linux too).
 func TestTheUnityPacksScriptsRunWithTheEditorOfThisMachine(t *testing.T) {
-	tmp := t.TempDir()
+	// On a Mac the temporary folder is under /var, a link to /private/var,
+	// and the Editor is started in the resolved path. Compare resolved
+	// paths.
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	src, mirror, handoff := filepath.Join(tmp, "src"), filepath.Join(tmp, "mirror"), filepath.Join(tmp, "handoff")
 	home := filepath.Join(tmp, "home")
 	editor := filepath.Join(tmp, "Hub", "Editor", "6000.5.8f1", "Unity.app", "Contents", "MacOS", "Unity")

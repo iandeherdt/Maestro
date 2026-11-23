@@ -40,6 +40,8 @@ const usage = `usage:
   maestro status                         what the running service is doing
   maestro pause [reason]                 start no new tickets until resume
   maestro resume                         continue after a pause
+  maestro unblock ISSUE                  give a blocked ticket a fresh start
+  maestro doctor                         check this machine, the sandbox and GitHub
   maestro service install                run in the background, start at login
   maestro service uninstall              stop running in the background
   maestro conventions                    rule packs per kind of project, enforced by tools
@@ -52,7 +54,7 @@ const usage = `usage:
 Several projects on one machine: name one with --project NAME on any command.
 With several and no name, maestro asks which one.
 
-The usual order the first time: setup, image, login, run.`
+The usual order the first time: setup, image, login, doctor, run.`
 
 func run(args []string, stdout, stderr io.Writer) int {
 	chosen = selection{}
@@ -62,6 +64,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "proxy" {
 		return runProxy(args[1:], stderr)
+	}
+	// The self-test runs this inside the sandbox (SPEC 11.6).
+	if len(args) > 0 && args[0] == "probe" {
+		return dockerbox.Probe(args[1:], stdout)
 	}
 	if len(args) > 0 && (args[0] == "projects" || args[0] == "project") {
 		return runProjects(args[1:], os.Stdin, stdout, stderr)
@@ -79,8 +85,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runService(args[1:], stdout, stderr)
 		case "image":
 			return runImage(args[1:], stdout, stderr)
-		case "status", "pause", "resume":
+		case "status", "pause", "resume", "unblock":
 			return runControl(args[0], args[1:], stdout, stderr)
+		case "doctor":
+			return runDoctor(args[1:], stdout, stderr)
 		case "service":
 			return runBackground(args[1:], os.Stdin, stdout, stderr)
 		case "login":

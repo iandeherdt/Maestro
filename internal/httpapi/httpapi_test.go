@@ -23,6 +23,12 @@ type fakeState struct {
 
 func (f *fakeState) Pause(reason string) { f.calls = append(f.calls, "pause:"+reason) }
 func (f *fakeState) Resume()             { f.calls = append(f.calls, "resume") }
+func (f *fakeState) Unblock(id string) <-chan orchestrator.UnblockResult {
+	f.calls = append(f.calls, "unblock:"+id)
+	ch := make(chan orchestrator.UnblockResult, 1)
+	ch <- orchestrator.UnblockResult{Identifier: "GH-" + id, Found: true, Failures: 2, MovedTo: "Todo"}
+	return ch
+}
 
 func (f *fakeState) Latest() orchestrator.Snapshot { return f.snap }
 func (f *fakeState) RequestTick()                  { f.ticks++ }
@@ -135,7 +141,7 @@ func TestRefreshNeedsLocalHeader(t *testing.T) {
 
 func TestPauseAndResume(t *testing.T) {
 	st := state()
-	for _, path := range []string{"/api/v1/pause", "/api/v1/resume"} {
+	for _, path := range []string{"/api/v1/pause", "/api/v1/resume", "/api/v1/unblock"} {
 		if res, _ := do(t, st, "POST", path, nil); res.StatusCode != 403 {
 			t.Errorf("%s without the header: %d", path, res.StatusCode)
 		}
@@ -159,6 +165,34 @@ func TestPauseAndResume(t *testing.T) {
 	}
 	if got := st.calls[0]; !strings.HasPrefix(got, "pause:on holiday  [31mxxx") || len(got) > 210 {
 		t.Errorf("reason = %q", got)
+	}
+}
+
+func TestUnblock(t *testing.T) {
+	st := state()
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "http://127.0.0.1:8080/api/v1/unblock", strings.NewReader(body))
+		req.Header.Set(LocalHeader, "1")
+		rec := httptest.NewRecorder()
+		(&Server{state: st}).Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	for _, bad := range []string{`{}`, `{"identifier":"  "}`, `{"identifier":"a\u001bb"}`, `{"identifier":"` + strings.Repeat("1", 101) + `"}`} {
+		if rec := post(bad); rec.Code != 400 {
+			t.Errorf("%s: %d", bad, rec.Code)
+		}
+	}
+	if len(st.calls) != 0 {
+		t.Fatalf("refused requests had an effect: %v", st.calls)
+	}
+	rec := post(`{"identifier":" 12 "}`)
+	var got map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &got)
+	if rec.Code != 200 || got["issue_identifier"] != "GH-12" || got["moved_to"] != "Todo" || got["cleared_failures"].(float64) != 2 {
+		t.Errorf("%d %v", rec.Code, got)
+	}
+	if strings.Join(st.calls, ",") != "unblock:12" {
+		t.Errorf("calls = %v", st.calls)
 	}
 }
 
