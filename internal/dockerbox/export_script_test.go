@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 // The export script, run on this machine with its two fixed paths replaced,
 // so that it is tested where there is no container engine too.
 func runExport(t *testing.T, repo, handoff string) string {
 	t.Helper()
-	script := strings.ReplaceAll(strings.ReplaceAll(exportScript, "/workspace/repo", repo), "/handoff", handoff)
+	script := strings.ReplaceAll(strings.ReplaceAll(sandbox.ExportScript, "/workspace/repo", repo), "/handoff", handoff)
 	cmd := exec.Command("sh", "-c", script, "export", "sym[bot]", "sym@example.com")
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null")
 	out, err := cmd.CombinedOutput()

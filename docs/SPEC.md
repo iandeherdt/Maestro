@@ -1210,6 +1210,18 @@ The control zone cannot start processes as another user by itself. A small launc
   apply its timeouts and report progress.
 - The launcher is the only root-executed code in the system. It MUST stay small enough to audit in
   one sitting and MUST have no dependency beyond the standard library.
+- The Linux launcher is `maestro-launch <worker>`. Its configuration is
+  `/etc/maestro/launch-<worker>.json`: the sandbox user, the service user, the workspace root, the
+  hand-off root, the mirror, the agent's Claude state, the skills, agents and licence folders, the
+  hidden paths, one proxy socket per network profile, the commit identity and the unit limits. The
+  file and every folder above it MUST belong to root and be writable by root only; otherwise the
+  launcher refuses to start. Unknown fields are an error.
+- It refuses unless it runs as root and the caller (`SUDO_UID`) is the configured service user.
+- The request is the first line of standard input. The rest of standard input is the step's own.
+- A refused request exits with status 125 and one line on standard error.
+- `export` writes into an empty folder under the hand-off root that only the sandbox user can
+  write. The launcher takes the bundle only if it is a regular file, moves it to
+  `<handoff_root>/<key>.bundle` and gives it to the service user with mode 0600.
 
 ### 11.3 Linux Backend (`systemd`)
 
@@ -1234,21 +1246,38 @@ UMask=0077
 MemoryMax=<sandbox.memory_max> MemorySwapMax=0
 CPUQuota=<sandbox.cpu_quota>   TasksMax=<sandbox.tasks_max>
 RuntimeMaxSec=<step timeout>   KillMode=control-group      OOMPolicy=kill
-IPAddressDeny=any
-IPAddressAllow=<proxy address>          # only for steps with network access
+PrivateNetwork=yes             IPAddressDeny=any
+BindReadOnlyPaths=<proxy socket of the profile>:/run/maestro-proxy.sock   # only with network
 ```
+
+- No step has a network of its own: `PrivateNetwork=yes` leaves only a loopback interface inside
+  the unit. A step with a network profile reaches its proxy through that profile's unix socket,
+  bound into the unit. The command inside every unit is the launcher's `inside` helper. With a
+  socket, it serves it on `127.0.0.1:3128` inside the unit, sets nothing else, and runs the
+  step's command; `HTTPS_PROXY` points there. This replaces `IPAddressAllow=<proxy address>`, which
+  cannot limit ports and so would leave every other loopback service of the worker reachable, and
+  it does not depend on cgroup v2.
+- Paths inside a unit: the workspace is `/workspace` (the repository is `/workspace/repo`), the
+  mirror `/mirror`, the hand-off folder `/handoff`, the Claude state `/claude`
+  (`CLAUDE_CONFIG_DIR`), the Unity licence `/unity-licence`. `HOME` is `/tmp`. Nothing of the
+  caller's environment is inherited.
+- Container engine sockets and `/run/user` are always inaccessible.
+- A workspace is removed inside a unit as the sandbox user, so that a link planted in it can lead
+  nowhere outside; the launcher then removes only the empty folder.
 
 - `RestrictNamespaces=yes` is added unless `claude.inner_sandbox` is true.
 - The agent's Claude Code state directory is bound for `agent` steps only. `hook`, `verify`,
   `populate` and `export` steps do not see it, so repository scripts cannot read the login.
 - SELinux stays enforcing. The unit runs in a confined domain if a policy module is provided.
 - To verify on the chosen distribution: every property above is supported and effective, and
-  `IPAddressDeny` is enforced (requires cgroup v2).
+  systemd creates the bind destinations (`/workspace`, `/claude` and the others) under
+  `ProtectSystem=strict`.
 
 ### 11.4 Network Egress
 
-- A forward proxy runs on the worker as its own user, listening on loopback (or the VM's host-only
-  address). It accepts only `CONNECT` to port 443 for host names on its allowlist, resolves names
+- A forward proxy runs on the worker as its own user, listening on one unix socket per network
+  profile with the systemd backend (Section 11.3), or on loopback (or the VM's host-only
+  address) otherwise. It accepts only `CONNECT` to port 443 for host names on its allowlist, resolves names
   itself, refuses destinations that resolve to private, loopback, link-local or multicast
   addresses, and logs every request with the unit name.
 - Allowlists by network profile:
