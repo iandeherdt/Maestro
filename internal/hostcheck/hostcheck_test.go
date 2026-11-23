@@ -167,7 +167,8 @@ func TestEditorVersion(t *testing.T) {
 }
 
 func TestProfile(t *testing.T) {
-	text, err := Profile("/Users/i/Library/Caches/maestro/unity-checks/mac/GH-1", "/Users/i", []string{"/Users/i/Library/Application Support/symphony"})
+	text, err := Profile("/Users/i/Library/Caches/maestro/unity-checks/mac/GH-1", "/Users/i",
+		[]string{"/Users/i/Library/Application Support/symphony"}, []string{"/Users/i/Applications/Unity/Hub/Editor/6000.0.1f1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,28 +176,57 @@ func TestProfile(t *testing.T) {
 		"(deny network*)",
 		`(allow network* (remote ip "localhost:*"))`,
 		`(deny network-outbound (remote unix-socket (path-regex #"^/Users/i/\.docker/")))`,
+		"(deny lsopen)",
+		"(deny appleevent-send)",
 		"(deny file-write*)",
 		`(subpath "/Users/i/Library/Caches/maestro/unity-checks/mac/GH-1")`,
+		`(subpath "/Users/i/Library/Logs/Unity")`,
+		`(regex #"^/Users/i/Library/Caches/[^/]*[Uu]nity3d")`,
+		`(deny file-read* (subpath "/Users/i"))`,
+		`(allow file-read* (subpath "/Users/i/Library"))`,
 		`(subpath "/Users/i/Library/Application Support/symphony")`,
-		`(subpath "/Users/i/.ssh")`,
+		`(subpath "/Users/i/Applications/Unity/Hub/Editor/6000.0.1f1")`,
 		`(allow file-read* (subpath "/Users/i/Library/Caches/maestro/unity-checks/mac/GH-1"))`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the profile lacks %s:\n%s", want, text)
 		}
 	}
-	// The reads of the check's folder are allowed after the denials, so
-	// they win.
-	if strings.LastIndex(text, "(allow file-read*") < strings.LastIndex(text, "(deny file-read*") {
-		t.Error("the check's folder is not readable")
+	// The last rule that matches decides. So the order is: the home folder
+	// is closed, its Library opened, the private parts of the Library
+	// closed, Unity's opened, Maestro's keys closed, the check's folder
+	// opened.
+	order := []string{
+		`(deny file-read* (subpath "/Users/i"))`,
+		`(allow file-read* (subpath "/Users/i/Library"))`,
+		`    (subpath "/Users/i/Library/Application Support")`,
+		`    (subpath "/Users/i/Library/Application Support/Unity")`,
+		`    (subpath "/Users/i/Library/Application Support/symphony")`,
+		`(allow file-read* (subpath "/Users/i/Library/Caches/maestro/unity-checks/mac/GH-1"))`,
+	}
+	rest := text
+	for _, rule := range order {
+		i := strings.Index(rest, rule+"\n")
+		if i < 0 {
+			t.Fatalf("%s is missing or out of order:\n%s", rule, text)
+		}
+		rest = rest[i+len(rule):]
+	}
+	// Writes: not the whole of the caches, the logs or Unity Hub's folder.
+	writes := text[strings.Index(text, "(allow file-write*"):]
+	writes = writes[:strings.Index(writes, "\n)")]
+	for _, not := range []string{`(subpath "/Users/i/Library/Caches")`, `(subpath "/Users/i/Library/Logs")`, "UnityHub"} {
+		if strings.Contains(writes, not) {
+			t.Errorf("the check can write to %s:\n%s", not, writes)
+		}
 	}
 	if strings.Count(text, "(") != strings.Count(text, ")") {
 		t.Error("unbalanced parentheses")
 	}
-	if _, err := Profile("/a\"b", "/Users/i", nil); err == nil {
+	if _, err := Profile("/a\"b", "/Users/i", nil, nil); err == nil {
 		t.Error("a quote was accepted")
 	}
-	if _, err := Profile("rel", "/Users/i", nil); err == nil {
+	if _, err := Profile("rel", "/Users/i", nil, nil); err == nil {
 		t.Error("a relative path was accepted")
 	}
 }

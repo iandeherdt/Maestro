@@ -630,8 +630,11 @@ The service then checks out exactly what it would push into a folder of its own
 (`~/Library/Caches/maestro/unity-checks/`, which keeps Unity's Library between checks) and runs
 `conventions/unity/verify.sh` there inside macOS's sandbox: no network but the loopback, where a
 proxy lets through only Unity's hosts and the hooks' allowlist; no writes outside that folder, the
-temporary folders and Unity's own; no reads of Maestro's setup and state. That fence is weaker
-than the container, because the code the agent wrote runs as you, so use it for your own projects.
+temporary folders and Unity's own; no reads of your home folder outside Unity's part of its
+Library, so not your documents, your other projects, your keys or Maestro's setup and state; and
+no opening or steering of your other apps. That fence is weaker than the container, because the
+code the agent wrote runs as you and whatever the fence does not name is allowed, so use it for
+your own projects.
 
 What it does not do: play the game, judge how it feels, or run anything that needs a screen or a
 GPU (the sandbox has neither; Blender renders on the CPU). Art drawn by hand stays yours: commit
