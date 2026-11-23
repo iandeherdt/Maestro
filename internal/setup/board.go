@@ -49,16 +49,24 @@ func validAuthor(s string) error {
 	return nil
 }
 
-// Tickets sets up where a ticket is approved: a board for a repository in
-// an organization, labels for one on a personal account.
+// Tickets sets up where a ticket is approved: a Linear team, a board for a
+// repository in an organization, or labels for one on a personal account.
 type Tickets struct {
 	GitHub GitHub
 	GOOS   string
+	Linear LinearBoard
 }
 
 func (*Tickets) Title() string { return "Set up where tickets are approved" }
 
 func (t *Tickets) step(st *State) Step {
+	if st.UsesLinear() {
+		l := t.Linear
+		if l.GOOS == "" {
+			l.GOOS = t.GOOS
+		}
+		return &l
+	}
 	if st.OwnerType == kindOrg {
 		return &Board{GitHub: t.GitHub, GOOS: t.GOOS}
 	}
@@ -70,6 +78,24 @@ func (t *Tickets) Check(ctx context.Context, st *State) (Status, error) {
 }
 
 func (t *Tickets) Run(ctx context.Context, ui *UI, st *State) error {
+	if st.Tracker == "" && st.InstallationID != "" {
+		// Asked once. The code stays on GitHub either way.
+		here := "On GitHub, with labels on the issues of " + st.Repo
+		if st.OwnerType == kindOrg {
+			here = "On GitHub, on a board of the organization"
+		}
+		i, err := ui.Choose("Where do you keep the tickets?", []string{here, "In Linear"})
+		if err != nil {
+			return err
+		}
+		st.Tracker = TrackerGitHub
+		if i == 1 {
+			st.Tracker = TrackerLinear
+		}
+		if err := st.Save(); err != nil {
+			return err
+		}
+	}
 	return t.step(st).Run(ctx, ui, st)
 }
 

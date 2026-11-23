@@ -264,12 +264,30 @@ func (a *Adapter) Key(ctx context.Context) (string, error) { return a.c.key(ctx)
 
 // Who asks Linear whom key acts as, before anything is configured.
 func Who(ctx context.Context, endpoint, key string) (id, email string, err error) {
+	c, err := keyClient(endpoint, key)
+	if err != nil {
+		return "", "", err
+	}
+	a := &Adapter{c: c}
+	return a.Me(ctx)
+}
+
+// Query runs one query or mutation with key, for setup, which works on a
+// team before any settings exist. The data is decoded into out.
+func Query(ctx context.Context, endpoint, key, query string, vars map[string]any, out any) error {
+	c, err := keyClient(endpoint, key)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, query, vars, out)
+}
+
+func keyClient(endpoint, key string) (*client, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && isLoopback(u.Hostname()))) {
-		return "", "", cfgErr("the Linear endpoint %q is not usable", endpoint)
+		return nil, cfgErr("the Linear endpoint %q is not usable", endpoint)
 	}
-	a := &Adapter{c: newClient(u, &http.Client{}, func(context.Context) (string, error) { return key, nil })}
-	return a.Me(ctx)
+	return newClient(u, &http.Client{}, func(context.Context) (string, error) { return key, nil }), nil
 }
 
 // Me returns the Linear user the API key acts as.

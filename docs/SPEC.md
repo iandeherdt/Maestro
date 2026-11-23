@@ -1629,7 +1629,7 @@ Account requirements, checked by `doctor`: the key works and acts as a user who 
 `allowed_authors` (a warning otherwise), and the team has no members outside `allowed_authors`
 (a warning listing them).
 
-Not yet on Linear: the planning stage and designs (Section 22), and `maestro setup`.
+Not yet on Linear: the planning stage and designs (Section 22).
 
 ## 13. Prompt Construction and Context Assembly
 
@@ -2126,7 +2126,17 @@ Steps:
    The wizard asks GitHub whether the repository's owner is an organization. If it is, the App is
    created in that organization and also requests the organization permission Projects read and
    write, and step 4 sets up a board. Otherwise step 4 creates labels.
-4. Tickets. For an organization, a board: the operator names the worker and gives the GitHub
+4. Tickets. The wizard first asks whether the tickets are kept on GitHub or in Linear, once;
+   `maestro setup --board github|linear` changes the answer later, and keeps a settings file
+   written for the other one under another name. For Linear: the operator makes an API key
+   (best as a separate Linear user for the service), which is checked against Linear and kept in
+   `linear.key` (mode 0600). The operator names the worker, picks the team from those the key
+   can see, and gives the e-mail address whose moves approve a ticket; it must belong to a team
+   member, and using the key's own user needs an explicit yes. Adding workflow states takes a
+   team admin, so the wizard lists the states the team lacks (Todo, In Progress, In Review or
+   Human Review, Rework, Blocked, Done) and waits until the operator has added them. It creates
+   the label `run:<worker>` in the team, or, when the key may not, asks the operator to.
+   For a GitHub organization, a board: the operator names the worker and gives the GitHub
    login whose issues are worked on, which becomes `allowed_authors`. The wizard lists the
    organization's open Projects and uses the one the operator picks, or creates one named
    Maestro linked to the repository. It then makes sure the Status field has an option for
@@ -2137,7 +2147,8 @@ Steps:
    with Projects read and write and Contents and Issues read. For a personal account, labels:
    the operator names the worker, and the state labels and the routing label that are
    missing are listed and created with a token limited to Issues on the one repository.
-5. Workflow file: written from the earlier answers and the verify command, shown in full before
+5. Workflow file: written from the earlier answers (for Linear: the team key, the approver's
+   e-mail, and the team's own names for the hand-off and canceled states) and the verify command, shown in full before
    it is written, and validated with the code the service uses at startup. An existing file is
    validated and kept, never overwritten.
    The wizard asks for the test command in plain words. An empty answer writes `true` and says
