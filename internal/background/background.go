@@ -257,3 +257,47 @@ func (u *Unit) Uninstall(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Restart restarts every installed service of this user whose file runs
+// binary, so that a replaced binary takes effect. It returns the labels it
+// restarted. run is for tests; nil runs the command.
+func Restart(ctx context.Context, goos, home string, uid int, binary string,
+	run func(ctx context.Context, name string, args ...string) ([]byte, error)) ([]string, error) {
+	u := &Unit{GOOS: goos, Home: home, UID: uid, Run: run}
+	var pattern string
+	switch goos {
+	case "darwin":
+		pattern = filepath.Join(home, "Library", "LaunchAgents", "com.maestro.*.plist")
+	case "linux":
+		pattern = filepath.Join(home, ".config", "systemd", "user", "maestro-*.service")
+	default:
+		return nil, nil
+	}
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+	var done []string
+	for _, f := range files {
+		text, err := os.ReadFile(f)
+		want := quote(binary)
+		if goos == "darwin" {
+			want = esc(binary)
+		}
+		if err != nil || !strings.Contains(string(text), want) {
+			continue
+		}
+		label := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(f), ".plist"), ".service")
+		var argv []string
+		if goos == "darwin" {
+			argv = []string{"launchctl", "kickstart", "-k", u.domain() + "/" + label}
+		} else {
+			argv = []string{"systemctl", "--user", "restart", label + ".service"}
+		}
+		if out, err := u.run(ctx, argv[0], argv[1:]...); err != nil {
+			return done, fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, strings.TrimSpace(string(out)))
+		}
+		done = append(done, label)
+	}
+	return done, nil
+}

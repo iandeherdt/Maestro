@@ -43,6 +43,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/reload"
 	"github.com/iandeherdt/Maestro/internal/setup"
 	"github.com/iandeherdt/Maestro/internal/skills"
+	"github.com/iandeherdt/Maestro/internal/trace"
 	"github.com/iandeherdt/Maestro/internal/tracker"
 	"github.com/iandeherdt/Maestro/internal/tracker/github"
 	"github.com/iandeherdt/Maestro/internal/worker"
@@ -728,7 +729,8 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		Tracker:    trk,
 		Workspaces: &synced{Manager: spaces, sync: syncMirror, log: log, host: host},
 		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
-			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} }},
+			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} },
+			Trace: turnTraces(cur.config, trace.New(version, log))},
 		Gates: gates,
 		Notes: pub,
 	}
@@ -744,7 +746,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: planner, PlanningState: cfg.Tracker.PlanningState,
 			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0],
 			DesignState: cfg.Tracker.DesignState, DesignFolder: cfg.Design.Folder, Designs: pub,
-			TerminalStates: cfg.Tracker.TerminalStates}
+			TerminalStates: cfg.Tracker.TerminalStates, Self: cfg.Worker.Name}
 		wk.Planning, plans = desk, desk
 		if cfg.Tracker.DesignState != "" {
 			wk.Designing, designs = desk, desk
@@ -827,6 +829,22 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
 	return nil
+}
+
+// turnTraces sends each agent turn to the collector the settings name,
+// read again for every turn so a reload takes effect.
+func turnTraces(cfg func() *config.Config, exp *trace.Exporter) func(worker.Turn) claude.TurnTrace {
+	return func(t worker.Turn) claude.TurnTrace {
+		c := cfg()
+		if c.Traces.URL == "" {
+			return nil // not a typed nil: the runner checks for nil
+		}
+		model := t.Model
+		if model == "" {
+			model = c.Claude.Model
+		}
+		return exp.Turn(trace.Endpoint{URL: c.Traces.URL, Project: c.Traces.Project}, t.WorkspaceKey, t.Prompt, model)
+	}
 }
 
 // startupSelfTest runs the sandbox's self-test before any work (SPEC 11.6).

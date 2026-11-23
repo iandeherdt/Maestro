@@ -288,6 +288,9 @@ func TestInvalid(t *testing.T) {
 		{"missing worker name", with("  name: linux\n", "  require_routing_label: true\n", ""), "worker.name"},
 		{"bad worker name", with("name: linux", "name: 'Linux Box'", ""), "worker.name"},
 		{"port out of range", minimal + "server:\n  port: 70000\n", "server.port"},
+		{"traces over http to another machine", minimal + "traces:\n  url: http://10.0.0.5:6006/v1/traces\n", "traces.url"},
+		{"traces url with a password", minimal + "traces:\n  url: https://a:b@x.example/v1/traces\n", "traces.url"},
+		{"traces url not http", minimal + "traces:\n  url: ftp://127.0.0.1/v1/traces\n", "traces.url"},
 		{"section not a mapping", minimal + "agent: 5\n", "agent"},
 	}
 	for _, tc := range tests {
@@ -615,5 +618,20 @@ func TestUnityEditorMovesUnitysStepsOutOfTheSandbox(t *testing.T) {
 	}
 	if _, err := build(t, with("", "", "conventions: [unity]\nunity:\n  editr: x\n"), nil); err == nil {
 		t.Error("a misspelt key was accepted")
+	}
+}
+
+func TestTraces(t *testing.T) {
+	c := mustBuild(t, minimal)
+	if c.Traces.URL != "" {
+		t.Errorf("traces are on without a url: %+v", c.Traces)
+	}
+	c = mustBuild(t, minimal+"traces:\n  url: http://127.0.0.1:6006/v1/traces\n")
+	if c.Traces.URL != "http://127.0.0.1:6006/v1/traces" || c.Traces.Project != c.Worker.Name {
+		t.Errorf("traces %+v, worker %q", c.Traces, c.Worker.Name)
+	}
+	c = mustBuild(t, minimal+"traces:\n  url: https://otel.example/v1/traces\n  project: games\n")
+	if c.Traces.Project != "games" {
+		t.Errorf("project %q", c.Traces.Project)
 	}
 }

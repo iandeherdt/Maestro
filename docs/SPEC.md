@@ -500,6 +500,22 @@ See Section 24. Absent or empty: no screenshots.
 - `width`, `height` (integers): the browser window for `pages`. Default `1280` by `800`, at most
   `4000`.
 
+#### 5.3.15 `traces` (object)
+
+Absent or without `url`: no traces are sent.
+
+- `url` (string): the OTLP/HTTP traces endpoint of a collector, such as Arize Phoenix's
+  `http://127.0.0.1:6006/v1/traces`. MUST use `https`, or `http` to a loopback host
+  (`localhost`, `127.0.0.1`, `::1`); no user information, query or fragment.
+- `project` (string): default `worker.name`. Sent as the resource attribute
+  `openinference.project.name`.
+
+The service, not the sandbox, sends each agent turn as one trace in the OpenInference
+conventions, built from the same stream it reads for the turn: an AGENT span for the turn (the
+issue identifier as `session.id`), an LLM span for each text or thinking block, and a TOOL span for
+each tool call with its input and result. Each value is cut at 32 KB. Sending MUST NOT block a
+turn: spans go to a bounded queue, and what does not fit or fails is dropped and logged once.
+
 ### 5.4 Prompt Template Contract
 
 The Markdown body is the per-issue prompt template.

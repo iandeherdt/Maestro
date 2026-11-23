@@ -107,7 +107,7 @@ func Parse(result string, workers []string) (*Plan, error) {
 		total += utf8.RuneCountInString(t.Title) + utf8.RuneCountInString(t.Body)
 		worker := ""
 		for _, w := range workers {
-			if strings.EqualFold(w, t.Worker) || t.Worker == "" && len(workers) == 1 {
+			if strings.EqualFold(w, t.Worker) || len(workers) == 1 {
 				worker = w
 			}
 		}

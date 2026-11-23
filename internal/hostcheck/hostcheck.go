@@ -445,6 +445,19 @@ func Profile(dir, home string, secret, read []string) (string, error) {
 	}
 	w(";; The check's own folder, even when it lies below one of those.")
 	w("(allow file-read* (subpath %s))", q(real(dir)))
+	// A path is looked up from the root, so the folders above the check's
+	// own have to be passed through. Without this every full path in it is
+	// refused: the shell's `cd x/..` says "Not a directory", and Unity cannot
+	// open the project by its path.
+	w(";; The folders above it can be passed through, not listed or read.")
+	w("(allow file-read-metadata")
+	for d := filepath.Dir(real(dir)); ; d = filepath.Dir(d) {
+		w("    (literal %s)", q(d))
+		if d == filepath.Dir(d) {
+			break
+		}
+	}
+	w(")")
 	return b.String(), nil
 }
 

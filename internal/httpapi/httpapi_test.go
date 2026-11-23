@@ -41,7 +41,9 @@ func state() *fakeState {
 		GeneratedAt: at, Worker: "linux", Today: budget.Day{Runs: 3, TotalTokens: 1500},
 		Running: []orchestrator.RunningView{{IssueID: "id-1", Identifier: "GH-1", State: "In Progress",
 			SessionID: "s-1", Phase: orchestrator.StreamingTurn, TurnCount: 2, StartedAt: at,
-			LastEvent: "assistant", LastMessage: evil, Usage: orchestrator.Usage{Input: 10, Output: 5}}},
+			LastEvent: "assistant", LastMessage: evil, Usage: orchestrator.Usage{Input: 10, Output: 5},
+			Feed: []orchestrator.FeedItem{{At: at, Kind: "notification", Message: "Reading the enemy scripts first."},
+				{At: at.Add(time.Second), Kind: "tool_call", Message: "Bash: " + evil}}}},
 		Retrying: []orchestrator.RetryEntry{{IssueID: "id-2", Identifier: "GH-2", Attempt: 2,
 			Kind: orchestrator.KindFailure, DueAt: at.Add(time.Minute), Error: evil}},
 		AwaitingChecks: []orchestrator.PublishRecord{{IssueID: "id-3", Identifier: "GH-3",
@@ -266,5 +268,16 @@ func TestListenerBindsLoopbackOnly(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 200 {
 		t.Fatalf("status %d", res.StatusCode)
+	}
+}
+
+func TestPageShowsTheFeedNewestFirst(t *testing.T) {
+	_, body := do(t, state(), "GET", "/", nil)
+	said, ran := strings.Index(body, "Reading the enemy scripts first."), strings.Index(body, "Bash: &lt;script&gt;")
+	if said < 0 || ran < 0 || ran > said {
+		t.Fatalf("feed missing or not newest first:\n%s", body)
+	}
+	if !strings.Contains(body, `http-equiv="refresh"`) {
+		t.Error("the page does not refresh itself")
 	}
 }

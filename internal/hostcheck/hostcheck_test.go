@@ -209,6 +209,16 @@ func TestProfile(t *testing.T) {
 		`    (subpath "/Users/i/Library/Application Support/Unity")`,
 		`    (subpath "/Users/i/Library/Application Support/symphony")`,
 		`(allow file-read* (subpath "/Users/i/Library/Caches/maestro/unity-checks/mac/GH-1"))`,
+		// The folders above the check's own, last, so no deny overrides them.
+		`(allow file-read-metadata`,
+		`    (literal "/Users/i/Library/Caches/maestro/unity-checks/mac")`,
+		`    (literal "/Users/i/Library/Caches/maestro/unity-checks")`,
+		`    (literal "/Users/i/Library/Caches/maestro")`,
+		`    (literal "/Users/i/Library/Caches")`,
+		`    (literal "/Users/i/Library")`,
+		`    (literal "/Users/i")`,
+		`    (literal "/Users")`,
+		`    (literal "/")`,
 	}
 	rest := text
 	for _, rule := range order {
