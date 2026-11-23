@@ -2141,7 +2141,8 @@ Steps:
    can see, and gives the e-mail address whose moves approve a ticket; it must belong to a team
    member, and using the key's own user needs an explicit yes. Adding workflow states takes a
    team admin, so the wizard lists the states the team lacks (Todo, In Progress, In Review or
-   Human Review, Rework, Blocked, Done, Idea, Planned, Design) and waits until the operator has added them. It creates
+   Human Review, Rework, Blocked, Done, Idea, Planned, Design) and offers to create them; when
+   Linear refuses that to the key, it waits until the operator has added them. It creates
    the label `run:<worker>` in the team, or, when the key may not, asks the operator to.
    For a GitHub organization, a board: the operator names the worker and gives the GitHub
    login whose issues are worked on, which becomes `allowed_authors`. The wizard lists the

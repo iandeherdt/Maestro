@@ -465,12 +465,36 @@ func (l *LinearBoard) chooseAuthor(ui *UI, st *State, team *linearTeam, me strin
 // state takes a team admin, which the service's key is not, so the
 // operator adds them.
 func (l *LinearBoard) states(ctx context.Context, ui *UI, key string, team *linearTeam) (*linearTeam, error) {
+	tried := false
 	for {
 		miss := team.missing()
 		if len(miss) == 0 {
 			return team, nil
 		}
-		ui.Say("  The team %s needs these states, which it does not have yet:", team.Key)
+		if !tried {
+			// Adding a state takes a team admin. The key may be one; if
+			// it is not, the operator adds them by hand.
+			tried = true
+			ui.Say("  The service needs these states in the team %s, which it does not have yet:", team.Key)
+			for _, m := range miss {
+				ui.Show("    %-14s %s", m, stateUse[m])
+			}
+			ok, err := ui.Confirm("  Create them?")
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, ErrAborted
+			}
+			if err := l.createStates(ctx, key, team, miss); err != nil {
+				ui.Say("  Linear did not let the key create them (%s).", oneLine(err.Error()))
+			}
+			if team, _, err = l.team(ctx, key, team.Key); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		ui.Say("  The team %s still needs these states, which it does not have yet:", team.Key)
 		for _, m := range miss {
 			for _, s := range linearStates {
 				if s.name == m || s.name == "" && m == team.handoff() {
@@ -487,6 +511,46 @@ func (l *LinearBoard) states(ctx context.Context, ui *UI, key string, team *line
 			return nil, err
 		}
 	}
+}
+
+// stateUse says what each state is for, as setup shows it.
+var stateUse = map[string]string{
+	"Todo":         "approved; the service may start",
+	"In Progress":  "an agent is working on it",
+	"In Review":    "a pull request waits for you",
+	"Human Review": "a pull request waits for you",
+	"Rework":       "you asked for changes; the agent continues",
+	"Blocked":      "the service gave up; see the status comment",
+	"Done":         "finished",
+	"Idea":         "something bigger: an agent asks questions and proposes a plan",
+	"Planned":      "you approved the plan; its tasks are created",
+	"Design":       "an agent makes a design before anything is built",
+}
+
+var stateColor = map[string]string{
+	"Unstarted": "#e2e2e2", "Started": "#f2c94c", "Completed": "#5e6ad2", "Backlog": "#bec2c8",
+}
+
+const linearStateCreate = `mutation($input: WorkflowStateCreateInput!) { workflowStateCreate(input: $input) { success } }`
+
+// createStates adds the missing states to the team, in their groups.
+func (l *LinearBoard) createStates(ctx context.Context, key string, team *linearTeam, miss []string) error {
+	for _, m := range miss {
+		kind := "Started"
+		for _, s := range linearStates {
+			if s.name == m {
+				kind = s.kind
+			}
+		}
+		err := linear.Query(ctx, l.endpoint(), key, linearStateCreate, map[string]any{"input": map[string]any{
+			"teamId": team.ID, "name": m, "type": strings.ToLower(kind), "color": stateColor[kind],
+			"description": "Maestro: " + stateUse[m] + ".",
+		}}, nil)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const linearLabelCreate = `mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`

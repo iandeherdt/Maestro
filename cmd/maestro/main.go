@@ -355,6 +355,16 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		{mention("maestro login"), "signs Claude Code in inside that container (once)"},
 		{mention("maestro run"), "starts the service; it then picks up " + pickup},
 	})
+	if st.UsesLinear() {
+		ui.Say("")
+		ui.Say("Working with Linear, once the service runs:")
+		ui.Commands([][2]string{
+			{"a ticket", "add the label run:" + st.Worker + " and move it to Todo; the pull request opens on GitHub"},
+			{"something bigger", "add the label and move it to Idea; answer the questions, then move it to Planned"},
+			{"your review", "comment on the pull request; the ticket goes to Rework and the agent continues"},
+		})
+		ui.Say("Only your own moves count as approval (%s). `%s` checks the team at any time.", st.LinearAuthor, mention("maestro doctor"))
+	}
 	ui.Say("Your settings: %s", st.WorkflowFile)
 	ui.Say("To check them at any time: `%s`", mention("maestro check"))
 	return 0
