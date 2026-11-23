@@ -212,6 +212,11 @@ func TestProfile(t *testing.T) {
 		}
 		rest = rest[i+len(rule):]
 	}
+	// The Package Manager's cache is read and written: without it Unity
+	// loads no packages and the check fails before the project is imported.
+	if n := strings.Count(text, `    (subpath "/Users/i/Library/Caches/Unity")`+"\n"); n != 2 {
+		t.Errorf("Unity's package cache is opened %d times, want for writes and for reads:\n%s", n, text)
+	}
 	// Writes: not the whole of the caches, the logs or Unity Hub's folder.
 	writes := text[strings.Index(text, "(allow file-write*"):]
 	writes = writes[:strings.Index(writes, "\n)")]
