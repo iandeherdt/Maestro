@@ -893,7 +893,7 @@ and a task that depends on another is `blocked by` it.
 
 ## Project status
 
-Last updated 2026-11-23, at release 0.5.17.
+Last updated 2026-11-23, at release 0.5.18.
 
 | Part | State |
 |---|---|
@@ -931,11 +931,11 @@ Last updated 2026-11-23, at release 0.5.17.
 | Pack `godot` | Written. Run under the sandbox's settings against a sample project with Godot 4.7.2, gdtoolkit 4.5.0 and GUT 9.7.1: a script that does not parse, unformatted code, a lint error, a passing and a failing test. The image line has not been built with `maestro image`. |
 | Running in the background (`maestro service install`) | Done on Linux: a systemd user unit runs the service on a RHEL 8.10 server with rootless Podman, and it picks up game cards for the worker `linux`. The launchd agent on a Mac is written and tested as far as the file and the commands go, not yet run on a real Mac. |
 | Closing ways past the gates (release 0.5.17) | Done: a base commit that moved after the run, changes hidden from git, and a secret in an earlier commit of the branch are all refused (#78). The mirror and the hand-off folders are closed to other users of the machine (#79). Setup says when the GitHub App could push to an unprotected base branch, and how to close that (#80). On a Mac, Unity's checks read only Unity's part of the home folder and write only Unity's folders (#81, #82). |
-| `maestro doctor`, start-up self-test | Written. The self-test runs in real containers in the tests, on Docker, and the service's end-to-end test starts through it. Not yet run on Podman on RHEL, or on a Mac. The SPEC 11.6 checks for leftover processes after a step and for exceeding the limits are not part of it yet. |
+| `maestro doctor`, start-up self-test (release 0.5.18) | Done. Run on a new Mac mini with release 0.5.18, together with `maestro setup`. The self-test also runs in real containers in the tests, on Docker, and the service's end-to-end test starts through it. Not yet run on Podman on RHEL. The SPEC 11.6 checks for leftover processes after a step and for exceeding the limits are not part of it yet. |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
-| Native Linux sandbox (systemd) | Started: the root launcher `maestro-launch` is written and tested with a simulated systemd. The service does not use it yet. |
+| Native Linux sandbox (systemd) | Started. In release 0.5.18: the root launcher `maestro-launch`, and the service's side that sends it each step through one sudo rule, both tested with a simulated systemd and sudo. The service cannot choose this backend yet; that, its setup and a real run are the next steps ([plan](docs/PLAN.md)). |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
-| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, with `maestro setup` for Linear and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
+| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
 | Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
 
 ## Documentation
