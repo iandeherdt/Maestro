@@ -3,9 +3,10 @@
 This is the roadmap. The design itself is specified in [SPEC.md](SPEC.md), which is normative and
 written at the level of detail of OpenAI's Symphony specification, from which it is derived.
 
-Status: in progress. Phase 1 is done, phases 2 and 5 are partly done, and nothing has run on the
-owner's machines yet. The README lists what exists. This repository is public, so it never
-contains secrets, host names or tokens.
+Status: in use. The service runs in the background on the owner's Linux server (RHEL 8.10,
+rootless Podman) and picks up cards from the board. The README lists what exists and how far each
+part has been tried. This repository is public, so it never contains secrets, host names or
+tokens.
 
 ## What is being built
 
@@ -63,12 +64,13 @@ the result itself, and opens a pull request for the owner to review and merge.
 
 Each phase lands as one or more pull requests and is done when the listed tests pass.
 
-Progress on 2026-11-21: phase 0 is done for everything that can be checked without a machine.
-Phase 1 is done. Phase 2 is done for label mode, and Project mode is parked (decision 7). Phase 5
-has the diff policy, the secret scan, the import step, the App tokens, the push and the pull
-request, the checks gate and the hand-off watch; the restart probe is open. Phase 6 has five of the seven steps of the
-guided setup. Phase 4 has the Claude Code runner, written from the documentation and not yet run
-against the real CLI. The sandbox launcher and everything on the Mac need the owner's machines.
+Progress on 2026-11-23 (release 0.5.17): phases 0, 1, 2, 4 and 5 are done. Phase 2 has both the
+labels and the board of an organization (decision 7). Phase 3 is done with the container sandbox
+(Docker, or rootless Podman on RHEL) instead of the native systemd backend, which is still open.
+Phase 6 has five of the seven steps of the guided setup and the background service, which runs on
+the owner's RHEL 8.10 server; `doctor` is open. Phase 7 has started on that server with a game
+project. Windows through WSL 2 is written (0.5.16) and not yet run on a real Windows PC. The
+security fixes of 0.5.17 closed three ways past the gates and tightened folder permissions.
 
 | Phase | Scope (SPEC sections) | Done when |
 |---|---|---|
@@ -82,6 +84,20 @@ against the real CLI. The sandbox launcher and everything on the Mac need the ow
 | 7. Linux pilot | Appendix C, 20.9 | The adversarial tickets end harmlessly. Two weeks at concurrency 1. |
 | 8. Linear adapter | 12.6 | Test matrix 20.3 for Linear |
 | 9. Mac worker | Appendix B | Test matrix 20.6 and 20.9 on the Mac with an Xcode and a Unity sample |
+| 10. Other code hosts | GitLab and Gitea as the repository host, next to GitHub | A ticket reaches a merged merge request on each, with the same gates |
+
+## Next
+
+In this order, one pull request each:
+
+1. `maestro unblock`, `maestro doctor` and the start-up self-test (SPEC 11.6, 16.7). `doctor`
+   checks what went wrong during the first setups: Podman on CNI instead of netavark, short image
+   names, cgroups v1, a sandbox image missing before `maestro login`.
+2. Native Linux sandbox with systemd (phase 3, SPEC 11). A plan comes first.
+3. Native Mac sandbox for work that needs macOS itself, Xcode and Unity (phase 9, Appendix B).
+   A plan comes first.
+4. Linear as a board (phase 8, SPEC 12.6). A plan comes first.
+5. Code hosts other than GitHub (phase 10). A plan comes first.
 
 ## Phase 0 status
 

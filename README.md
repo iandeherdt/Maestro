@@ -812,7 +812,7 @@ changed ones:
 
 ## Project status
 
-Last updated 2026-11-22.
+Last updated 2026-11-23, at release 0.5.17.
 
 | Part | State |
 |---|---|
@@ -829,13 +829,13 @@ Last updated 2026-11-22.
 | Import of the agent's commits, push, pull request | Done, tested against real Git and a fake GitHub API |
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
-| Windows, through WSL 2 | Written: setup and the service recognise WSL, check systemd and folders on Windows drives, and create the scheduled task that keeps WSL running. Tested against a simulated WSL, not yet run on Windows. |
+| Windows, through WSL 2 | Written, in release 0.5.16: setup and the service recognise WSL, check systemd and folders on Windows drives, and create the scheduled task that keeps WSL running. Tested against a simulated WSL, not yet run on a real Windows PC. |
 | Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. Also run once on an organization, with the board. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Comments on a pull request send the card back to work | Written, tested against a fake GitHub API. Not yet run against github.com. |
 | Screenshots on the pull request | Written. Taking the pictures is tested here with a real Chromium, storing them against a stand-in for GitHub. Not yet run through the service on a real project: the image with the browser has not been built with `maestro image`, and the pictures have not been seen in a pull request on github.com. |
-| Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Not yet run on RHEL with SELinux. |
+| Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Runs on a Linux server with RHEL 8.10 and rootless Podman, which needs the netavark network backend and never pulls the sandbox image (#76). |
 | `maestro image`, `maestro login`, `maestro run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
 | `maestro status`, `pause`, `resume` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
@@ -848,12 +848,14 @@ Last updated 2026-11-22.
 | Unity (pack `unity`, `maestro unity`) | Written. The `.meta`, version and quick compile checks were run against a sample project in the Unity 6.3 image, and shown to fail on a violation. The Editor was shown to start under the sandbox's settings and stop for want of a licence. The licence is shown to reach the hooks and verify read-only and not the agent. Not yet run with a real licence, against Unity's servers, or in an image built with `maestro image`. |
 | Packs `blender` and `klad`, binary folders (`policy.binary_paths`) | Written. Both packs were run under the sandbox's settings (no network, its user, no capabilities) against sample projects: Blender 5.0.1 with a good generator, one that raises, one that writes nothing, and a triangle limit; klad v0.4.0 (built from source here) with a missing, a current and an out-of-date picture. The image lines that download Blender and build klad have not been built with `maestro image`. |
 | Pack `godot` | Written. Run under the sandbox's settings against a sample project with Godot 4.7.2, gdtoolkit 4.5.0 and GUT 9.7.1: a script that does not parse, unformatted code, a lint error, a passing and a failing test. The image line has not been built with `maestro image`. |
-| Running in the background (`maestro service install`) | Written and tested as far as the file and the commands go. Not yet run on a real Mac or a real systemd. |
-| `maestro unblock`, `doctor`, start-up self-test | Not started |
+| Running in the background (`maestro service install`) | Done on Linux: a systemd user unit runs the service on a RHEL 8.10 server with rootless Podman, and it picks up game cards for the worker `linux`. The launchd agent on a Mac is written and tested as far as the file and the commands go, not yet run on a real Mac. |
+| Closing ways past the gates (release 0.5.17) | Done: a base commit that moved after the run, changes hidden from git, and a secret in an earlier commit of the branch are all refused (#78). The mirror and the hand-off folders are closed to other users of the machine (#79). Setup says when the GitHub App could push to an unprotected base branch, and how to close that (#80). On a Mac, Unity's checks read only Unity's part of the home folder and write only Unity's folders (#81, #82). |
+| `maestro unblock`, `doctor`, start-up self-test | Not started. Next on the list. |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board | Not started |
+| Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
 
 ## Documentation
 
