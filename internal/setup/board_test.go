@@ -330,8 +330,9 @@ func TestTicketsPicksBoardOrLabels(t *testing.T) {
 	if s, err := step.Check(ctx, st); err != nil || !strings.Contains(s.Detail, "board") {
 		t.Errorf("organization: %+v %v", s, err)
 	}
-	u, _ := ui("\nian\ny\n")
-	if err := Run(ctx, u, st, []Step{step}); err != nil || st.Board != 1 || len(g.created) != 0 {
+	// Asked first: GitHub or Linear. Enter takes GitHub.
+	u, _ := ui("\n\nian\ny\n")
+	if err := Run(ctx, u, st, []Step{step}); err != nil || st.Board != 1 || st.Tracker != TrackerGitHub || len(g.created) != 0 {
 		t.Fatalf("board %d, labels %v, %v", st.Board, g.created, err)
 	}
 }

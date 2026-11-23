@@ -147,6 +147,16 @@ type State struct {
 	Author string `json:"author,omitempty"`
 	Board  int    `json:"board,omitempty"`
 
+	// Tracker is where the tickets are kept: TrackerLinear, or GitHub when
+	// empty or TrackerGitHub. With Linear, LinearTeam is the team's key,
+	// LinearAuthor the e-mail address of the person who approves, and the
+	// last two are the team's names for the hand-off and closed states.
+	Tracker        string   `json:"tracker,omitempty"`
+	LinearTeam     string   `json:"linear_team,omitempty"`
+	LinearAuthor   string   `json:"linear_author,omitempty"`
+	LinearHandoff  string   `json:"linear_handoff,omitempty"`
+	LinearTerminal []string `json:"linear_terminal,omitempty"`
+
 	// TakenWorkers are the worker names of the other projects on this
 	// machine. Every worker has its own containers, volumes and service, so
 	// two projects may not share one. They are not saved.

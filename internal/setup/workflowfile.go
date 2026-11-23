@@ -66,8 +66,15 @@ func validCommand(s string) error {
 
 func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	m := repoRE.FindStringSubmatch(st.Repo)
-	if m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker) ||
-		st.OwnerType == kindOrg && (!authorRE.MatchString(st.Author) || st.Board <= 0) {
+	switch {
+	case st.UsesLinear():
+		if !teamKeyRE.MatchString(st.LinearTeam) || !emailRE.MatchString(st.LinearAuthor) || validStateName(st.LinearHandoff) != nil {
+			return errors.New("the earlier steps have to be finished first")
+		}
+	case st.OwnerType == kindOrg && (!authorRE.MatchString(st.Author) || st.Board <= 0):
+		return errors.New("the earlier steps have to be finished first")
+	}
+	if m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker) {
 		return errors.New("the earlier steps have to be finished first")
 	}
 	path := filepath.Join(st.Dir(), workflowFileName)
@@ -170,6 +177,49 @@ func render(engine string, st *State, owner, verify string, ci bool) string {
 	stateDir := strconv.Quote(filepath.Join(st.Dir(), "state"))
 	var b strings.Builder
 	b.WriteString("---\n")
+	if st.UsesLinear() {
+		renderLinear(&b, st)
+	} else {
+		renderGitHub(&b, st, owner)
+	}
+	b.WriteString("workspace:\n  root: " + root + "\n  repo: " + st.Repo + "\n")
+	b.WriteString("sandbox:\n  backend: " + engine + "\n")
+	b.WriteString("verify:\n  command: |\n    " + verify + "\n")
+	if !ci {
+		b.WriteString("publish:\n  required_checks: none\n")
+	}
+	b.WriteString("budget:\n  state_dir: " + stateDir + "\n")
+	b.WriteString("worker:\n  name: " + st.Worker + "\n")
+	b.WriteString("---\n\n")
+	b.WriteString("Implement the issue below in this repository.\n\n")
+	b.WriteString("Follow the conventions in CLAUDE.md if the repository has one. Add or update tests for every\n")
+	b.WriteString("behaviour you change, and run the test suite before you finish.\n")
+	return b.String()
+}
+
+// renderLinear is the tracker part for a Linear team. The names come from
+// the team; they are quoted.
+func renderLinear(b *strings.Builder, st *State) {
+	quoted := func(list []string) string {
+		q := make([]string, len(list))
+		for i, s := range list {
+			q[i] = strconv.Quote(s)
+		}
+		return "[" + strings.Join(q, ", ") + "]"
+	}
+	terminal := st.LinearTerminal
+	if len(terminal) == 0 {
+		terminal = []string{"Done"}
+	}
+	b.WriteString("tracker:\n  kind: linear\n  provider:\n")
+	b.WriteString("    team_key: " + st.LinearTeam + "\n")
+	b.WriteString("  allowed_authors: " + quoted([]string{st.LinearAuthor}) + "\n")
+	b.WriteString("  active_states: [Todo, In Progress]\n")
+	b.WriteString("  terminal_states: " + quoted(terminal) + "\n")
+	b.WriteString("  handoff_state: " + strconv.Quote(st.LinearHandoff) + "\n")
+}
+
+func renderGitHub(b *strings.Builder, st *State, owner string) {
 	b.WriteString("tracker:\n  kind: github\n  provider:\n")
 	b.WriteString("    repo: " + st.Repo + "\n")
 	author := owner
@@ -184,17 +234,4 @@ func render(engine string, st *State, owner, verify string, ci bool) string {
 	}
 	b.WriteString("    bot_login: \"" + st.AppSlug + "[bot]\"\n")
 	b.WriteString("  allowed_authors: [" + author + "]\n")
-	b.WriteString("workspace:\n  root: " + root + "\n  repo: " + st.Repo + "\n")
-	b.WriteString("sandbox:\n  backend: " + engine + "\n")
-	b.WriteString("verify:\n  command: |\n    " + verify + "\n")
-	if !ci {
-		b.WriteString("publish:\n  required_checks: none\n")
-	}
-	b.WriteString("budget:\n  state_dir: " + stateDir + "\n")
-	b.WriteString("worker:\n  name: " + st.Worker + "\n")
-	b.WriteString("---\n\n")
-	b.WriteString("Implement the issue below in this repository.\n\n")
-	b.WriteString("Follow the conventions in CLAUDE.md if the repository has one. Add or update tests for every\n")
-	b.WriteString("behaviour you change, and run the test suite before you finish.\n")
-	return b.String()
 }

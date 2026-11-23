@@ -118,7 +118,10 @@ func (m *mcpServer) info(_ context.Context, _ map[string]any) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Repository: %s\nWorker (this machine): %s\nSettings file: %s\nBase branch: %s\nBranches the service makes start with: %s\n",
 		c.Workspace.Repo, c.Worker.Name, in.path, c.Workspace.BaseBranch, c.Publish.BranchPrefix)
-	if in.state != nil && in.state.OnBoard() {
+	if t.Kind == "linear" {
+		fmt.Fprintf(&b, "Tickets are Linear issues of the team %v. A ticket is taken when it has the labels %s and the person moved it to %q.\n",
+			t.Provider["team_key"], strings.Join(t.RequiredLabels, ", "), t.ActiveStates[0])
+	} else if in.state != nil && in.state.OnBoard() {
 		fmt.Fprintf(&b, "Tickets are approved on a board: project number %d of the organization. A card is taken when it is in an active column and its Worker field is %q.\n",
 			in.state.Board, c.Worker.Name)
 	} else {

@@ -848,6 +848,11 @@ The tickets can live in Linear instead of on GitHub. The code, the checks and th
 stay on GitHub. The board is one Linear team, and a ticket is given to a machine with the label
 `run:<worker>`, for example `run:linux`, because Linear has no field for it.
 
+`maestro setup` asks where you keep the tickets. Pick Linear, and it asks for the API key, the
+team and your Linear e-mail address, lists the states the team still needs, and makes the label.
+A machine that was set up for GitHub switches with `maestro setup --board linear`; its old
+settings file is kept next to the new one. The file it writes looks like this:
+
 ```markdown
 ---
 tracker:
@@ -864,14 +869,8 @@ tracker:
 
 The rest of the file is as above. The team needs a workflow state for each of these, and also
 `Blocked` and `Rework`, which Linear does not have to begin with: add them under the team's
-settings, Workflow. `maestro doctor` names any that are missing.
-
-Store the API key the service uses, then check the setup:
-
-```sh
-maestro linear key
-maestro doctor
-```
+settings, Workflow. Setup and `maestro doctor` name any that are missing. To store a new API key
+later: `maestro linear key`.
 
 Make the key in Linear under Settings, Security & access, Personal API keys, limited to the team
 and to Read and Write. It is kept in the setup folder, readable by you only, and never reaches the
@@ -928,7 +927,7 @@ Last updated 2026-11-23, at release 0.5.17.
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
-| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written and tested against a fake Linear server. Not yet run against Linear itself. Planning and designs are not on Linear yet. |
+| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, with `maestro setup` for Linear, and tested against a fake Linear server. Not yet run against Linear itself. Planning and designs are not on Linear yet. |
 | Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
 
 ## Documentation

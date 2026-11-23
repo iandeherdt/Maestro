@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iandeherdt/Maestro/internal/setup"
 	"github.com/iandeherdt/Maestro/internal/tracker/linear"
 )
 
@@ -31,15 +32,9 @@ approval.`
 var linearEndpoint = linear.DefaultEndpoint
 
 // linearKeyFile is where the Linear API key is kept.
-func linearKeyFile(dir string) string { return filepath.Join(dir, "linear.key") }
+func linearKeyFile(dir string) string { return setup.LinearKeyFile(dir) }
 
-func readLinearKey(dir string) (string, error) {
-	raw, err := os.ReadFile(linearKeyFile(dir))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(raw)), nil
-}
+func readLinearKey(dir string) (string, error) { return setup.ReadLinearKey(dir) }
 
 // linear builds the Linear board adapter and checks that its key works.
 // The key comes from the setup folder, or else from the variable the
@@ -47,11 +42,11 @@ func readLinearKey(dir string) (string, error) {
 func (in *install) linear(ctx context.Context, log *slog.Logger) (*linear.Adapter, string, error) {
 	opt := linear.Options{Env: os.Getenv, Log: log}
 	key, err := readLinearKey(in.dir)
-	switch {
-	case err == nil && key != "":
-		opt.Key = func(context.Context) (string, error) { return key, nil }
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
+	if err != nil {
 		return nil, "", err
+	}
+	if key != "" {
+		opt.Key = func(context.Context) (string, error) { return key, nil }
 	}
 	la, err := linear.New(in.cfg, opt)
 	if err != nil {
@@ -117,7 +112,7 @@ func runLinear(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return report(stderr, err)
 		}
 		key = strings.TrimSpace(key)
-		if key == "" || strings.ContainsAny(key, " \t\n\r") {
+		if setup.ValidLinearKey(key) != nil {
 			fmt.Fprintln(stderr, "That is not an API key. Nothing was stored.")
 			return 1
 		}
@@ -126,10 +121,7 @@ func runLinear(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "Nothing was stored.")
 			return report(stderr, err)
 		}
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return report(stderr, err)
-		}
-		if err := os.WriteFile(linearKeyFile(dir), []byte(key+"\n"), 0o600); err != nil {
+		if err := setup.WriteLinearKey(dir, key); err != nil {
 			return report(stderr, err)
 		}
 		fmt.Fprintf(stdout, "Stored. The key acts as %s in Linear.\n", plain(email, 100))

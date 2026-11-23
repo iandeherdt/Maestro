@@ -31,7 +31,8 @@ func main() {
 var version = "dev"
 
 const usage = `usage:
-  maestro setup [--dir DIR] [--port N]   guided installation, safe to run again
+  maestro setup [--dir DIR] [--port N] [--board github|linear]
+                                        guided installation, safe to run again
   maestro new                            guided start of a Unity or Godot game for the agents
   maestro check [path-to-WORKFLOW.md]    validate a workflow file
   maestro image                          build the sandbox image (needs Docker)
@@ -252,7 +253,12 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "where setup keeps its state and the App key (default: the user's configuration directory)")
 	port := fs.Int("port", setup.DefaultPort, "loopback port used while creating the GitHub App")
+	board := fs.String("board", "", "where the tickets are kept: github or linear (asked when not given)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return 2
+	}
+	if *board != "" && *board != setup.TrackerGitHub && *board != setup.TrackerLinear {
+		fmt.Fprintln(stderr, "--board is github or linear")
 		return 2
 	}
 	if *dir == "" {
@@ -276,6 +282,16 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if ps, err := listProjects(); err == nil {
 		st.TakenWorkers = workersOf(ps, abs)
 	}
+	if *board != "" {
+		kept, err := setup.SwitchTracker(st, *board)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if kept != "" {
+			fmt.Fprintf(stdout, "The settings file for the other board is kept as %s. A new one is written for %s.\n", kept, *board)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ui := setup.Terminal(stdin, stdout)
@@ -290,7 +306,8 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.Machine{Dir: abs},
 		&setup.CreateApp{Port: *port},
 		&setup.InstallApp{},
-		&setup.Tickets{},
+		&setup.Tickets{Linear: setup.LinearBoard{Endpoint: linearEndpoint,
+			AskKey: func(ui *setup.UI, prompt string) (string, error) { return askSecret(ui.In, stdin, ui.Out, prompt) }}},
 		&setup.WorkflowFile{},
 	}
 	// Ctrl-C ends whatever the wizard waits for on the network. A question
@@ -325,7 +342,10 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	ui.Say("")
 	tickets, pickup := "the labels", "issues labelled status:todo and run:"+st.Worker
-	if st.OnBoard() {
+	switch {
+	case st.UsesLinear():
+		tickets, pickup = "the Linear team "+st.LinearTeam, "tickets with the label run:"+st.Worker+" that you move to Todo"
+	case st.OnBoard():
 		tickets, pickup = "the board", "cards in the Todo column whose Worker is "+st.Worker
 	}
 	ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
