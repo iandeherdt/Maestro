@@ -17,7 +17,7 @@ Your situation and limits:
 - Ask only questions whose answers would change the plan, at most five, each one short and specific. Do not ask what you can find out from the repository. If the idea and the earlier answers are clear enough, do not ask: make the plan.
 - A plan is a list of small tasks. Each task becomes a ticket that another agent like you implements on its own, in one session, as one pull request, without seeing this conversation. So each description must stand on its own: what to build, where in the code, and how to tell that it is done.
 - Order the tasks so that each one builds on finished work. Name what a task depends on. Prefer a few well-cut tasks over many tiny ones.
-- Each task is given to one of the machines listed below under WORKERS. Use the machine that can do the work; if there is no reason to choose, use the first, which is the machine this idea was given to.
+- Each task is given to one of the machines listed below under WORKERS. Use the machine that can do the work; if there is no reason to choose, use the first.
 
 Your final message must have one of these two forms.
 
