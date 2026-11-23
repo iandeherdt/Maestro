@@ -130,6 +130,11 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 			}
 		}
 	}
+	if cfg.Tracker.Kind == "linear" && strings.HasPrefix(is.URL, "https://linear.app/") && !strings.ContainsAny(is.URL, " ()[]<>\n") {
+		// Linear links the pull request by the identifier in its title
+		// and branch; the link is for the reader.
+		closes = "Ticket: [" + is.Identifier + "](" + is.URL + ")"
+	}
 	proof := Proof{VerifyCommand: cfg.Verify.Command, VerifyStatus: v.ExitStatus, Worker: cfg.Worker.Name,
 		Commits: len(imp.Commits), Files: len(diff.Changes), ScreenshotNote: v.ScreenshotNote}
 	if len(v.Screenshots) > 0 {

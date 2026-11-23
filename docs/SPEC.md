@@ -1578,34 +1578,58 @@ App may create a Project.
 
 ### 12.6 Linear Adapter Profile
 
-`tracker.kind: linear`
+`tracker.kind: linear`. Linear is the board only; the repository, checks and pull requests stay
+on GitHub (`workspace.repo`).
 
 Provider keys:
 
-- `endpoint`: default `https://api.linear.app/graphql`.
-- `api_key`: default `$LINEAR_API_KEY`. Secret.
-- `team_key`: REQUIRED. The dedicated team.
-- `project_slug`: OPTIONAL additional scope.
+- `endpoint`: default `https://api.linear.app/graphql`. MUST be https (http only to loopback, for
+  tests). Redirects are not followed, so the key reaches only this endpoint.
+- `api_key`: default `$LINEAR_API_KEY`. Secret. MUST be a `$VARIABLE` reference. A key stored with
+  `maestro linear key` (the file `linear.key` in the setup folder, mode 0600) takes precedence.
+- `team_key`: REQUIRED. The dedicated team, such as `ENG`.
+- `project`: OPTIONAL additional scope, a project's slug id or name.
 
 Identity and fields:
 
 - `id`: Linear issue ID. `identifier`: Linear identifier (`ABC-123`). `native_ref`: null.
-- `author_id`: creator's user ID, compared with `allowed_authors` (Linear user IDs).
+- `author_id`: creator's user ID. `allowed_authors` and `allowed_commenters` hold Linear user IDs
+  or email addresses.
 - `priority`: Linear priority `1..4`, `0` becomes null.
-- `blocked_by`: inverse `blocks` relations.
+- `labels`: label names, lowercased. The worker label `run:<worker.name>` is part of
+  `required_labels` (Section 5), because Linear has no field for the worker.
+- `blocked_by`: inverse `blocks` relations. A blocker is closed when its workflow state type is
+  `completed` or `canceled`.
 - State: the workflow state name, spelling preserved.
 
-Approval provenance: the adapter reads the issue history and requires that the most recent
-transition into the current active state, and the most recent addition of each required label,
-were made by an allowlisted user ID (to verify: history fields available through the API).
+Approval provenance: the adapter reads the issue history (`IssueHistory.actor`, `toState`,
+`addedLabels`) and requires that the most recent transition into the current state, and the most
+recent addition of each required label, were made by an allowlisted user. With no transition in
+the history, the creator counts. A change made by an integration or automation (`botActor`) or
+with no actor never counts. The user the API key acts as counts only for the states the service
+writes itself (in progress, handoff, blocked, done, `Rework`), and for issues it created itself.
+For that reason the first active state MUST NOT be a state the service writes. The result is
+cached per issue until `updatedAt` changes.
 
-Scope and paging: reads are filtered by team (and project), pages of 50.
+Writes: `set_state` only to the states the service writes. The status note is one comment that
+starts with `` **Maestro** (worker `<worker>`) ``; the service edits only a comment its own user
+wrote. `fetch_feedback` returns comments of `allowed_commenters`, never of integrations. The pull
+request carries `Ticket: [ABC-123](https://linear.app/...)` in place of `Closes #n`.
+
+Errors: HTTP 429 or a GraphQL error with code `RATELIMITED` is `tracker_rate_limited`, with the
+wait from `Retry-After` or `X-RateLimit-Requests-Reset`. 401 and 403 are `tracker_status`.
+
+Scope and paging: reads are filtered by team (and project), pages of 50, at most 50 pages.
 
 Token scope: the API key is created restricted to the dedicated team and to the Read and Write
-permissions only. Admin permission MUST NOT be granted. The key is used only by the control zone.
+permissions only. Admin permission MUST NOT be granted. The key is used only by the control zone,
+and is a held secret that the publisher refuses to push in a commit.
 
-Account requirements, checked by `doctor` where the API allows: the team has no members outside
-`allowed_authors`.
+Account requirements, checked by `doctor`: the key works and acts as a user who is not in
+`allowed_authors` (a warning otherwise), and the team has no members outside `allowed_authors`
+(a warning listing them).
+
+Not yet on Linear: the planning stage and designs (Section 22), and `maestro setup`.
 
 ## 13. Prompt Construction and Context Assembly
 

@@ -43,6 +43,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/reload"
 	"github.com/iandeherdt/Maestro/internal/setup"
 	"github.com/iandeherdt/Maestro/internal/skills"
+	"github.com/iandeherdt/Maestro/internal/tracker"
 	"github.com/iandeherdt/Maestro/internal/tracker/github"
 	"github.com/iandeherdt/Maestro/internal/worker"
 	"github.com/iandeherdt/Maestro/internal/workspace"
@@ -121,8 +122,8 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 			"Setup skips the steps that are done and only asks the last questions again.",
 			in.path, in.cfg.Sandbox.Backend, in.path, in.path+".old")
 	}
-	if in.cfg.Tracker.Kind != "github" {
-		return nil, explain("only the github tracker is built so far")
+	if k := in.cfg.Tracker.Kind; k != "github" && k != "linear" {
+		return nil, explain("the tracker %q is not built; github and linear are", k)
 	}
 	if err := clash(dir, in.cfg.Worker.Name); err != nil {
 		return nil, err
@@ -662,15 +663,28 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			cfg.Workspace.Repo, base)
 	}
 
-	trk, err := github.New(cfg, github.Options{Token: tickets.Token, Log: log})
-	if err != nil {
-		return err
+	// The board: GitHub's issues, or Linear. The code is on GitHub either
+	// way.
+	var trk tracker.Tracker
+	var ghBoard *github.Adapter
+	var linearKey string
+	if cfg.Tracker.Kind == "linear" {
+		la, key, err := in.linear(ctx, log)
+		if err != nil {
+			return err
+		}
+		trk, linearKey = la, key
+	} else {
+		if ghBoard, err = github.New(cfg, github.Options{Token: tickets.Token, Log: log}); err != nil {
+			return err
+		}
+		trk = ghBoard
 	}
 	if onBoard {
 		// Cards of other repositories on this project's board were put
 		// there by a board automation; with several projects, every new
 		// issue would land on every board.
-		t, err := trk.Tidy(ctx)
+		t, err := ghBoard.Tidy(ctx)
 		switch {
 		case err != nil:
 			log.Warn("cards of other repositories could not be taken off the board", "error", err)
@@ -688,7 +702,11 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		HeldSecrets: func() []string {
 			// The Unity licence reaches code the agent wrote, in the checks:
 			// it may not leave in a commit.
-			return append([]string{tickets.Current(), code.Current()}, unityStore(in.dir).Secrets()...)
+			held := append([]string{tickets.Current(), code.Current()}, unityStore(in.dir).Secrets()...)
+			if linearKey != "" {
+				held = append(held, linearKey)
+			}
+			return held
 		},
 		BotName: in.box.BotName, BotEmail: in.box.BotEmail, BotLogin: in.box.BotName,
 		APIURL: gh.api, GitURL: gh.git,
@@ -719,7 +737,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		if err != nil {
 			return err
 		}
-		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: trk, PlanningState: cfg.Tracker.PlanningState,
+		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: ghBoard, PlanningState: cfg.Tracker.PlanningState,
 			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0],
 			DesignState: cfg.Tracker.DesignState, DesignFolder: cfg.Design.Folder, Designs: pub,
 			TerminalStates: cfg.Tracker.TerminalStates}
@@ -760,7 +778,11 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	defer os.Remove(filepath.Join(cfg.Budget.StateDir, serviceFile))
 	fmt.Fprintf(stdout, "Maestro is running for %s (worker %q, base branch %s).\n", cfg.Workspace.Repo, cfg.Worker.Name, base)
-	if onBoard {
+	if cfg.Tracker.Kind == "linear" {
+		fmt.Fprintf(stdout, "It looks at the Linear team %v every %d seconds. To give it a ticket: add the label run:%s\n",
+			cfg.Tracker.Provider["team_key"], cfg.Polling.IntervalMS/1000, cfg.Worker.Name)
+		fmt.Fprintf(stdout, "and move it to %s. The pull request goes to %s on GitHub.\n", cfg.Tracker.ActiveStates[0], cfg.Workspace.Repo)
+	} else if onBoard {
 		fmt.Fprintf(stdout, "It looks at the board every %d seconds. To give it a ticket: put an issue of %s on the board,\n", cfg.Polling.IntervalMS/1000, cfg.Workspace.Repo)
 		fmt.Fprintf(stdout, "set the card's Worker to %s, and move the card to the column %s.\n", cfg.Worker.Name, cfg.Tracker.ActiveStates[0])
 		if plans != nil {
