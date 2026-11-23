@@ -93,10 +93,11 @@ In this order, one pull request each:
 1. `maestro unblock`, `maestro doctor` and the start-up self-test (SPEC 11.6, 11.9, 16.7). Written.
    `doctor` checks what went wrong during the first setups: Podman on CNI instead of netavark,
    cgroups v1 and missing cgroup controllers, a sandbox image missing or out of date, no login.
-2. Native Linux sandbox with systemd (phase 3, SPEC 11). A plan comes first.
-3. Native Mac sandbox for work that needs macOS itself, Xcode and Unity (phase 9, Appendix B).
+2. Linear as a board (phase 8, SPEC 12.6). The board itself is written; planning on Linear and
+   `maestro setup` for Linear come next.
+3. Native Linux sandbox with systemd (phase 3, SPEC 11). A plan comes first.
+4. Native Mac sandbox for work that needs macOS itself, Xcode and Unity (phase 9, Appendix B).
    A plan comes first.
-4. Linear as a board (phase 8, SPEC 12.6). A plan comes first.
 5. Code hosts other than GitHub (phase 10). A plan comes first.
 
 ## Phase 0 status

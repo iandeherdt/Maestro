@@ -842,6 +842,48 @@ changed ones:
 | `policy.deny_paths` | built-in list | Extra paths the agent may never change |
 | `policy.flag_paths` | none | Paths whose changes are pointed out in the pull request |
 
+### Linear as the board
+
+The tickets can live in Linear instead of on GitHub. The code, the checks and the pull requests
+stay on GitHub. The board is one Linear team, and a ticket is given to a machine with the label
+`run:<worker>`, for example `run:linux`, because Linear has no field for it.
+
+```markdown
+---
+tracker:
+  kind: linear
+  provider:
+    team_key: ENG                  # the team's key, the letters before the number of a ticket
+    project: ""                    # optional: only the tickets of this project
+  allowed_authors: [you@example.com]
+  active_states: [Todo, In Progress]
+  terminal_states: [Done, Canceled]
+  handoff_state: In Review         # Linear's name; the default is Human Review
+---
+```
+
+The rest of the file is as above. The team needs a workflow state for each of these, and also
+`Blocked` and `Rework`, which Linear does not have to begin with: add them under the team's
+settings, Workflow. `maestro doctor` names any that are missing.
+
+Store the API key the service uses, then check the setup:
+
+```sh
+maestro linear key
+maestro doctor
+```
+
+Make the key in Linear under Settings, Security & access, Personal API keys, limited to the team
+and to Read and Write. It is kept in the setup folder, readable by you only, and never reaches the
+agent. Best is a separate Linear user for the service, because what that user does is never taken
+as your approval: a ticket is picked up only when someone in `allowed_authors` (a Linear email or
+user id) moved it into the first active state and added each required label. Linear keeps who did
+that in the ticket's history, and that history is what the service reads. A ticket that is
+`blocked by` another open ticket waits for it. The status of the work is one comment on the ticket,
+which the service edits as it goes, and the pull request links back to the ticket.
+
+Not yet on Linear: planning an idea first and designs. Those still need GitHub's board.
+
 ## Project status
 
 Last updated 2026-11-23, at release 0.5.17.
@@ -886,7 +928,7 @@ Last updated 2026-11-23, at release 0.5.17.
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
-| Linear board | Not started |
+| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written and tested against a fake Linear server. Not yet run against Linear itself. Planning and designs are not on Linear yet. |
 | Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
 
 ## Documentation

@@ -153,6 +153,11 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 	d.section("GitHub")
 	d.github(ctx, in)
 
+	if in.cfg.Tracker.Kind == "linear" {
+		d.section("Linear")
+		d.linearBoard(ctx, in)
+	}
+
 	if slices.Contains(in.cfg.Conventions, "unity") {
 		d.section("Unity")
 		d.unityPackages(ctx, in)
@@ -456,4 +461,58 @@ func proxyAllows(list []string, host string) bool {
 		}
 	}
 	return false
+}
+
+// linearBoard checks the Linear key and who else could approve work.
+func (d *doctor) linearBoard(ctx context.Context, in *install) {
+	la, _, err := in.linear(ctx, nil)
+	if err != nil {
+		d.fail("the Linear API key works", errText(err))
+		return
+	}
+	id, email, _ := la.Me(ctx)
+	d.ok("the Linear API key works; it acts as " + email)
+	authors := map[string]bool{}
+	for _, a := range in.cfg.Tracker.AllowedAuthors {
+		authors[strings.ToLower(strings.TrimSpace(a))] = true
+	}
+	if authors[strings.ToLower(email)] || authors[strings.ToLower(id)] {
+		d.warn("the service's Linear user is not one of tracker.allowed_authors",
+			"It is, so a ticket the service itself moves to "+in.cfg.Tracker.ActiveStates[0]+" counts as approved.\n"+
+				"Give the service a Linear user of its own and make the key as that user.")
+	}
+	t := in.cfg.Tracker
+	team := fmt.Sprint(t.Provider["team_key"])
+	names := append(append([]string{}, t.ActiveStates...), t.TerminalStates...)
+	names = append(names, t.InProgressState, t.HandoffState, t.BlockedState, t.DoneState, "Rework")
+	missing, err := la.MissingStates(ctx, names)
+	switch {
+	case err != nil:
+		d.fail("the Linear team "+team+" can be read", err.Error())
+		return
+	case len(missing) > 0:
+		d.fail("the Linear team "+team+" has every state the service uses",
+			"Missing: "+strings.Join(missing, ", ")+". Add them in Linear under the team's settings, Workflow,\n"+
+				"or name the team's own states in the tracker settings of WORKFLOW.md.")
+	default:
+		d.ok("the Linear team " + team + " has every state the service uses")
+	}
+	members, err := la.TeamMembers(ctx)
+	if err != nil {
+		d.fail("the Linear team "+team+" can be read", err.Error())
+		return
+	}
+	var others []string
+	for _, m := range members {
+		if m != email && !authors[strings.ToLower(m)] {
+			others = append(others, m)
+		}
+	}
+	if len(others) > 0 {
+		d.warn("only you can approve work on the Linear team",
+			"Also on the team: "+strings.Join(others, ", ")+". Their moves never approve a ticket,\n"+
+				"but they can see the tickets and comment, and comments from allowed_commenters reach the agent.")
+	} else {
+		d.ok("nobody else is on the Linear team")
+	}
 }
