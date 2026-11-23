@@ -174,7 +174,7 @@ func printStatus(w io.Writer, s statusJSON, now time.Time) {
 func runControl(cmd string, args []string, stdout, stderr io.Writer) int {
 	// For pause, the words after the flags are the reason, so the settings
 	// file can only be named with --file there.
-	dir, explicit, rest, ok := parseWords(cmd, args, stderr, cmd == "pause")
+	dir, explicit, rest, ok := parseWords(cmd, args, stderr, cmd == "pause" || cmd == "unblock")
 	if !ok {
 		return 2
 	}
@@ -205,6 +205,55 @@ func runControl(cmd string, args []string, stdout, stderr io.Writer) int {
 			return report(stderr, err)
 		}
 		fmt.Fprintln(stdout, "Resumed. The service is looking for tickets again.")
+	case "unblock":
+		if len(rest) != 1 {
+			fmt.Fprintln(stderr, "usage: maestro unblock ISSUE   (such as GH-12, or just 12)")
+			return 2
+		}
+		return unblock(ctx, stateDir, rest[0], stdout, stderr)
+	}
+	return 0
+}
+
+type unblockJSON struct {
+	Identifier  string `json:"issue_identifier"`
+	Found       bool   `json:"found"`
+	Failures    int64  `json:"cleared_failures"`
+	MovedTo     string `json:"moved_to"`
+	OtherWorker bool   `json:"other_worker"`
+	Error       string `json:"error"`
+	Queued      bool   `json:"queued"`
+}
+
+// unblock is `maestro unblock ISSUE`. The running service does it, because
+// it is the only writer of the failure counts and holds the board token.
+func unblock(ctx context.Context, stateDir, id string, stdout, stderr io.Writer) int {
+	body, _ := json.Marshal(map[string]string{"identifier": id})
+	var res unblockJSON
+	if err := reach(ctx, stateDir, http.MethodPost, "/api/v1/unblock", strings.NewReader(string(body)), &res); err != nil {
+		return report(stderr, err)
+	}
+	name := plain(res.Identifier, 30)
+	switch {
+	case res.Queued:
+		fmt.Fprintln(stdout, "The service is busy and will do it in a moment. See the result with: "+mention("maestro status"))
+	case !res.Found && res.Error != "":
+		fmt.Fprintf(stderr, "The board could not be asked for blocked tickets: %s\nTry again in a moment.\n", plain(res.Error, 300))
+		return 1
+	case !res.Found:
+		fmt.Fprintf(stderr, "No blocked ticket %s was found for this worker. `maestro status` lists what it works on.\n", plain(id, 30))
+		return 1
+	case res.OtherWorker:
+		fmt.Fprintf(stderr, "%s is blocked, but for another worker. Run `maestro unblock` on that machine, or drag the card back.\n", name)
+		return 1
+	case res.Error != "":
+		fmt.Fprintf(stderr, "The failure count of %s is cleared, but the card could not be moved: %s\n"+
+			"Move it back to an active column yourself; it starts with a fresh budget.\n", name, plain(res.Error, 300))
+		return 1
+	case res.MovedTo != "":
+		fmt.Fprintf(stdout, "%s is unblocked: %d failed attempt(s) are forgotten and it is back in %s.\n", name, res.Failures, plain(res.MovedTo, 40))
+	default:
+		fmt.Fprintf(stdout, "%s starts again with a fresh budget: %d failed attempt(s) are forgotten.\n", name, res.Failures)
 	}
 	return 0
 }

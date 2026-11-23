@@ -31,6 +31,7 @@ type State interface {
 	RequestTick()
 	Pause(reason string)
 	Resume()
+	Unblock(identifier string) <-chan orchestrator.UnblockResult
 }
 
 // LocalHeader must be present on mutating requests.
@@ -82,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/refresh", s.apiRefresh)
 	mux.HandleFunc("/api/v1/pause", s.apiPause)
 	mux.HandleFunc("/api/v1/resume", s.apiResume)
+	mux.HandleFunc("/api/v1/unblock", s.apiUnblock)
 	mux.HandleFunc("/api/v1/", s.apiIssue)
 	return guard(mux)
 }
@@ -322,6 +324,36 @@ func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 	}
 	s.state.Resume()
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+}
+
+// apiUnblock gives an issue a fresh failure budget and, when it is
+// blocked, moves it back to work. It waits a few seconds for the answer,
+// which needs the board.
+func (s *Server) apiUnblock(w http.ResponseWriter, r *http.Request) {
+	if !local(w, r) {
+		return
+	}
+	var in struct {
+		Identifier string `json:"identifier"`
+	}
+	json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in)
+	id := strings.TrimSpace(in.Identifier)
+	if id == "" || len(id) > 100 || strings.ContainsFunc(id, func(c rune) bool { return c < 0x20 || c == 0x7f }) {
+		writeError(w, http.StatusBadRequest, "bad_identifier", "name one issue, such as GH-12 or 12")
+		return
+	}
+	select {
+	case res := <-s.state.Unblock(id):
+		out := map[string]any{"issue_identifier": res.Identifier, "found": res.Found,
+			"cleared_failures": res.Failures, "moved_to": res.MovedTo, "other_worker": res.OtherWorker}
+		if res.Err != nil {
+			out["error"] = res.Err.Error()
+		}
+		writeJSON(w, http.StatusOK, out)
+	case <-time.After(8 * time.Second):
+		writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+	case <-r.Context().Done():
+	}
 }
 
 func (s *Server) apiIssue(w http.ResponseWriter, r *http.Request) {

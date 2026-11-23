@@ -90,9 +90,9 @@ security fixes of 0.5.17 closed three ways past the gates and tightened folder p
 
 In this order, one pull request each:
 
-1. `maestro unblock`, `maestro doctor` and the start-up self-test (SPEC 11.6, 16.7). `doctor`
-   checks what went wrong during the first setups: Podman on CNI instead of netavark, short image
-   names, cgroups v1, a sandbox image missing before `maestro login`.
+1. `maestro unblock`, `maestro doctor` and the start-up self-test (SPEC 11.6, 11.9, 16.7). Written.
+   `doctor` checks what went wrong during the first setups: Podman on CNI instead of netavark,
+   cgroups v1 and missing cgroup controllers, a sandbox image missing or out of date, no login.
 2. Native Linux sandbox with systemd (phase 3, SPEC 11). A plan comes first.
 3. Native Mac sandbox for work that needs macOS itself, Xcode and Unity (phase 9, Appendix B).
    A plan comes first.

@@ -144,11 +144,12 @@ What the setup does:
 If the machine has no browser, the setup shows an `ssh -L` command to run on your own computer so
 that the page opens there.
 
-Three commands are left, in this order, with Docker running:
+Four commands are left, in this order, with Docker running:
 
 ```sh
 maestro image    # builds the container the agent works in. A few minutes, once.
 maestro login    # signs Claude Code in inside that container. Once.
+maestro doctor   # checks everything below, and says what to do about what is wrong.
 maestro run      # starts the service. Stop it with Ctrl-C.
 ```
 
@@ -393,8 +394,33 @@ maestro service uninstall   # back to running it by hand
 It shows the file it will write and asks before it does. The background service runs as you, and
 the agent still works in Docker, so Docker has to be running.
 
-Not built yet: `maestro unblock` and `maestro doctor`. To give a blocked ticket another
-chance, drag its card back to Todo (or put `status:todo` back on it).
+A ticket that failed `budget.max_failure_attempts` times in a row is moved to Blocked, with the
+reason in a comment. To give it another chance with a fresh count, either drag its card back to
+Todo (or put `status:todo` back on it), or:
+
+```sh
+maestro unblock GH-12       # or just: maestro unblock 12
+```
+
+### When something is not right: `maestro doctor`
+
+`maestro doctor` checks, without starting the service and without changing anything, what the
+service needs: the settings file, the container engine, the sandbox image, the Claude login, the
+GitHub App and the rule on the base branch, and whether the background service runs and keeps
+running after you log out. Each problem comes with what to do about it. It knows the things that
+went wrong on real machines so far: Podman on its old CNI network, cgroups v1 under rootless
+Podman (the memory and process limits are then ignored), cgroup controllers that systemd does
+not hand to your user, an image that is missing or older than the settings, and no login yet.
+
+It also runs the sandbox's self-test, which the service runs too each time it starts. A throwaway
+container is started exactly like a step, once without network, once on the hooks' network and
+once on the agent's, and tries what a step must not be able to do: run as root, hold a
+capability, gain privileges, see the service's environment, write outside its workspace, see the
+mirror, the hand-off folder, the Claude login or a container socket, connect anywhere directly,
+look up names without network, or get a host past the proxy that is not on its list. If any of
+that works, the service does not start. Three more things are reported as warnings and do not
+stop it: whether the memory and process limits are in force, whether the engine answers name
+lookups on the proxied networks, and whether the agent's proxy reaches Claude.
 
 ## Several projects on one machine
 
@@ -837,7 +863,7 @@ Last updated 2026-11-23, at release 0.5.17.
 | Screenshots on the pull request | Written. Taking the pictures is tested here with a real Chromium, storing them against a stand-in for GitHub. Not yet run through the service on a real project: the image with the browser has not been built with `maestro image`, and the pictures have not been seen in a pull request on github.com. |
 | Container sandbox (isolated network, proxies, image) | Done, tested with real containers on Docker and on rootless Podman. The image with the real Claude Code is built in CI. Runs on a Linux server with RHEL 8.10 and rootless Podman, which needs the netavark network backend and never pulls the sandbox image (#76). |
 | `maestro image`, `maestro login`, `maestro run` | Done. Tested in real containers against a stand-in for GitHub and for Claude Code, and run once on a Mac with the real Claude Code against github.com, from a labelled issue to a merged pull request. |
-| `maestro status`, `pause`, `resume` | Done, tested against the running service |
+| `maestro status`, `pause`, `resume`, `unblock` | Done, tested against the running service |
 | Planning stage (idea, questions, plan, tasks) | Done. Run once on a Mac with the real Claude Code against github.com: a plan was posted, changed after a comment, approved, and its tasks were created in Todo. Questions from the agent and tasks that depend on each other have only been tested against stand-ins. Needs the board. |
 | Design stage (mock-ups or a game design between plan and tasks) | Written. Tested against stand-ins for the board, GitHub and Claude Code; the pictures are tested with a real Chromium and the design's commits with real Git. Not yet run against github.com. |
 | Tools and a skill for your own Claude Code (`maestro assistant`, `maestro mcp`) | Written. The server is tested here by speaking the protocol to it against a stand-in for the running service. Not yet added to a real Claude Code. |
@@ -850,7 +876,7 @@ Last updated 2026-11-23, at release 0.5.17.
 | Pack `godot` | Written. Run under the sandbox's settings against a sample project with Godot 4.7.2, gdtoolkit 4.5.0 and GUT 9.7.1: a script that does not parse, unformatted code, a lint error, a passing and a failing test. The image line has not been built with `maestro image`. |
 | Running in the background (`maestro service install`) | Done on Linux: a systemd user unit runs the service on a RHEL 8.10 server with rootless Podman, and it picks up game cards for the worker `linux`. The launchd agent on a Mac is written and tested as far as the file and the commands go, not yet run on a real Mac. |
 | Closing ways past the gates (release 0.5.17) | Done: a base commit that moved after the run, changes hidden from git, and a secret in an earlier commit of the branch are all refused (#78). The mirror and the hand-off folders are closed to other users of the machine (#79). Setup says when the GitHub App could push to an unprotected base branch, and how to close that (#80). On a Mac, Unity's checks read only Unity's part of the home folder and write only Unity's folders (#81, #82). |
-| `maestro unblock`, `doctor`, start-up self-test | Not started. Next on the list. |
+| `maestro doctor`, start-up self-test | Written. The self-test runs in real containers in the tests, on Docker, and the service's end-to-end test starts through it. Not yet run on Podman on RHEL, or on a Mac. The SPEC 11.6 checks for leftover processes after a step and for exceeding the limits are not part of it yet. |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |

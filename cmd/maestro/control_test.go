@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,14 +17,21 @@ import (
 )
 
 type fakeOrch struct {
-	snap  orchestrator.Snapshot
-	calls []string
+	snap    orchestrator.Snapshot
+	calls   []string
+	unblock map[string]orchestrator.UnblockResult
 }
 
 func (f *fakeOrch) Latest() orchestrator.Snapshot { return f.snap }
 func (f *fakeOrch) RequestTick()                  {}
 func (f *fakeOrch) Pause(reason string)           { f.calls = append(f.calls, "pause:"+reason) }
 func (f *fakeOrch) Resume()                       { f.calls = append(f.calls, "resume") }
+func (f *fakeOrch) Unblock(id string) <-chan orchestrator.UnblockResult {
+	f.calls = append(f.calls, "unblock:"+id)
+	ch := make(chan orchestrator.UnblockResult, 1)
+	ch <- f.unblock[id]
+	return ch
+}
 
 func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 	ctx := context.Background()
@@ -92,5 +100,44 @@ func TestStatusPauseResumeReachTheRunningService(t *testing.T) {
 	printStatus(&out, statusJSON{Worker: "mac"}, now)
 	if !strings.Contains(out.String(), "Nothing is being worked on.") || strings.Contains(out.String(), "PAUSED") || strings.Contains(out.String(), "tomorrow") {
 		t.Errorf("idle status:\n%s", out.String())
+	}
+}
+
+func TestUnblockAsksTheRunningService(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	orch := &fakeOrch{unblock: map[string]orchestrator.UnblockResult{
+		"12":    {Identifier: "GH-12", Found: true, Failures: 3, MovedTo: "Todo"},
+		"GH-13": {Identifier: "GH-13", Found: true, Failures: 1},
+		"14":    {Identifier: "GH-14", Found: true, OtherWorker: true},
+		"15":    {Identifier: "GH-15", Found: true, Failures: 2, Err: errors.New("GitHub answered 502")},
+	}}
+	srv, err := httpapi.Listen(0, orch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve()
+	defer srv.Shutdown(ctx)
+	if err := writeServiceInfo(dir, srv.Addr()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id   string
+		code int
+		want string
+	}{
+		{"12", 0, "GH-12 is unblocked: 3 failed attempt(s) are forgotten and it is back in Todo."},
+		{"GH-13", 0, "GH-13 starts again with a fresh budget: 1 failed attempt(s)"},
+		{"14", 1, "blocked, but for another worker"},
+		{"15", 1, "could not be moved: GitHub answered 502"},
+		{"99", 1, "No blocked ticket 99 was found"},
+	} {
+		var out, errb bytes.Buffer
+		if code := unblock(ctx, dir, c.id, &out, &errb); code != c.code {
+			t.Errorf("%s: exit %d, want %d (%s%s)", c.id, code, c.code, out.String(), errb.String())
+		}
+		if !strings.Contains(out.String()+errb.String(), c.want) {
+			t.Errorf("%s: %q lacks %q", c.id, out.String()+errb.String(), c.want)
+		}
 	}
 }
