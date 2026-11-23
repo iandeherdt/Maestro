@@ -1665,11 +1665,22 @@ Export step (sandbox, network `none`, no Claude state mounted):
 
 1. If the working tree has changes, stage everything except ignored files and commit with the
    message `maestro: uncommitted changes at end of turn`.
-2. `git bundle create <handoff>/<workspace_key>.bundle <base_sha>..HEAD`.
-3. Print `HEAD` and the commit count.
+2. Look at the working tree a second time with a git directory made for this step, which has an
+   empty index, no settings, no exclude file and no attributes of its own, and compare every file
+   with `HEAD` by content. The workspace's `.git` belongs to the agent: an index flag
+   (`skip-worktree`, `assume-unchanged`), `.git/info/exclude`, a filter or `core.worktree` can make
+   a changed file look unchanged there. What the second look finds is committed with the message
+   `maestro: changes that git was told not to see`, so the verify step runs on what is published
+   and the diff policy sees it. Only a `.gitignore` that is itself committed hides a file.
+3. `git bundle create <handoff>/<workspace_key>.bundle <base_sha>..HEAD`.
+4. Print `HEAD` and the commit count.
 
 Import (control zone):
 
+0. Require that `base_sha` is on the base branch of the mirror (its tip or a commit it builds
+   on). `base_sha` is read from the workspace, where the agent can change it; a commit of the
+   agent's own is never on the base branch. Without this, work that was refused once could be
+   offered again as the base of a harmless change and pass the diff policy.
 1. Open the bundle with no-follow semantics, require a regular file owned by `maestro-agent`,
    size at most `publish.max_bundle_bytes`, and copy it into a directory owned by `maestro`. All
    further steps use the copy.
@@ -1680,6 +1691,8 @@ Import (control zone):
    `base_sha`, and that every new commit has exactly one parent. The new commits are therefore a
    single line from `base_sha`: no unrelated history, no new root commit and no merge. At most
    500 new commits are accepted. A head that fails these checks is removed from the mirror.
+   The incoming head must also be the commit the export step printed, which is the one the
+   verify step ran on.
 4. All Git commands in the control zone run with `core.hooksPath=/dev/null`, no system or global
    configuration from the workspace, `protocol.allow=never` except for the configured remote, and
    with external diff, textconv and filters disabled. Git reads a bundle through its `file` transport, so
@@ -1701,6 +1714,10 @@ mode, size, and content for scanning). No checkout is created.
   `max_file_bytes` is not loaded, and nothing is read once `max_diff_bytes` is spent. The policy
   denies each of these cases anyway.
 - Error messages from Git are not passed on, because they can quote names chosen by the agent.
+- The diff is the change from `base_sha` to the head, and a push sends every commit. When there
+  is more than one new commit, the lines and file names each commit adds are read as well
+  (`git log -p`) and given to the secret scan, so a credential added in one commit and removed
+  in the next is denied. Together the commits may change at most 16 times `max_diff_bytes`.
 
 ### 15.3 Diff Policy
 

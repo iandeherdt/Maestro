@@ -175,6 +175,14 @@ func (g *Gates) Publish(ctx context.Context, is issue.Issue, ws workspace.Worksp
 	return g.Publisher.Publish(ctx, is, ws, v)
 }
 
+// ExportedHead is the commit the last export step reported for a
+// workspace, or "" when there was none.
+func (g *Gates) ExportedHead(workspaceKey string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.heads[workspaceKey]
+}
+
 // Forget drops what is remembered about a workspace that was removed.
 func (g *Gates) Forget(workspaceKey string) {
 	g.mu.Lock()

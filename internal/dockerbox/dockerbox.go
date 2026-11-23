@@ -490,12 +490,44 @@ $G merge --quiet --ff-only FETCH_HEAD >/dev/null 2>&1 || true
 cat .git/maestro-base
 `
 
+// exportScript commits what is uncommitted, then looks at the working
+// tree a second time with a git directory of its own. The workspace's
+// .git belongs to the agent: its index can mark a changed file as
+// unchanged (skip-worktree, assume-unchanged), its exclude file can hide
+// new files, its settings can turn on filters or point git at another
+// tree. The second git directory has none of that: an empty index, no
+// settings and no exclude file, so every file is compared by content with
+// the commit, and only a .gitignore that is itself in the commit hides a
+// file. What it finds is committed, so the verify step runs on what is
+// published and the diff policy sees it. $1 and $2 are the commit
+// identity.
 const exportScript = `set -eu
 cd /workspace/repo
 G="git -c core.hooksPath=/dev/null -c core.fsmonitor=false"
 if [ -n "$($G status --porcelain)" ]; then
   $G add -A
   $G commit --quiet --no-verify -m "maestro: uncommitted changes at end of turn"
+fi
+head="$($G rev-parse --verify HEAD^{commit})"
+objects="$($G rev-parse --git-path objects)"
+case "$objects" in /*) ;; *) objects="$PWD/$objects" ;; esac
+check="$(mktemp -d)"
+trap 'rm -rf "$check"' EXIT
+git init --quiet "$check"
+# Its objects are the workspace's, so what it commits is there at once.
+c() {
+  GIT_OBJECT_DIRECTORY="$objects" git --git-dir="$check/.git" --work-tree="$PWD" \
+    -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
+}
+c update-ref --no-deref HEAD "$head"
+c read-tree "$head"
+if [ -n "$(c status --porcelain)" ]; then
+  c add -A
+  tree="$(c write-tree)"
+  new="$(c -c user.name="$1" -c user.email="$2" commit-tree "$tree" -p "$head" \
+    -m "maestro: changes that git was told not to see")"
+  $G update-ref HEAD "$new" "$head"
+  $G reset --quiet
 fi
 base="$(cat .git/maestro-base)"
 count="$($G rev-list --count "$base..HEAD")"
@@ -634,7 +666,10 @@ func (b *Box) export(ctx context.Context, s spec) (sandbox.Result, error) {
 	final := filepath.Join(b.HandoffDir, s.key+".bundle")
 	os.Remove(final)
 	s.handoff = dir
-	s.argv = []string{"sh", "-c", exportScript}
+	if !identRE.MatchString(b.BotName) || !identRE.MatchString(b.BotEmail) {
+		return sandbox.Result{}, fail("no commit identity is configured")
+	}
+	s.argv = []string{"sh", "-c", exportScript, "export", b.BotName, b.BotEmail}
 	res, err := b.start(ctx, s, nil, nil)
 	if err != nil || res.ExitStatus != 0 {
 		return res, err

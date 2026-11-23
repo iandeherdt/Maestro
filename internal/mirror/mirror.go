@@ -108,6 +108,17 @@ func (m *Mirror) gitEnv(ctx context.Context, stdin io.Reader, limit int64, extra
 	return out.buf.Bytes(), nil
 }
 
+// gitTo is git with the standard output kept in out, which says whether
+// it was cut short.
+func (m *Mirror) gitTo(ctx context.Context, out *capped, args ...string) error {
+	raw, err := m.gitEnv(ctx, nil, out.limit+1, nil, args...)
+	if int64(len(raw)) > out.limit {
+		raw, out.over = raw[:out.limit], true
+	}
+	out.buf.Write(raw)
+	return err
+}
+
 // gitError deliberately leaves out git's output: it can quote ref names and
 // paths chosen by the agent.
 type gitError struct {
@@ -459,6 +470,85 @@ func (m *Mirror) Diff(ctx context.Context, baseSHA, head string, lim Limits) (Di
 		}
 	}
 	return d, nil
+}
+
+// OnBranch reports whether sha is the tip of a branch of the mirror or a
+// commit that branch builds on. The base commit of a workspace is reported
+// by the sandbox, where the agent can change the note of it. A commit the
+// agent made is never on the base branch, so this is what keeps the agent
+// from choosing what its work is compared with.
+//
+// An empty branch means the base branch is not named in the settings. Any
+// branch then counts, except those under notUnder, the prefix of the
+// branches the service itself pushes.
+func (m *Mirror) OnBranch(ctx context.Context, sha, branch, notUnder string) (bool, error) {
+	if !shaRE.MatchString(sha) {
+		return false, fmt.Errorf("invalid commit id")
+	}
+	if branch == "" {
+		if notUnder == "" {
+			return false, fmt.Errorf("neither a base branch nor a branch prefix is set")
+		}
+		out, err := m.git(ctx, nil, 0, "for-each-ref", "--format=%(refname)", "--contains", sha, "refs/heads/")
+		if err != nil {
+			if exited(err) {
+				return false, nil // not a commit of the mirror
+			}
+			return false, err
+		}
+		for _, ref := range strings.Fields(string(out)) {
+			if !strings.HasPrefix(ref, "refs/heads/"+notUnder) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if !ValidBranch(branch) {
+		return false, fmt.Errorf("invalid branch name")
+	}
+	if _, err := m.git(ctx, nil, 0, "merge-base", "--is-ancestor", sha, "refs/heads/"+branch); err != nil {
+		if exited(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// HistoryAdded returns every line that a commit between base and head
+// adds, and the names of the files it touches, also when a later commit
+// takes the line out again. Diff shows the change from base to head only,
+// and a push sends every commit. complete is false when the commits hold
+// more than maxBytes of changes; the lines are then not all there.
+func (m *Mirror) HistoryAdded(ctx context.Context, baseSHA, head string, maxBytes int64) (lines []string, complete bool, err error) {
+	if !shaRE.MatchString(baseSHA) || !shaRE.MatchString(head) {
+		return nil, false, fmt.Errorf("invalid commit id")
+	}
+	if maxBytes <= 0 {
+		return nil, false, fmt.Errorf("no limit for the history is set")
+	}
+	out := &capped{limit: maxBytes}
+	if err := m.gitTo(ctx, out, "log", "-p", "--text", "-U0", "--no-renames", "--no-ext-diff", "--no-textconv", "--no-color",
+		"--full-index", "--format=", baseSHA+".."+head, "--"); err != nil {
+		return nil, false, err
+	}
+	// A line of a file's content always follows a "@@" line and starts
+	// with "+", "-", a space or a backslash, so "diff " at the start of a
+	// line is git's own. Only between the two is "+++ " a file name.
+	inHunk := false
+	for _, line := range strings.Split(out.buf.String(), "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff "):
+			inHunk = false
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case inHunk && strings.HasPrefix(line, "+"):
+			lines = append(lines, line[1:])
+		case !inHunk && strings.HasPrefix(line, "+++ "):
+			lines = append(lines, strings.TrimPrefix(line[4:], "b/"))
+		}
+	}
+	return lines, !out.over, nil
 }
 
 // PushedRef records the head last pushed for a workspace. It is the lease

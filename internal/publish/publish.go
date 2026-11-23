@@ -37,6 +37,8 @@ const (
 type Mirror interface {
 	Import(ctx context.Context, bundlePath, workspaceKey, baseSHA string) (mirror.Imported, error)
 	Diff(ctx context.Context, baseSHA, head string, lim mirror.Limits) (mirror.Diff, error)
+	OnBranch(ctx context.Context, sha, branch, notUnder string) (bool, error)
+	HistoryAdded(ctx context.Context, baseSHA, head string, maxBytes int64) (lines []string, complete bool, err error)
 	Push(ctx context.Context, remoteURL, workspaceKey, branch, token string) error
 	ForgetPush(ctx context.Context, workspaceKey string) error
 }
@@ -53,6 +55,10 @@ type Publisher struct {
 	// HeldSecrets returns the credential values the service holds, for the
 	// exact-match part of the secret scan.
 	HeldSecrets func() []string
+	// ExportedHead returns the commit the export step reported for a
+	// workspace, which is the one the verify step ran on. When set, a
+	// bundle that holds another commit is refused.
+	ExportedHead func(workspaceKey string) string
 	// BotName and BotEmail are the commit identity the sandbox is set up
 	// with. Empty skips the identity flag.
 	BotName, BotEmail string
@@ -166,6 +172,11 @@ func target(cfg *config.Config, ws workspace.Workspace) (owner, repo string, err
 	return owner, repo, nil
 }
 
+// historyFactor is how many times policy.max_diff_bytes the commits may
+// change when they are added up one by one. Work that goes back and forth
+// over the same lines is larger that way than its final diff.
+const historyFactor = 16
+
 // admitted is work that passed import, diff policy and secret scan.
 type admitted struct {
 	imp  mirror.Imported
@@ -177,6 +188,26 @@ type admitted struct {
 // secret scan. Exactly one of the result and the rejection is set when the
 // error is nil.
 func (p *Publisher) admit(ctx context.Context, cfg *config.Config, ws workspace.Workspace) (*admitted, *worker.Rejection, error) {
+	refuse := func(reason string) (*admitted, *worker.Rejection, error) {
+		return nil, &worker.Rejection{Category: ImportRejected,
+			Feedback: []issue.Feedback{{Source: "policy", Body: "The commits could not be accepted: " + reason + "."}}}, nil
+	}
+	// The sandbox says which commit the work started from, and the agent
+	// can change what it says. Only a commit of the base branch is taken:
+	// the diff below is then a diff against the owner's code, never against
+	// a commit of the agent's own.
+	onBase, err := p.Mirror.OnBranch(ctx, ws.BaseSHA, cfg.Workspace.BaseBranch, cfg.Publish.BranchPrefix)
+	if err != nil {
+		return nil, nil, fmt.Errorf("base commit: %w", err)
+	}
+	if !onBase {
+		name := "the base branch"
+		if cfg.Workspace.BaseBranch != "" {
+			name = "the branch " + cfg.Workspace.BaseBranch
+		}
+		return refuse("the workspace does not start from a commit of " + name +
+			". If that branch was rewritten, remove the workspace so that the work starts again")
+	}
 	imp, err := p.Mirror.Import(ctx, filepath.Join(p.HandoffDir, ws.Key+".bundle"), ws.Key, ws.BaseSHA)
 	var rej *mirror.Rejected
 	if errors.As(err, &rej) {
@@ -185,6 +216,11 @@ func (p *Publisher) admit(ctx context.Context, cfg *config.Config, ws workspace.
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("import: %w", err)
+	}
+	if p.ExportedHead != nil {
+		if want := p.ExportedHead(ws.Key); want != "" && want != imp.Head {
+			return refuse("the bundle does not hold the commit that was exported and checked")
+		}
 	}
 
 	diff, err := p.Mirror.Diff(ctx, ws.BaseSHA, imp.Head, mirror.Limits{
@@ -197,8 +233,24 @@ func (p *Publisher) admit(ctx context.Context, cfg *config.Config, ws workspace.
 	if p.HeldSecrets != nil {
 		held = p.HeldSecrets()
 	}
+	// The diff is the change from base to head. Every commit is pushed, so
+	// what one commit adds and a later one removes is looked at as well.
+	var history []string
+	if cfg.Policy.SecretScan && len(imp.Commits) > 1 {
+		limit := max(historyFactor*cfg.Policy.MaxDiffBytes, 1<<20)
+		lines, complete, err := p.Mirror.HistoryAdded(ctx, ws.BaseSHA, imp.Head, limit)
+		if err != nil {
+			return nil, nil, fmt.Errorf("history: %w", err)
+		}
+		if !complete {
+			return nil, &worker.Rejection{Category: PolicyDenied, Feedback: []issue.Feedback{{Source: "policy",
+				Body: fmt.Sprintf("D5 the commits together change more than %d bytes, too much to check one by one. "+
+					"Make the change again from the base commit in fewer, smaller commits", limit)}}}, nil
+		}
+		history = lines
+	}
 	res := policy.Evaluate(cfg.Policy, policy.Input{Changes: diff.Changes, Commits: imp.Commits, BasePaths: diff.BasePaths,
-		BotName: p.BotName, BotEmail: p.BotEmail, HeldSecrets: held})
+		BotName: p.BotName, BotEmail: p.BotEmail, HeldSecrets: held, HistoryAdded: history})
 	if !res.OK() {
 		r := &worker.Rejection{Category: PolicyDenied}
 		for _, line := range res.Feedback() {
