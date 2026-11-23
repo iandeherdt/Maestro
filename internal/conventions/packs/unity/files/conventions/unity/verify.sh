@@ -17,7 +17,12 @@ for platform in EditMode PlayMode; do
     unity -runTests -testPlatform "$platform" -testResults "$work/$platform.xml" -logFile "$work/$platform.log" \
         >/dev/null 2>&1 || status=$?
     if [ ! -f "$work/$platform.xml" ]; then
-        grep -E 'error CS|Scripts have compiler errors' "$work/$platform.log" >&2 || tail -n 40 "$work/$platform.log" >&2
+        # Compiler and analyzer errors: CS for C# itself, other codes (such
+        # as UAL0010) for Unity's analyzers and source generators.
+        errors=$(grep -E ': error [A-Z]+[0-9]+|Scripts have compiler errors' "$work/$platform.log" | sort -u | head -n 60 || true)
+        [ -z "$errors" ] || printf '%s\n' "$errors" >&2
+        # No error with a code: the end of the log says more.
+        case "$errors" in *": error "*) ;; *) tail -n 40 "$work/$platform.log" >&2 ;; esac
         echo "conventions: Unity could not run the $platform tests (exit $status)." >&2
         exit 1
     fi
