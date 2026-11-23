@@ -109,6 +109,14 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 			return 1
 		}
 		d.ok("the root launcher can be started through its sudo rule")
+		if p, err := planSystemd(in); err != nil {
+			d.fail("the sandbox's folders can be used", errText(err))
+		} else if probs := p.problems(ctx); len(probs) > 0 {
+			d.fail("the launcher, its settings, the sandbox user and Claude Code are current",
+				strings.Join(probs, "\n")+"\nSet them up again with: "+mention("maestro setup"))
+		} else {
+			d.ok("the launcher, its settings, the sandbox user and Claude Code " + p.claude + " are current")
+		}
 	} else {
 		d.section("Containers")
 		if err := in.docker(ctx); err != nil {

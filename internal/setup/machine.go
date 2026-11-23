@@ -50,10 +50,51 @@ func (m *Machine) defaults() {
 
 func (*Machine) Title() string { return "Check this machine" }
 
+// SandboxSystemd is the State.Sandbox of the systemd sandbox.
+const SandboxSystemd = "systemd"
+
+var systemdVersionRE = regexp.MustCompile(`systemd (\d+)`)
+var nodeVersionRE = regexp.MustCompile(`^v(\d+)\.`)
+
+// systemdProblems is what the systemd sandbox needs instead of a container
+// engine: systemd, sudo, and Node.js with npm, from which setup installs
+// the pinned Claude Code for the steps.
+func (m *Machine) systemdProblems(ctx context.Context) []string {
+	if m.GOOS != "linux" || m.WSL.Version() != 0 {
+		return []string{"The systemd sandbox runs on Linux only, not in WSL. Run setup without --sandbox to use containers"}
+	}
+	var out []string
+	if v, err := m.Output(ctx, "systemctl", "--version"); err != nil {
+		out = append(out, "systemd does not answer (systemctl --version). The systemd sandbox needs it as the machine's init system")
+	} else if g := systemdVersionRE.FindStringSubmatch(v); g == nil {
+		out = append(out, "The systemd version could not be read.")
+	} else if n, _ := strconv.Atoi(g[1]); n < 239 {
+		out = append(out, fmt.Sprintf("systemd %d is too old; 239 (RHEL 8) or newer is needed, 250 or newer is best.", n))
+	}
+	if !m.Exists("/sys/fs/cgroup/cgroup.controllers") {
+		out = append(out, "This machine uses cgroups v1, where systemd cannot apply the sandbox's memory and CPU limits. "+
+			"Switch to cgroups v2 and restart: sudo grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && sudo reboot")
+	}
+	if _, err := m.LookPath("sudo"); err != nil {
+		out = append(out, "sudo is not installed. Setup uses it once to install the sandbox's root launcher: sudo dnf install sudo")
+	}
+	if v, err := m.Output(ctx, "/usr/bin/node", "--version"); err != nil {
+		out = append(out, "Node.js is not installed in /usr/bin. The steps run Claude Code with it: sudo dnf install nodejs npm")
+	} else if g := nodeVersionRE.FindStringSubmatch(strings.TrimSpace(v)); g == nil {
+		out = append(out, "The Node.js version could not be read.")
+	} else if n, _ := strconv.Atoi(g[1]); n < 18 {
+		out = append(out, fmt.Sprintf("Node.js %d is too old; 18 or newer is needed: sudo dnf module install nodejs:20", n))
+	}
+	if _, err := m.LookPath("npm"); err != nil {
+		out = append(out, "npm is not installed. Setup installs Claude Code for the steps with it: sudo dnf install npm")
+	}
+	return out
+}
+
 var gitVersionRE = regexp.MustCompile(`git version (\d+)\.(\d+)`)
 
 // problems lists what is missing, each with what to do about it.
-func (m *Machine) problems(ctx context.Context) []string {
+func (m *Machine) problems(ctx context.Context, sandbox string) []string {
 	m.defaults()
 	var out []string
 	if _, err := m.LookPath("git"); err != nil {
@@ -71,6 +112,8 @@ func (m *Machine) problems(ctx context.Context) []string {
 		}
 	}
 	switch engine := Engine(m.GOOS, m.LookPath); {
+	case sandbox == SandboxSystemd:
+		out = append(out, m.systemdProblems(ctx)...)
 	case engine == "" && m.GOOS == "darwin":
 		out = append(out, "Docker is not installed. The agent runs in a Docker container. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it")
 	case engine == "" && m.GOOS == "linux" && m.WSL.Version() == 2:
@@ -121,17 +164,28 @@ func WSLProblems(h wsl.Host, dirs ...string) []string {
 	return out
 }
 
-func (m *Machine) Check(ctx context.Context, _ *State) (Status, error) {
-	p := m.problems(ctx)
+func (m *Machine) Check(ctx context.Context, st *State) (Status, error) {
+	sandbox := ""
+	if st != nil {
+		sandbox = st.Sandbox
+	}
+	p := m.problems(ctx, sandbox)
 	if len(p) == 0 {
+		if sandbox == SandboxSystemd {
+			return Status{Done: true, Detail: "Git, systemd, sudo and Node.js are installed."}, nil
+		}
 		return Status{Done: true, Detail: "Git and a container engine (Docker or Podman) are installed."}, nil
 	}
 	return Status{Detail: fmt.Sprintf("%d thing(s) to fix: %s", len(p), strings.Join(short(p), "; "))}, nil
 }
 
-func (m *Machine) Run(ctx context.Context, ui *UI, _ *State) error {
+func (m *Machine) Run(ctx context.Context, ui *UI, st *State) error {
+	sandbox := ""
+	if st != nil {
+		sandbox = st.Sandbox
+	}
 	for {
-		p := m.problems(ctx)
+		p := m.problems(ctx, sandbox)
 		if len(p) == 0 {
 			return nil
 		}
@@ -175,4 +229,42 @@ func Engine(goos string, lookPath func(string) (string, error)) string {
 		}
 	}
 	return ""
+}
+
+var backendLineRE = regexp.MustCompile(`(?m)^  backend: (docker|podman|systemd)$`)
+
+// SwitchSandbox chooses containers ("" or "container") or SandboxSystemd
+// for the steps. A settings file setup wrote earlier gets the new backend
+// on its one `backend:` line; a file that does not have exactly one is left
+// alone, and the error says what to change.
+func SwitchSandbox(st *State, kind string, goos string, lookPath func(string) (string, error)) error {
+	if kind == "container" {
+		kind = ""
+	}
+	if kind != "" && kind != SandboxSystemd {
+		return fmt.Errorf("--sandbox is container or %s", SandboxSystemd)
+	}
+	if st.Sandbox == kind {
+		return nil
+	}
+	st.Sandbox = kind
+	if st.WorkflowFile != "" {
+		raw, err := os.ReadFile(st.WorkflowFile)
+		if err == nil {
+			if n := len(backendLineRE.FindAllIndex(raw, -1)); n != 1 {
+				return fmt.Errorf("%s has %d `backend:` lines under sandbox; set `sandbox.backend` in it yourself", st.WorkflowFile, n)
+			}
+			backend := kind
+			if backend == "" {
+				if backend = Engine(goos, lookPath); backend == "" {
+					backend = "docker"
+				}
+			}
+			raw = backendLineRE.ReplaceAll(raw, []byte("  backend: "+backend))
+			if err := os.WriteFile(st.WorkflowFile, raw, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	return st.Save()
 }

@@ -1244,6 +1244,16 @@ The control zone cannot start processes as another user by itself. A small launc
 - `maestro-launch <worker> login` runs `claude auth login` on the caller's terminal
   (`systemd-run --pty`), with the agent's Claude state and network and no workspace. The sudo
   rule allows exactly these two command lines.
+- `maestro setup --sandbox systemd` installs all of this once, as root through sudo, after
+  showing every command, the launcher's settings and the sudo rule: the user `maestro-agent`
+  (system user, no login, no home), `/opt/maestro/bin` with the pinned Claude Code and a copy of
+  `maestro`, the launcher, its settings, `/var/lib/maestro/<worker>/workspaces` (root, 0711) and
+  `/var/lib/maestro/<worker>/claude` (the sandbox user, 0700), and
+  `/etc/sudoers.d/maestro-<worker>`, checked with `visudo -c` first. Paths under `/home`, `/root`
+  and `/run/user` are already hidden by `ProtectHome`; the service's folders outside them are
+  hidden by name. Releases for Linux carry `maestro-launch` next to `maestro`; `maestro doctor`
+  reports when the installed launcher, its settings, the copy of `maestro` or Claude Code differ
+  from what this Maestro would install.
 - A refused request exits with status 125 and one line on standard error.
 - `export` writes into an empty folder under the hand-off root that only the sandbox user can
   write. The launcher takes the bundle only if it is a regular file, moves it to
