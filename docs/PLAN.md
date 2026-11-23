@@ -64,12 +64,13 @@ the result itself, and opens a pull request for the owner to review and merge.
 
 Each phase lands as one or more pull requests and is done when the listed tests pass.
 
-Progress on 2026-11-23 (release 0.5.17): phases 0, 1, 2, 4 and 5 are done. Phase 2 has both the
+Progress on 2026-11-23 (release 0.5.18): phases 0, 1, 2, 4 and 5 are done. Phase 2 has both the
 labels and the board of an organization (decision 7). Phase 3 is done with the container sandbox
-(Docker, or rootless Podman on RHEL) instead of the native systemd backend, which is still open.
-Phase 6 has five of the seven steps of the guided setup and the background service, which runs on
-the owner's RHEL 8.10 server; `doctor` is open. Phase 7 has started on that server with a game
-project. Windows through WSL 2 is written (0.5.16) and not yet run on a real Windows PC. The
+(Docker, or rootless Podman on RHEL); the native systemd backend has started (the root launcher and
+its client). Phase 6 has five of the seven steps of the guided setup, the background service, which
+runs on the owner's RHEL 8.10 server, and `doctor`, which ran on a new Mac mini with 0.5.18. Phase 7
+has started on that server with a game project. Phase 8 has Linear as a board, not yet run against
+Linear itself. Windows through WSL 2 is written (0.5.16) and not yet run on a real Windows PC. The
 security fixes of 0.5.17 closed three ways past the gates and tightened folder permissions.
 
 | Phase | Scope (SPEC sections) | Done when |
