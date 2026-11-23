@@ -274,13 +274,33 @@ func (in *install) allow(cfg *config.Config) error {
 
 // up prepares the directories and starts the proxies.
 func (in *install) up(ctx context.Context) error {
-	if err := os.MkdirAll(in.auditDir, 0o700); err != nil {
+	if err := in.dirs(); err != nil {
 		return err
 	}
-	// Containers read the mirror and the allowlists, and write the
-	// hand-off, as the sandbox user and not as the service. The mirror
-	// holds the repository and the allowlists hold host names.
-	for _, d := range []string{in.mirrorDir, in.allowDir, in.handoffDir} {
+	if err := in.allow(in.cfg); err != nil {
+		return err
+	}
+	return in.box.Up(ctx, in.allowDir)
+}
+
+// dirs makes the directories of the control zone and sets who may enter
+// them. Containers read the mirror and the allowlists, and write into the
+// hand-off folder of a workspace, as the sandbox user and not as the
+// service, so those folders are open to every user. What keeps the other
+// users of the machine out is the folder above them: a container is given
+// the folder itself and never walks the path to it, another user has to.
+// So the state directory and the hand-off directory are the service's
+// alone.
+func (in *install) dirs() error {
+	for _, d := range []string{in.cfg.Budget.StateDir, in.handoffDir, in.auditDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0o700); err != nil {
+			return err
+		}
+	}
+	for _, d := range []string{in.mirrorDir, in.allowDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
@@ -288,10 +308,7 @@ func (in *install) up(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := in.allow(in.cfg); err != nil {
-		return err
-	}
-	return in.box.Up(ctx, in.allowDir)
+	return nil
 }
 
 func report(stderr io.Writer, err error) int {
