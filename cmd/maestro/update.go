@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/iandeherdt/Maestro/internal/background"
+	"github.com/iandeherdt/Maestro/internal/systemdbox"
 )
 
 // releases is where `maestro update` downloads from. Tests replace it.
@@ -71,14 +72,22 @@ func runUpdate(args []string, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	fmt.Fprintf(stdout, "Downloading maestro %s (this is %s).\n", tag, version)
-	bin, err := download(ctx, hc, releases+"/download/"+tag, runtime.GOOS, runtime.GOARCH)
+	files, err := downloadFiles(ctx, hc, releases+"/download/"+tag, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return report(stderr, fmt.Errorf("%w. Nothing was changed", err))
 	}
-	if err := replaceBinary(self, bin); err != nil {
+	if err := replaceBinary(self, files["maestro"]); err != nil {
 		return report(stderr, fmt.Errorf("replacing %s: %w", self, err))
 	}
 	fmt.Fprintf(stdout, "Checksum ok. %s is now maestro %s.\n", self, tag)
+	if l := files["maestro-launch"]; l != nil {
+		if err := replaceBinary(filepath.Join(filepath.Dir(self), "maestro-launch"), l); err != nil {
+			return report(stderr, fmt.Errorf("placing maestro-launch: %w", err))
+		}
+		if _, err := os.Stat(systemdbox.Launcher); err == nil {
+			fmt.Fprintf(stdout, "The systemd sandbox's root launcher came with it. Install it for root with: %s\n", mention("maestro setup"))
+		}
+	}
 	if *noRestart {
 		fmt.Fprintln(stdout, "The background service keeps running the old version until it restarts.")
 		return 0
@@ -152,6 +161,13 @@ func fetch(ctx context.Context, hc *http.Client, u string) ([]byte, error) {
 // download returns the maestro binary of the release at url for this
 // machine, after checking the archive against the release's SHA256SUMS.
 func download(ctx context.Context, hc *http.Client, url, goos, goarch string) ([]byte, error) {
+	files, err := downloadFiles(ctx, hc, url, goos, goarch)
+	return files["maestro"], err
+}
+
+// downloadFiles is download with every program of the archive: maestro,
+// and on Linux maestro-launch, the systemd sandbox's root launcher.
+func downloadFiles(ctx context.Context, hc *http.Client, url, goos, goarch string) (map[string][]byte, error) {
 	if goos != "darwin" && goos != "linux" {
 		return nil, errors.New("releases are built for macOS and Linux only")
 	}
@@ -183,15 +199,16 @@ func download(ctx context.Context, hc *http.Client, url, goos, goarch string) ([
 		return nil, err
 	}
 	tr := tar.NewReader(zr)
+	files := map[string][]byte{}
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
-			return nil, fmt.Errorf("%s holds no maestro binary", archive)
+			break
 		}
 		if err != nil {
 			return nil, err
 		}
-		if h.Name == "maestro" && h.Typeflag == tar.TypeReg {
+		if (h.Name == "maestro" || h.Name == "maestro-launch") && h.Typeflag == tar.TypeReg {
 			b, err := io.ReadAll(io.LimitReader(tr, maxArchive+1))
 			if err != nil {
 				return nil, err
@@ -199,15 +216,19 @@ func download(ctx context.Context, hc *http.Client, url, goos, goarch string) ([
 			if len(b) > maxArchive {
 				return nil, errors.New("the binary is larger than expected")
 			}
-			return b, nil
+			files[h.Name] = b
 		}
 	}
+	if files["maestro"] == nil {
+		return nil, fmt.Errorf("%s holds no maestro binary", archive)
+	}
+	return files, nil
 }
 
 // replaceBinary writes bin next to path and renames it over path, so a
 // running copy is never half replaced.
 func replaceBinary(path string, bin []byte) error {
-	tmp := filepath.Join(filepath.Dir(path), ".maestro.new")
+	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".new")
 	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
 		return err
 	}

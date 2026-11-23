@@ -72,6 +72,14 @@ main() {
   cp "$tmp/maestro" "$dir/.maestro.new"
   chmod 755 "$dir/.maestro.new"
   mv -f "$dir/.maestro.new" "$dir/maestro"
+  # Linux releases also carry the systemd sandbox's root launcher. It is
+  # only placed here; `maestro setup --sandbox systemd` installs it for root.
+  if tar -tzf "$tmp/$archive" | grep -qx maestro-launch; then
+    tar -xzf "$tmp/$archive" -C "$tmp" maestro-launch
+    cp "$tmp/maestro-launch" "$dir/.maestro-launch.new"
+    chmod 755 "$dir/.maestro-launch.new"
+    mv -f "$dir/.maestro-launch.new" "$dir/maestro-launch"
+  fi
 
   say "Installed $("$dir/maestro" version) in $dir"
   if [ -e "$dir/symphony" ]; then

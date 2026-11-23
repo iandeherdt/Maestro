@@ -25,6 +25,7 @@ import (
 
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/setup"
+	"github.com/iandeherdt/Maestro/internal/systemdbox"
 )
 
 // The image of this test has a stand-in for Claude Code: it is "logged in"
@@ -301,10 +302,10 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 		t.Fatalf("%v\n%s", err, out)
 	}
 	var out bytes.Buffer
-	if err := in.box.BuildImage(ctx, dockerbox.Build{Dockerfile: e2eDockerfile, Binary: bin, Out: &out}); err != nil {
+	if err := in.dbox.BuildImage(ctx, dockerbox.Build{Dockerfile: e2eDockerfile, Binary: bin, Out: &out}); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	defer in.box.Purge(context.Background())
+	defer in.dbox.Purge(context.Background())
 	gh := endpoints{api: srv.URL, git: filepath.Join(root, "remotes"), fileRemote: true}
 
 	// Without a login the service says what to do and starts nothing.
@@ -316,7 +317,7 @@ Work on {{ issue.identifier }}: {{ issue.title }}
 		t.Fatal("the proxies were left running")
 	}
 	if o, err := exec.Command(engine, "run", "--rm", "--user", "10001", "--entrypoint", "", "--mount",
-		"type=volume,src="+in.box.ClaudeVolume()+",dst=/claude", in.cfg.Sandbox.Image, "touch", "/claude/login").CombinedOutput(); err != nil {
+		"type=volume,src="+in.dbox.ClaudeVolume()+",dst=/claude", in.cfg.Sandbox.Image, "touch", "/claude/login").CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, o)
 	}
 
@@ -447,10 +448,22 @@ func TestOpenExplainsWhatIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.box.Worker != "mac" || in.box.Image != "maestro-sandbox:latest" || in.box.Memory != "6g" || in.box.CPUs != "3.00" ||
-		in.box.PIDs != 2048 || in.box.BotName != "sym[bot]" || in.box.MirrorDir != filepath.Join(dir, "state", "mirror") ||
-		in.box.HandoffDir != filepath.Join(dir, "ws", ".handoff") {
-		t.Errorf("box = %+v", in.box)
+	if in.dbox.Worker != "mac" || in.dbox.Image != "maestro-sandbox:latest" || in.dbox.Memory != "6g" || in.dbox.CPUs != "3.00" ||
+		in.dbox.PIDs != 2048 || in.dbox.BotName != "sym[bot]" || in.dbox.MirrorDir != filepath.Join(dir, "state", "mirror") ||
+		in.dbox.HandoffDir != filepath.Join(dir, "ws", ".handoff") {
+		t.Errorf("box = %+v", in.dbox)
+	}
+	// The systemd sandbox: no image, the proxies on sockets in the state.
+	in, err = open(dir, write("systemd"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, ok := in.box.(*systemdbox.Box)
+	if !ok || in.dbox != nil || sb.Worker != "mac" || sb.SocketDir != filepath.Join(dir, "state", "proxy-sockets") || in.bot != "sym[bot]" {
+		t.Errorf("systemd box = %+v %v", in.box, in.dbox)
+	}
+	if err := in.image(context.Background()); err != nil {
+		t.Errorf("image: %v", err)
 	}
 	// No file at all.
 	var errb bytes.Buffer

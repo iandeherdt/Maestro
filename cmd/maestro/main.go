@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -257,40 +259,12 @@ func runProxy(args []string, stderr io.Writer) int {
 }
 
 // proxyListen listens on a TCP address, or on a unix socket with
-// "unix:/path". The systemd sandbox binds the socket into each unit with
-// network (SPEC 11.3). Its folder must be closed to other users: the socket
-// itself is open to all, because the sandbox user connects to it.
+// "unix:/path" (proxy.ListenUnix).
 func proxyListen(addr string) (net.Listener, error) {
-	path, ok := strings.CutPrefix(addr, "unix:")
-	if !ok {
-		return net.Listen("tcp", addr)
+	if path, ok := strings.CutPrefix(addr, "unix:"); ok {
+		return proxy.ListenUnix(path)
 	}
-	if !filepath.IsAbs(path) {
-		return nil, fmt.Errorf("%s: the socket path must be absolute", path)
-	}
-	fi, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		return nil, err
-	}
-	if fi.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s: the folder of the socket must be closed to other users (chmod 700)", filepath.Dir(path))
-	}
-	// A socket left by an earlier run; nothing else is removed.
-	if fi, err := os.Lstat(path); err == nil {
-		if fi.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("%s exists and is not a socket", path)
-		}
-		os.Remove(path)
-	}
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0o666); err != nil {
-		ln.Close()
-		return nil, err
-	}
-	return ln, nil
+	return net.Listen("tcp", addr)
 }
 
 func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -299,6 +273,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", "", "where setup keeps its state and the App key (default: the user's configuration directory)")
 	port := fs.Int("port", setup.DefaultPort, "loopback port used while creating the GitHub App")
 	board := fs.String("board", "", "where the tickets are kept: github or linear (asked when not given)")
+	sandboxKind := fs.String("sandbox", "", "where the steps run: container (Docker or Podman, the default) or systemd (Linux)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -327,6 +302,12 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if ps, err := listProjects(); err == nil {
 		st.TakenWorkers = workersOf(ps, abs)
 	}
+	if *sandboxKind != "" {
+		if err := setup.SwitchSandbox(st, *sandboxKind, runtime.GOOS, exec.LookPath); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
 	if *board != "" {
 		kept, err := setup.SwitchTracker(st, *board)
 		if err != nil {
@@ -354,6 +335,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.Tickets{Linear: setup.LinearBoard{Endpoint: linearEndpoint,
 			AskKey: func(ui *setup.UI, prompt string) (string, error) { return askSecret(ui.In, stdin, ui.Out, prompt) }}},
 		&setup.WorkflowFile{},
+		&setupSystemd{setupDir: abs},
 		newSetupUnity(),
 	}
 	// Ctrl-C ends whatever the wizard waits for on the network. A question
@@ -395,12 +377,20 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		tickets, pickup = "the board", "cards in the Todo column whose Worker is "+st.Worker
 	}
 	ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
-	ui.Say("Three commands are left. Run them in this order, with Docker running:")
-	ui.Commands([][2]string{
-		{mention("maestro image"), "builds the container the agent works in (a few minutes, once)"},
-		{mention("maestro login"), "signs Claude Code in inside that container (once)"},
-		{mention("maestro run"), "starts the service; it then picks up " + pickup},
-	})
+	if st.Sandbox == setup.SandboxSystemd {
+		ui.Say("Two commands are left. Run them in this order:")
+		ui.Commands([][2]string{
+			{mention("maestro login"), "signs Claude Code in inside the sandbox (once)"},
+			{mention("maestro run"), "starts the service; it then picks up " + pickup},
+		})
+	} else {
+		ui.Say("Three commands are left. Run them in this order, with Docker running:")
+		ui.Commands([][2]string{
+			{mention("maestro image"), "builds the container the agent works in (a few minutes, once)"},
+			{mention("maestro login"), "signs Claude Code in inside that container (once)"},
+			{mention("maestro run"), "starts the service; it then picks up " + pickup},
+		})
+	}
 	if st.UsesLinear() {
 		ui.Say("")
 		ui.Say("Working with Linear, once the service runs:")

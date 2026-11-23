@@ -1,7 +1,8 @@
 // Command maestro-launch is the root launcher of the systemd sandbox
 // (SPEC 11.2, 11.3). The service runs it through one sudo rule:
 //
-//	maestro-launch <worker>     a request on standard input, see package launch
+//	maestro-launch <worker>         a request on standard input, see package launch
+//	maestro-launch <worker> login   Claude Code's sign-in, on the caller's terminal
 //	maestro-launch inside ...   the helper that runs in each unit, unprivileged
 //
 // It is installed root-owned at /usr/local/libexec/maestro-launch. Its
@@ -31,8 +32,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) >= 1 && args[0] == "inside" {
 		return launch.Inside(args[1:], stderr)
 	}
-	if len(args) != 1 || !sandbox.ValidWorker(args[0]) {
+	login := len(args) == 2 && args[1] == "login"
+	if !(len(args) == 1 || login) || !sandbox.ValidWorker(args[0]) {
 		fmt.Fprintln(stderr, "usage: maestro-launch <worker>   (a request on standard input)")
+		fmt.Fprintln(stderr, "       maestro-launch <worker> login")
 		return 2
 	}
 	if os.Geteuid() != 0 {
@@ -51,16 +54,21 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return failed
 		}
 	}
-	r := launch.NewReader(stdin)
-	req, err := launch.ReadRequest(r)
-	if err != nil {
-		fmt.Fprintln(stderr, "maestro-launch:", err)
-		return failed
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer stop()
 	l := &launch.Launcher{Cfg: cfg}
-	code, err := l.Handle(ctx, req, r, stdout, stderr)
+	var code int
+	if login {
+		code, err = l.Login(ctx, stdin, stdout, stderr)
+	} else {
+		r := launch.NewReader(stdin)
+		req, rerr := launch.ReadRequest(r)
+		if rerr != nil {
+			fmt.Fprintln(stderr, "maestro-launch:", rerr)
+			return failed
+		}
+		code, err = l.Handle(ctx, req, r, stdout, stderr)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "maestro-launch:", err)
 		return failed

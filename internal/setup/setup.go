@@ -156,6 +156,9 @@ type State struct {
 	LinearAuthor   string   `json:"linear_author,omitempty"`
 	LinearHandoff  string   `json:"linear_handoff,omitempty"`
 	LinearTerminal []string `json:"linear_terminal,omitempty"`
+	// Sandbox is SandboxSystemd when the steps run in systemd units
+	// instead of containers (`maestro setup --sandbox systemd`, Linux only).
+	Sandbox string `json:"sandbox,omitempty"`
 
 	// TakenWorkers are the worker names of the other projects on this
 	// machine. Every worker has its own containers, volumes and service, so
