@@ -148,7 +148,7 @@ func unityActivate(dir, settings string, store unity.Store, mode int, stdin io.R
 		fmt.Fprintln(stdout)
 		fmt.Fprintln(stdout, "Starting the container and installing Unity's command-line tool in it. That takes a")
 		fmt.Fprintln(stdout, "minute or two, longer on a Mac with Apple silicon; then a sign-in link appears here.")
-		files, err := in.box.SignInUnity(ctx, stderr)
+		files, err := in.dbox.SignInUnity(ctx, stderr)
 		if err != nil {
 			fmt.Fprintln(stderr, "If the sign-in does not work, `maestro unity activate --password` uses the email and")
 			fmt.Fprintln(stderr, "password of an account without two-step verification instead.")
@@ -174,7 +174,7 @@ func unityActivate(dir, settings string, store unity.Store, mode int, stdin io.R
 		return report(stderr, err)
 	}
 	fmt.Fprintln(stdout, "Activating. This takes a minute.")
-	files, err := in.box.ActivateUnity(ctx, acct, stderr)
+	files, err := in.dbox.ActivateUnity(ctx, acct, stderr)
 	if err != nil {
 		return report(stderr, err)
 	}

@@ -74,6 +74,12 @@ type Config struct {
 	// sandbox inside the agent step (claude.inner_sandbox).
 	InnerSandbox bool `json:"inner_sandbox,omitempty"`
 
+	// Tools holds the programs the steps may use besides the system's:
+	// claude (Claude Code) and maestro, for the self-test's probe. It is
+	// first on each step's PATH. Steps cannot see any home folder, so
+	// these are installed root-owned outside them. Default /opt/maestro/bin.
+	Tools string `json:"tools,omitempty"`
+
 	// Relay is this program's path, run inside a unit with network to
 	// forward the proxy port. Default: the launcher's own path.
 	Relay string `json:"relay,omitempty"`
@@ -115,7 +121,7 @@ func (c *Config) Check() error {
 	}
 	paths := map[string]string{"workspace_root": c.WorkspaceRoot, "handoff_root": c.HandoffRoot,
 		"mirror": c.Mirror, "claude_state": c.ClaudeState}
-	for k, p := range map[string]string{"skills": c.Skills, "agents": c.Agents, "unity_licence": c.UnityLicence, "relay": c.Relay} {
+	for k, p := range map[string]string{"skills": c.Skills, "agents": c.Agents, "unity_licence": c.UnityLicence, "relay": c.Relay, "tools": c.Tools} {
 		if p != "" {
 			paths[k] = p
 		}
@@ -189,6 +195,16 @@ func rootOwned(path string) error {
 			return nil
 		}
 	}
+}
+
+// DefaultTools is where setup installs the steps' own programs.
+const DefaultTools = "/opt/maestro/bin"
+
+func (c *Config) tools() string {
+	if c.Tools != "" {
+		return c.Tools
+	}
+	return DefaultTools
 }
 
 // ConfigPath is where the configuration of a worker lives.

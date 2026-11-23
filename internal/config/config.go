@@ -775,8 +775,8 @@ func (b *builder) sandbox(s *section) {
 	if !imageRE.MatchString(sb.Image) {
 		b.fail("sandbox.image", "must be an image name such as maestro-sandbox:latest")
 	}
-	// The docker backend runs its own proxy next to the containers.
-	if sb.Proxy == "" && (sb.Backend == "docker" || sb.Backend == "podman") {
+	// The docker and systemd backends run their own proxies.
+	if sb.Proxy == "" && (sb.Backend == "docker" || sb.Backend == "podman" || sb.Backend == "systemd") {
 	} else if sb.Proxy == "" {
 		b.fail("sandbox.network.proxy", "is required")
 	} else if host, port, err := net.SplitHostPort(sb.Proxy); err != nil || host == "" || !validPort(port) {

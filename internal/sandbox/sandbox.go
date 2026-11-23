@@ -21,6 +21,13 @@ const (
 	StepAgent    Step = "agent"
 	StepVerify   Step = "verify"
 	StepExport   Step = "export"
+	// StepLoginStatus asks Claude Code in the sandbox whether it is
+	// signed in, with the agent's state and network. It takes no
+	// workspace and no command: the launcher runs `claude auth status`.
+	StepLoginStatus Step = "login-status"
+	// StepSelfTest runs the probe (SPEC 11.6) with one network profile in
+	// a throwaway workspace. It takes no workspace and no command.
+	StepSelfTest Step = "selftest"
 )
 
 // Network profiles. The launcher maps them to the proxy allowlists of the

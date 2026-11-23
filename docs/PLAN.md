@@ -96,11 +96,12 @@ In this order, one pull request each:
    cgroups v1 and missing cgroup controllers, a sandbox image missing or out of date, no login.
 2. Linear as a board (phase 8, SPEC 12.6). Written: the board, `maestro setup` for Linear and
    planning with sub-issues. Left: a first run against Linear itself.
-3. Native Linux sandbox with systemd (phase 3, SPEC 11). Step 1 written: the root launcher
-   `maestro-launch` (SPEC 11.2, 11.3). Step 2 written: `internal/systemdbox`, which sends each
-   step to the launcher through sudo, and `maestro proxy --listen unix:PATH`. Left: the service
-   choosing this backend (`sandbox.backend: systemd`) with its proxies, Claude login and self-test,
-   setup and doctor, then a run on a RHEL 9 compatible machine.
+3. Native Linux sandbox with systemd (phase 3, SPEC 11). Steps 1 and 2 are in 0.5.18: the root
+   launcher `maestro-launch` (SPEC 11.2, 11.3) and `internal/systemdbox`, which sends each step to
+   it through sudo. Step 3a written: the service runs on `sandbox.backend: systemd`, with its
+   proxies on unix sockets, login, self-test and doctor through the launcher. Left: setup
+   installing the launcher, the sandbox user, the folders and the sudo rule (3b), then a run on
+   the RHEL server (3c).
 4. Native Mac sandbox for work that needs macOS itself, Xcode and Unity (phase 9, Appendix B).
    A plan comes first.
 5. Code hosts other than GitHub (phase 10). A plan comes first.

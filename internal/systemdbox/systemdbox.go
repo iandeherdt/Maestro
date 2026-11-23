@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -42,11 +43,19 @@ type Box struct {
 	// Sudo and LauncherPath are the programs run. Defaults: sudo and
 	// Launcher. Tests replace them.
 	Sudo, LauncherPath string
+	// SocketDir holds the proxies' sockets, one per profile (Socket). It
+	// is the service user's alone; the launcher binds a socket into each
+	// unit with network.
+	SocketDir string
+	// Log receives the proxies' log.
+	Log *slog.Logger
+
+	px proxies
 }
 
 func fail(format string, a ...any) error { return &sandbox.Error{Msg: fmt.Sprintf(format, a...)} }
 
-func (b *Box) command(ctx context.Context) *exec.Cmd {
+func (b *Box) command(ctx context.Context, extra ...string) *exec.Cmd {
 	sudo, launcher := b.Sudo, b.LauncherPath
 	if sudo == "" {
 		sudo = "sudo"
@@ -55,7 +64,7 @@ func (b *Box) command(ctx context.Context) *exec.Cmd {
 		launcher = Launcher
 	}
 	// -n: never ask for a password; the rule allows exactly this command.
-	cmd := exec.CommandContext(ctx, sudo, "-n", "--", launcher, b.Worker)
+	cmd := exec.CommandContext(ctx, sudo, append([]string{"-n", "--", launcher, b.Worker}, extra...)...)
 	// The launcher stops the unit when it is told to; it is killed only if
 	// it does not finish in time.
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
@@ -82,7 +91,9 @@ func (b *Box) launch(ctx context.Context, req sandbox.Request, stdin []byte, std
 	}
 	// The launcher checks all of this again; checking here gives a clear
 	// error before sudo runs.
-	if !sandbox.ValidKey(req.WorkspaceKey) {
+	// The login status and the self-test have no workspace of their own.
+	noKey := req.Step == sandbox.StepLoginStatus || req.Step == sandbox.StepSelfTest
+	if noKey && req.WorkspaceKey != "" || !noKey && !sandbox.ValidKey(req.WorkspaceKey) {
 		return sandbox.Result{}, fail("invalid workspace key")
 	}
 	for k, v := range req.Env {

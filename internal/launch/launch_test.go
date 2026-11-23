@@ -433,3 +433,81 @@ func TestOnlyTheStandardLibrary(t *testing.T) {
 		}
 	}
 }
+
+func TestLoginAndItsStatusHaveNoWorkspace(t *testing.T) {
+	l, f := testLauncher(t)
+	if _, err := l.Login(context.Background(), strings.NewReader(""), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := handle(l, sandbox.Request{Step: sandbox.StepLoginStatus, NetworkProfile: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	login, status := f.calls[0], f.calls[1]
+	for _, c := range []call{login, status} {
+		if c.hasPrefix("--property=BindPaths=" + l.Cfg.WorkspaceRoot) {
+			t.Errorf("a workspace is bound:\n%s", strings.Join(c.args, "\n"))
+		}
+		if !c.has("BindPaths="+l.Cfg.ClaudeState+":/claude") || !c.has("PrivateNetwork=yes") ||
+			!c.has("BindReadOnlyPaths="+l.Cfg.ProxySockets["agent"]+":"+proxySocket) || !c.has("WorkingDirectory=/tmp") ||
+			!c.has("PATH="+DefaultTools+":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") {
+			t.Errorf("unit:\n%s", strings.Join(c.args, "\n"))
+		}
+	}
+	if !login.has("--pty") || login.has("--pipe") || !login.has("TERM=xterm-256color") || login.hasPrefix("--setenv=CI=") {
+		t.Errorf("login unit:\n%s", strings.Join(login.args, "\n"))
+	}
+	if got := strings.Join(login.args[len(login.args)-4:], " "); got != DefaultTools+"/claude auth login --claudeai" {
+		t.Errorf("login command %q", got)
+	}
+	if got := strings.Join(status.args[len(status.args)-4:], " "); got != DefaultTools+"/claude auth status --json" || !status.has("--pipe") {
+		t.Errorf("status command %q", got)
+	}
+	if !strings.HasPrefix(login.unit, "maestro-linux-login-") || !strings.HasPrefix(status.unit, "maestro-linux-login-status-") {
+		t.Errorf("units %s %s", login.unit, status.unit)
+	}
+	// The caller chooses nothing of these.
+	for _, req := range []sandbox.Request{
+		{Step: sandbox.StepLoginStatus, NetworkProfile: "agent", Argv: []string{"sh"}},
+		{Step: sandbox.StepLoginStatus, NetworkProfile: "agent", WorkspaceKey: "GH-1"},
+		{Step: sandbox.StepLoginStatus, NetworkProfile: "hooks"},
+		{Step: sandbox.StepSelfTest, NetworkProfile: "none", Env: map[string]string{"A": "b"}},
+		{Step: sandbox.StepSelfTest, NetworkProfile: "elsewhere"},
+	} {
+		if _, _, err := handle(l, req); !errors.Is(err, ErrRequest) {
+			t.Errorf("%+v: %v", req, err)
+		}
+	}
+}
+
+func TestSelfTestRunsTheProbeInAThrowawayWorkspace(t *testing.T) {
+	l, f := testLauncher(t)
+	f.answer = func(argv []string, w io.Writer) int {
+		if argv[0] == DefaultTools+"/maestro" {
+			io.WriteString(w, `{"name":"runs as an ordinary user","ok":true}`+"\n")
+		}
+		return 0
+	}
+	_, out, err := handle(l, sandbox.Request{Step: sandbox.StepSelfTest, NetworkProfile: "hooks"})
+	if err != nil || !strings.Contains(out, "ordinary user") {
+		t.Fatalf("%q %v", out, err)
+	}
+	probe := f.calls[0]
+	want := DefaultTools + "/maestro probe --profile hooks --canary " + sandbox.CanaryName + " --deny " + sandbox.ProbeDenyHost +
+		" --pids 512 --memory " + strconv.Itoa(4<<30)
+	if got := strings.Join(probe.args[len(probe.args)-12:], " "); got != want {
+		t.Errorf("probe %q", got)
+	}
+	if !probe.hasPrefix("--property=BindPaths="+filepath.Join(l.Cfg.WorkspaceRoot, "selftest-")) ||
+		!probe.has("BindReadOnlyPaths="+l.Cfg.ProxySockets["hooks"]+":"+proxySocket) || probe.hasPrefix("--property=BindPaths="+l.Cfg.ClaudeState) {
+		t.Errorf("probe unit:\n%s", strings.Join(probe.args, "\n"))
+	}
+	if len(f.calls) != 2 || !strings.Contains(strings.Join(f.calls[1].args, " "), "-delete") {
+		t.Errorf("the workspace is not emptied: %d calls", len(f.calls))
+	}
+	if left, _ := os.ReadDir(l.Cfg.WorkspaceRoot); len(left) != 0 {
+		t.Errorf("left behind: %v", left)
+	}
+	if n, ok := memoryBytes("512M"); !ok || n != 512<<20 {
+		t.Errorf("memoryBytes %d", n)
+	}
+}

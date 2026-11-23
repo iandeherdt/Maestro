@@ -272,7 +272,7 @@ func TestInvalid(t *testing.T) {
 		{"bad permission mode", minimal + "claude:\n  permission_mode: yolo\n", "claude.permission_mode"},
 		{"missing sandbox backend", with("  backend: systemd\n", "", ""), "sandbox.backend"},
 		{"no sandbox backend 'none'", with("backend: systemd", "backend: none", ""), "sandbox.backend"},
-		{"missing proxy", with("    proxy: 127.0.0.1:3128\n", "    allow_agent: []\n", ""), "sandbox.network.proxy"},
+		{"missing proxy", strings.Replace(with("    proxy: 127.0.0.1:3128\n", "    allow_agent: []\n", ""), "backend: systemd", "backend: macos-user", 1), "sandbox.network.proxy"},
 		{"proxy without port", with("proxy: 127.0.0.1:3128", "proxy: localhost", ""), "sandbox.network.proxy"},
 		{"ip address in allowlist", with("proxy: 127.0.0.1:3128", "proxy: 127.0.0.1:3128\n    allow_hooks: [10.0.0.5]", ""), "sandbox.network.allow_hooks"},
 		{"url in allowlist", with("proxy: 127.0.0.1:3128", "proxy: 127.0.0.1:3128\n    allow_agent: ['https://a.example/x']", ""), "sandbox.network.allow_agent"},
