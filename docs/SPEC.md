@@ -1229,15 +1229,37 @@ The control zone cannot start processes as another user by itself. A small launc
 - The Linux launcher is `maestro-launch <worker>`. Its configuration is
   `/etc/maestro/launch-<worker>.json`: the sandbox user, the service user, the workspace root, the
   hand-off root, the mirror, the agent's Claude state, the skills, agents and licence folders, the
-  hidden paths, one proxy socket per network profile, the commit identity and the unit limits. The
+  hidden paths, one proxy socket per network profile, the folder of the steps' own programs
+  (`tools`, default `/opt/maestro/bin`: Claude Code and `maestro` for the probe, root-owned, first
+  on each step's `PATH`), the commit identity and the unit limits. The
   file and every folder above it MUST belong to root and be writable by root only; otherwise the
   launcher refuses to start. Unknown fields are an error.
 - It refuses unless it runs as root and the caller (`SUDO_UID`) is the configured service user.
 - The request is the first line of standard input. The rest of standard input is the step's own.
+- Two more steps take a network profile and nothing else; the launcher chooses what they run:
+  `login-status` (agent profile) runs `claude auth status --json` with the agent's Claude state
+  and no workspace, and `selftest` runs the probe (Section 11.6) with the given profile in a
+  workspace it makes for the purpose and removes again. Whatever starts `systemd-run` carries a
+  canary variable that the probe must not see.
+- `maestro-launch <worker> login` runs `claude auth login` on the caller's terminal
+  (`systemd-run --pty`), with the agent's Claude state and network and no workspace. The sudo
+  rule allows exactly these two command lines.
+- `maestro setup --sandbox systemd` installs all of this once, as root through sudo, after
+  showing every command, the launcher's settings and the sudo rule: the user `maestro-agent`
+  (system user, no login, no home), `/opt/maestro/bin` with the pinned Claude Code and a copy of
+  `maestro`, the launcher, its settings, `/var/lib/maestro/<worker>/workspaces` (root, 0711) and
+  `/var/lib/maestro/<worker>/claude` (the sandbox user, 0700), and
+  `/etc/sudoers.d/maestro-<worker>`, checked with `visudo -c` first. Paths under `/home`, `/root`
+  and `/run/user` are already hidden by `ProtectHome`; the service's folders outside them are
+  hidden by name. Releases for Linux carry `maestro-launch` next to `maestro`; `maestro doctor`
+  reports when the installed launcher, its settings, the copy of `maestro` or Claude Code differ
+  from what this Maestro would install.
 - A refused request exits with status 125 and one line on standard error.
 - `export` writes into an empty folder under the hand-off root that only the sandbox user can
   write. The launcher takes the bundle only if it is a regular file, moves it to
-  `<handoff_root>/<key>.bundle` and gives it to the service user with mode 0600.
+  `<handoff_root>/<key>.bundle` and gives it to the service user with mode 0600. It opens the
+  bundle without following links and changes owner and mode through the open file, so no path
+  that another user can change redirects what root does.
 
 ### 11.3 Linux Backend (`systemd`)
 
@@ -1291,9 +1313,11 @@ BindReadOnlyPaths=<proxy socket of the profile>:/run/maestro-proxy.sock   # only
 
 ### 11.4 Network Egress
 
-- A forward proxy runs on the worker as its own user, listening on one unix socket per network
-  profile with the systemd backend (Section 11.3), or on loopback (or the VM's host-only
-  address) otherwise. It accepts only `CONNECT` to port 443 for host names on its allowlist, resolves names
+- A forward proxy runs on the worker as its own user, listening on loopback (or the VM's
+  host-only address). With the systemd backend (Section 11.3) the service serves one proxy per
+  network profile itself, as the service user, on a unix socket in a folder only that user can
+  enter; a second Maestro process of the same installation (`maestro login` beside the running
+  service) uses the sockets that already answer. It accepts only `CONNECT` to port 443 for host names on its allowlist, resolves names
   itself, refuses destinations that resolve to private, loopback, link-local or multicast
   addresses, and logs every request with the unit name.
 - Allowlists by network profile:

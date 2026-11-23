@@ -16,6 +16,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
 // doctor collects what `maestro doctor` finds and prints it as it goes.
@@ -101,22 +102,39 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 		d.fail("this WSL distribution can run the service", strings.Join(p, "\n"))
 	}
 
-	d.section("Containers")
-	if err := in.docker(ctx); err != nil {
-		d.fail("the container engine answers", errText(err))
-		return 1
-	}
-	d.ok("the container engine answers (" + engineName(in) + ")")
-	if in.box.Podman {
-		d.podman(ctx)
-	}
-	if err := in.image(ctx); err != nil {
-		d.fail("the sandbox image is there", errText(err))
-		return 1
-	}
-	d.ok("the sandbox image " + in.cfg.Sandbox.Image + " is there")
-	if why := imageOutdated(ctx, in); why != "" {
-		d.warn("the sandbox image is current", why+" Build it again with: "+mention("maestro image"))
+	if in.dbox == nil {
+		d.section("Sandbox (systemd)")
+		if err := in.docker(ctx); err != nil {
+			d.fail("the root launcher can be started", errText(err))
+			return 1
+		}
+		d.ok("the root launcher can be started through its sudo rule")
+		if p, err := planSystemd(in); err != nil {
+			d.fail("the sandbox's folders can be used", errText(err))
+		} else if probs := p.problems(ctx); len(probs) > 0 {
+			d.fail("the launcher, its settings, the sandbox user and Claude Code are current",
+				strings.Join(probs, "\n")+"\nSet them up again with: "+mention("maestro setup"))
+		} else {
+			d.ok("the launcher, its settings, the sandbox user and Claude Code " + p.claude + " are current")
+		}
+	} else {
+		d.section("Containers")
+		if err := in.docker(ctx); err != nil {
+			d.fail("the container engine answers", errText(err))
+			return 1
+		}
+		d.ok("the container engine answers (" + engineName(in) + ")")
+		if in.dbox.Podman {
+			d.podman(ctx)
+		}
+		if err := in.image(ctx); err != nil {
+			d.fail("the sandbox image is there", errText(err))
+			return 1
+		}
+		d.ok("the sandbox image " + in.cfg.Sandbox.Image + " is there")
+		if why := imageOutdated(ctx, in); why != "" {
+			d.warn("the sandbox image is current", why+" Build it again with: "+mention("maestro image"))
+		}
 	}
 
 	// The self-test and the login need the proxies. A running service has
@@ -147,7 +165,7 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 	if err != nil {
 		d.fail("the self-test runs", errText(err))
 	} else {
-		d.selfTest(rep)
+		d.selfTest(rep, in.oldProbe())
 	}
 
 	d.section("GitHub")
@@ -172,17 +190,19 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 }
 
 func engineName(in *install) string {
-	if in.box.Podman {
+	if in.dbox == nil {
+		return "systemd"
+	}
+	if in.dbox.Podman {
 		return "podman"
 	}
 	return "docker"
 }
 
 // selfTest prints the self-test's checks, grouped by network profile.
-func (d *doctor) selfTest(rep dockerbox.SelfTestReport) {
+func (d *doctor) selfTest(rep sandbox.SelfTestReport, old string) {
 	if rep.OldImage {
-		d.fail("the sandbox image can run the self-test",
-			"It was built by an older Maestro. Build it again with: "+mention("maestro image"))
+		d.fail("the sandbox can run the self-test", old)
 		return
 	}
 	labels := map[string]string{"none": "a step without network", "hooks": "a hook or a check", "agent": "the agent"}
@@ -283,7 +303,7 @@ func cgroupAdvice(rootless bool, version, controllers string) string {
 
 // imageOutdated says why the image does not fit the settings, or "".
 func imageOutdated(ctx context.Context, in *install) string {
-	have, ok := in.box.ImageLabel(ctx, imagePacksLabel)
+	have, ok := in.dbox.ImageLabel(ctx, imagePacksLabel)
 	if !ok {
 		return "The image carries no list of its packs; it was built by an older Maestro."
 	}
@@ -298,7 +318,7 @@ func imageOutdated(ctx context.Context, in *install) string {
 		return ""
 	}
 	extra := imageExtra(packs, len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "")
-	if lines, _ := in.box.ImageLabel(ctx, imageLinesLabel); lines != linesHash(extra) {
+	if lines, _ := in.dbox.ImageLabel(ctx, imageLinesLabel); lines != linesHash(extra) {
 		return "This version of Maestro puts more in the image."
 	}
 	return ""

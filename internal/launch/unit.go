@@ -39,6 +39,7 @@ type unit struct {
 	env     map[string]string
 	argv    []string // run inside the unit by the "inside" helper
 	network string   // "", agent or hooks
+	pty     bool     // a terminal instead of pipes, for the login
 }
 
 func unitToken() string {
@@ -58,6 +59,9 @@ type spec struct {
 	licence bool // the Unity licence, read-only
 	workdir string
 	timeout int64 // milliseconds
+	// noWorkspace: the step has no workspace (the login and its status).
+	noWorkspace bool
+	pty         bool
 }
 
 // workspace is the host folder of a workspace.
@@ -69,9 +73,9 @@ func (c *Config) handoff(key string) string { return filepath.Join(c.HandoffRoot
 func (c *Config) bundle(key string) string  { return filepath.Join(c.HandoffRoot, key+".bundle") }
 
 // baseEnv is the whole environment of a step. Nothing is inherited.
-func baseEnv(network string) map[string]string {
+func baseEnv(network, tools string) map[string]string {
 	env := map[string]string{
-		"HOME": "/tmp", "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME": "/tmp", "PATH": tools + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"LANG": "C.UTF-8", "TZ": "UTC", "CI": "1", "TERM": "dumb", "NO_PROXY": "",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 	}
@@ -86,14 +90,20 @@ func baseEnv(network string) map[string]string {
 // build turns a spec into a unit. Every path and property comes from the
 // configuration; the request contributed only checked names.
 func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, error) {
-	if !sandbox.ValidKey(s.key) {
+	name := "maestro-" + c.Worker + "-"
+	switch {
+	case s.noWorkspace && s.key == "":
+	case !s.noWorkspace && sandbox.ValidKey(s.key):
+		name += strings.ToLower(s.key) + "-"
+	default:
 		return nil, errors.New("invalid workspace key")
 	}
 	u := &unit{
-		name:    "maestro-" + c.Worker + "-" + strings.ToLower(s.key) + "-" + string(s.step) + "-" + unitToken(),
-		env:     baseEnv(s.network),
+		name:    name + string(s.step) + "-" + unitToken(),
+		env:     baseEnv(s.network, c.tools()),
 		argv:    argv,
 		network: s.network,
+		pty:     s.pty,
 	}
 	for k, v := range extra {
 		if !sandbox.AllowedEnv(k, v) {
@@ -138,7 +148,9 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 	// Whole seconds, rounded up, so a short limit is never zero.
 	p("RuntimeMaxSec=" + strconv.FormatInt((timeout+999)/1000, 10))
 
-	p("BindPaths=" + c.workspace(s.key) + ":" + workDir)
+	if !s.noWorkspace {
+		p("BindPaths=" + c.workspace(s.key) + ":" + workDir)
+	}
 	if s.mirror {
 		p("BindReadOnlyPaths=" + c.Mirror + ":" + mirrorDir)
 	}
@@ -179,7 +191,11 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 // is always this program's "inside" helper, which starts the relay when
 // the step has network, then runs argv.
 func (u *unit) args(self string) []string {
-	a := []string{"--wait", "--collect", "--pipe", "--quiet", "--service-type=exec", "--unit=" + u.name}
+	stdio := "--pipe"
+	if u.pty {
+		stdio = "--pty"
+	}
+	a := []string{"--wait", "--collect", stdio, "--quiet", "--service-type=exec", "--unit=" + u.name}
 	for _, kv := range u.props {
 		a = append(a, "--property="+kv)
 	}

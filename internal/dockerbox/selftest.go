@@ -9,7 +9,6 @@ package dockerbox
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,54 +28,16 @@ import (
 	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
-// ProbeCheck is the answer to one check.
-type ProbeCheck struct {
-	// Profile is the network profile the probe ran with: none, agent or
-	// hooks.
-	Profile string `json:"profile"`
-	Name    string `json:"name"`
-	OK      bool   `json:"ok"`
-	// Advisory checks are reported and never stop the service.
-	Advisory bool   `json:"advisory,omitempty"`
-	Detail   string `json:"detail,omitempty"`
-}
+// ProbeCheck and SelfTestReport are shared with the other backends.
+type (
+	ProbeCheck     = sandbox.ProbeCheck
+	SelfTestReport = sandbox.SelfTestReport
+)
 
-// SelfTestReport is what SelfTest found.
-type SelfTestReport struct {
-	Checks []ProbeCheck
-	// OldImage is set when the image's maestro has no probe: it was built
-	// by an older Maestro. No check ran then.
-	OldImage bool
-}
-
-// Failed lists the required checks that did not pass.
-func (r SelfTestReport) Failed() []ProbeCheck {
-	var out []ProbeCheck
-	for _, c := range r.Checks {
-		if !c.OK && !c.Advisory {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// Warnings lists the advisory checks that did not pass.
-func (r SelfTestReport) Warnings() []ProbeCheck {
-	var out []ProbeCheck
-	for _, c := range r.Checks {
-		if !c.OK && c.Advisory {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// canaryName is set in the environment of the container command during
-// the self-test. The probe must not see it.
-const canaryName = "MAESTRO_SELFTEST_CANARY"
-
-// probeDenyHost is a host no allowlist has a reason to name.
-const probeDenyHost = "example.org"
+const (
+	canaryName    = sandbox.CanaryName
+	probeDenyHost = sandbox.ProbeDenyHost
+)
 
 // SelfTest runs the probe in a container for each network profile, the
 // way a step is run. The proxies must be up (Up). It removes what it
@@ -160,23 +121,7 @@ func (b *Box) probe(ctx context.Context, key, profile string) ([]ProbeCheck, boo
 }
 
 func parseProbe(out []byte, profile string) ([]ProbeCheck, error) {
-	var checks []ProbeCheck
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if !strings.HasPrefix(line, "{") {
-			continue
-		}
-		var c ProbeCheck
-		if err := json.Unmarshal([]byte(line), &c); err != nil {
-			return nil, err
-		}
-		// The probe runs in the sandbox: it says what it found, not which
-		// profile it ran with.
-		c.Profile = profile
-		checks = append(checks, c)
-	}
-	return checks, sc.Err()
+	return sandbox.ParseProbe(out, profile)
 }
 
 // memoryBytes turns docker's "6g" into bytes.

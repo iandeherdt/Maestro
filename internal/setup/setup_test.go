@@ -236,7 +236,7 @@ func TestMachineInWSL(t *testing.T) {
 		m := machine(nil, "git version 2.43.0", "linux", true)
 		m.WSL = wsl.Host{ReadFile: files(tc.release, tc.init), Getenv: func(string) string { return "Ubuntu" }}
 		m.Dir = tc.dir
-		got := m.problems(ctx)
+		got := m.problems(ctx, "")
 		if len(got) != len(tc.want) {
 			t.Errorf("%s: problems %q", name, got)
 			continue
@@ -766,5 +766,78 @@ func TestSwitchRepo(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(kept); string(raw) != "old" {
 		t.Error("the old settings file was not kept")
+	}
+}
+
+func TestMachineForTheSystemdSandbox(t *testing.T) {
+	ctx := context.Background()
+	answers := func(systemd, node string) *Machine {
+		m := machine(map[string]bool{"docker": true, "podman": true}, "git version 2.43.0", "linux", true)
+		m.Output = func(_ context.Context, name string, _ ...string) (string, error) {
+			switch name {
+			case "git":
+				return "git version 2.43.0", nil
+			case "systemctl":
+				return systemd, nil
+			case "/usr/bin/node":
+				if node == "" {
+					return "", errors.New("not found")
+				}
+				return node, nil
+			}
+			return "", nil
+		}
+		return m
+	}
+	if p := answers("systemd 252 (252-46.el9)\n+PAM", "v20.18.1\n").problems(ctx, SandboxSystemd); len(p) != 0 {
+		t.Errorf("RHEL 9 without containers: %q", p)
+	}
+	for name, tc := range map[string]struct {
+		m    *Machine
+		want string
+	}{
+		"old systemd": {answers("systemd 219\n", "v20.1.0"), "too old; 239"},
+		"no node":     {answers("systemd 239\n", ""), "Node.js is not installed"},
+		"old node":    {answers("systemd 239\n", "v16.20.0"), "Node.js 16 is too old"},
+	} {
+		p := tc.m.problems(ctx, SandboxSystemd)
+		if len(p) != 1 || !strings.Contains(p[0], tc.want) {
+			t.Errorf("%s: %q", name, p)
+		}
+	}
+	mac := answers("", "v20.1.0")
+	mac.GOOS = "darwin"
+	if p := mac.problems(ctx, SandboxSystemd); len(p) != 1 || !strings.Contains(p[0], "Linux only") {
+		t.Errorf("mac: %q", p)
+	}
+}
+
+func TestSwitchSandboxRewritesTheBackendLine(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := LoadState(dir)
+	st.WorkflowFile = filepath.Join(dir, "WORKFLOW.md")
+	os.WriteFile(st.WorkflowFile, []byte("---\nsandbox:\n  backend: podman\nworker:\n  name: linux\n---\n"), 0o600)
+	look := func(string) (string, error) { return "/usr/bin/podman", nil }
+	if err := SwitchSandbox(st, SandboxSystemd, "linux", look); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(st.WorkflowFile); !strings.Contains(string(raw), "  backend: systemd\n") || st.Sandbox != SandboxSystemd {
+		t.Errorf("%s %q", raw, st.Sandbox)
+	}
+	if again, _ := LoadState(dir); again.Sandbox != SandboxSystemd {
+		t.Error("not saved")
+	}
+	if err := SwitchSandbox(st, "container", "linux", look); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(st.WorkflowFile); !strings.Contains(string(raw), "  backend: podman\n") || st.Sandbox != "" {
+		t.Errorf("%s", raw)
+	}
+	if err := SwitchSandbox(st, "vm", "linux", look); err == nil {
+		t.Error("an unknown sandbox was accepted")
+	}
+	os.WriteFile(st.WorkflowFile, []byte("sandbox:\n  backend: podman\n# backend copy\nother:\n  backend: docker\n"), 0o600)
+	if err := SwitchSandbox(st, SandboxSystemd, "linux", look); err == nil {
+		t.Error("a file with two backend lines was changed")
 	}
 }

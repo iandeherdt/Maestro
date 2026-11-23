@@ -80,6 +80,8 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
   (`sudo dnf install podman` on RHEL and Fedora; it needs no root daemon) or Docker Engine.
   On RHEL 8, also switch Podman to its netavark network backend (`maestro login` says how):
   the older CNI backend has no DNS on the sandbox's internal networks.
+  On a Linux server you can do without containers: see
+  [Linux without containers](#linux-without-containers-the-systemd-sandbox).
 - A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
   installed on the machine itself.
 - A GitHub repository you own. Private repositories work. For the board, the repository has to
@@ -197,6 +199,35 @@ removes the task again.
 Unity's checks run inside the container with the Unity Editor for Linux, as on any Linux machine.
 A Unity Editor installed on Windows is not used: Windows has no sandbox like the one the Mac
 checks run in.
+
+### Linux without containers: the systemd sandbox
+
+On Linux the steps can also run as a separate user in throwaway systemd units, with no container
+engine. This is new and not yet run on a real server: use it to try it out, and keep Podman for
+real work until it has been.
+
+```sh
+maestro setup --sandbox systemd
+```
+
+It needs systemd 239 or newer (RHEL 8 or 9), sudo, and Node.js 18 or newer with npm in
+`/usr/bin` (`sudo dnf install nodejs npm`). RHEL 8 also needs cgroup v2 for the memory and CPU
+limits; setup says how to switch. Setup shows every command before it runs them, once,
+with sudo:
+
+- the user `maestro-agent`, with no login, no home and no sudo, which runs every step;
+- `/opt/maestro/bin`, with Claude Code at the version the image would have and a copy of
+  `maestro` for the self-test, because the steps see no home folder;
+- the root launcher `/usr/local/libexec/maestro-launch` and its settings in `/etc/maestro`,
+  which only root can change;
+- `/var/lib/maestro/<worker>` for the workspaces and the agent's Claude login;
+- one sudo rule that lets your user start the launcher, and nothing else.
+
+A step gets no network of its own. One with network reaches its proxy through a socket the
+launcher puts into the unit. After that, `maestro login` and `maestro run` work as with
+containers, and there is no image to build. The Unity pack still needs containers. Back to
+containers: `maestro setup --sandbox container`. After `maestro update`, run `maestro setup`
+again so root installs the new launcher; `maestro doctor` says when it is due.
 
 ### A Mac as an always-on agent machine
 
@@ -1041,7 +1072,7 @@ Last updated 2026-11-23, at release 0.5.18.
 | `maestro update` | Written. The download, the checksum, the archive and the restart of the right service are tested against a stand-in for GitHub's releases. Not yet run against a real release. |
 | Tasks of a plan stay on the planning machine | Written and tested against a stand-in board, after a plan on a Mac mini put its tasks on a worker no machine ran. |
 | Unity's checks on a Mac, started from `maestro setup` | Written. The setup step is tested against a stand-in for GitHub. The checks failed on a Mac mini with "Not a directory" because the sandbox closed the folders above the check's own; that is fixed but not yet run again on the Mac. |
-| Native Linux sandbox (systemd) | Started. In release 0.5.18: the root launcher `maestro-launch`, and the service's side that sends it each step through one sudo rule, both tested with a simulated systemd and sudo. The service cannot choose this backend yet; that, its setup and a real run are the next steps ([plan](docs/PLAN.md)). |
+| Native Linux sandbox (systemd) | Written, not yet run on a real server. In release 0.5.18: the root launcher `maestro-launch` and the service's side that sends it each step through one sudo rule. Since then: the service runs on `sandbox.backend: systemd` with its proxies on unix sockets, `maestro login`, the start-up self-test and `maestro doctor` through the launcher, and `maestro setup --sandbox systemd` installs the launcher, the sandbox user, Claude Code and the sudo rule. Releases and `maestro update` carry the launcher. Tested with a simulated systemd and sudo; a run on the RHEL server is next ([plan](docs/PLAN.md)). |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
 | Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |

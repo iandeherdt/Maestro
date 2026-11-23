@@ -34,6 +34,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"github.com/iandeherdt/Maestro/internal/httpapi"
 	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/launch"
 	"github.com/iandeherdt/Maestro/internal/logging"
 	"github.com/iandeherdt/Maestro/internal/mirror"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
@@ -43,6 +44,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/reload"
 	"github.com/iandeherdt/Maestro/internal/setup"
 	"github.com/iandeherdt/Maestro/internal/skills"
+	"github.com/iandeherdt/Maestro/internal/systemdbox"
 	"github.com/iandeherdt/Maestro/internal/trace"
 	"github.com/iandeherdt/Maestro/internal/tracker"
 	"github.com/iandeherdt/Maestro/internal/tracker/github"
@@ -57,7 +59,12 @@ type install struct {
 	source *reload.Source
 	cfg    *config.Config
 	state  *setup.State
-	box    *dockerbox.Box
+	// box is the sandbox; dbox is the same box when it is the container
+	// backend, and nil with systemd. Images, Podman and the Unity
+	// activation exist only there.
+	box    sandboxBox
+	dbox   *dockerbox.Box
+	bot    string
 	skills skills.Store
 	// dir is where setup keeps its state.
 	dir string
@@ -116,8 +123,8 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		return nil, explain("%v\nThe settings file is %s. Run `maestro setup` if you have not yet.", err, in.path)
 	}
 	in.source, in.cfg = src, src.Current().Config
-	if b := in.cfg.Sandbox.Backend; b != "docker" && b != "podman" {
-		return nil, explain("%s says `sandbox.backend: %s`, which is not built yet. The container sandbox (docker or podman) is.\n"+
+	if b := in.cfg.Sandbox.Backend; b != "docker" && b != "podman" && b != "systemd" {
+		return nil, explain("%s says `sandbox.backend: %s`, which is not built yet. The container sandbox (docker or podman) and systemd are.\n"+
 			"If setup wrote this file, the easiest fix is to let it write a new one:\n"+
 			"  mv %q %q\n  maestro setup\n"+
 			"Setup skips the steps that are done and only asks the last questions again.",
@@ -153,7 +160,23 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	if err := in.skills.Ensure(); err != nil {
 		return nil, err
 	}
-	in.box = &dockerbox.Box{
+	in.bot = bot
+	packs, err := conventions.Resolve(in.cfg.Conventions)
+	if err != nil {
+		return nil, err
+	}
+	if err := conventions.SyncSkills(in.skills.SkillsDir(), packs); err != nil {
+		return nil, err
+	}
+	if in.cfg.Sandbox.Backend == "systemd" {
+		if slices.Contains(in.cfg.Conventions, "unity") {
+			return nil, explain("the unity pack needs the container sandbox: Unity's Editor for Linux comes with the sandbox image.\n" +
+				"Use `sandbox.backend: podman` (or docker) for this project.")
+		}
+		in.box = &systemdbox.Box{Worker: in.cfg.Worker.Name, SocketDir: filepath.Join(stateDir, "proxy-sockets"), Log: log}
+		return in, nil
+	}
+	in.dbox = &dockerbox.Box{
 		SkillsDir: in.skills.SkillsDir(), AgentsDir: in.skills.AgentsDir(),
 		Podman: in.cfg.Sandbox.Backend == "podman",
 		Worker: in.cfg.Worker.Name, Image: in.cfg.Sandbox.Image,
@@ -164,18 +187,10 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	// The checks get the Unity licence when the unity pack is on and there
 	// is one (`maestro unity activate`). The agent's own step never does.
 	if lic := unityStore(dir); lic.Has() && slices.Contains(in.cfg.Conventions, "unity") {
-		in.box.UnityLicenceDir = lic.Dir
+		in.dbox.UnityLicenceDir = lic.Dir
 	}
-	// The agents get the skills of the packs that are on. They do not read
-	// the repository's .claude settings, where the packs put them for people.
-	packs, err := conventions.Resolve(in.cfg.Conventions)
-	if err != nil {
-		return nil, err
-	}
-	in.box.Platform = conventions.Derive(packs).Platform
-	if err := conventions.SyncSkills(in.skills.SkillsDir(), packs); err != nil {
-		return nil, err
-	}
+	in.dbox.Platform = conventions.Derive(packs).Platform
+	in.box = in.dbox
 	return in, nil
 }
 
@@ -192,7 +207,10 @@ func cpus(quota string) string {
 func (in *install) docker(ctx context.Context) error {
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if in.box.Podman {
+	if in.dbox == nil {
+		return in.systemdReady(ctx)
+	}
+	if in.dbox.Podman {
 		if _, err := exec.LookPath("podman"); err != nil {
 			return explain("the `podman` command was not found. Install it (on RHEL: sudo dnf install podman) and try again.")
 		}
@@ -379,7 +397,11 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 	if !strings.HasPrefix(b.Version, "v") {
 		b.Version = "v" + b.Version
 	}
-	if runtime.GOOS == "linux" && (in.box.Platform == "" || in.box.Platform == "linux/"+runtime.GOARCH) {
+	if in.dbox == nil {
+		fmt.Fprintln(stdout, "The systemd sandbox uses no image: its steps run Claude Code from "+launch.DefaultTools+".")
+		return 0
+	}
+	if runtime.GOOS == "linux" && (in.dbox.Platform == "" || in.dbox.Platform == "linux/"+runtime.GOARCH) {
 		if self, err := os.Executable(); err == nil {
 			b.Binary = self
 		}
@@ -392,7 +414,7 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintln(stdout)
-	if err := in.box.BuildImage(ctx, b); err != nil {
+	if err := in.dbox.BuildImage(ctx, b); err != nil {
 		return report(stderr, err)
 	}
 	fmt.Fprintln(stdout, "\nThe image is ready.")
@@ -402,7 +424,10 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 
 // image explains what to do when the image is missing.
 func (in *install) image(ctx context.Context) error {
-	ok, err := in.box.ImageState(ctx)
+	if in.dbox == nil {
+		return nil
+	}
+	ok, err := in.dbox.ImageState(ctx)
 	if err != nil {
 		return explain("Docker could not say whether the sandbox image %s is there: %v\nTry again in a moment; Docker Desktop may still be starting.", in.cfg.Sandbox.Image, err)
 	}
@@ -441,8 +466,13 @@ func runLogin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "Claude Code's sign-in now runs inside the sandbox, with your Claude subscription.")
 	fmt.Fprintln(stdout, "  1. It shows a link. Open it in your browser and approve.")
 	fmt.Fprintln(stdout, "  2. The browser shows a code. Paste it back here and press Enter.")
-	fmt.Fprintln(stdout, "The login is stored in a Docker volume that only the agent's containers get. It is not copied")
-	fmt.Fprintln(stdout, "to this machine's files or keychain.")
+	if in.dbox != nil {
+		fmt.Fprintln(stdout, "The login is stored in a Docker volume that only the agent's containers get. It is not copied")
+		fmt.Fprintln(stdout, "to this machine's files or keychain.")
+	} else {
+		fmt.Fprintln(stdout, "The login is stored in the sandbox user's folder, which only the agent's steps see. It is not")
+		fmt.Fprintln(stdout, "copied to your files or keychain.")
+	}
 	fmt.Fprintln(stdout)
 	in.box.Login(ctx, []string{in.cfg.Claude.Command, "auth", "login", "--claudeai"}, stdin, stdout, stderr)
 	fmt.Fprintln(stdout)
@@ -713,7 +743,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			}
 			return held
 		},
-		BotName: in.box.BotName, BotEmail: in.box.BotEmail, BotLogin: in.box.BotName,
+		BotName: in.bot, BotEmail: in.bot + "@users.noreply.github.com", BotLogin: in.bot,
 		APIURL: gh.api, GitURL: gh.git,
 	}
 	spaces := workspace.New(cur.config(), in.box, log)
@@ -831,6 +861,17 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	return nil
 }
 
+// oldProbe says what to do when the sandbox's maestro cannot run the
+// self-test.
+func (in *install) oldProbe() string {
+	if in.dbox == nil {
+		return "the maestro in " + launch.DefaultTools + ", which the steps run, is older than this one and cannot run\n" +
+			"the sandbox's self-test. Install the current one with: " + mention("maestro setup")
+	}
+	return "the sandbox image " + in.cfg.Sandbox.Image + " was built by an older Maestro, which cannot run the sandbox's\n" +
+		"self-test. Build it again with: " + mention("maestro image")
+}
+
 // turnTraces sends each agent turn to the collector the settings name,
 // read again for every turn so a reload takes effect.
 func turnTraces(cfg func() *config.Config, exp *trace.Exporter) func(worker.Turn) claude.TurnTrace {
@@ -855,8 +896,7 @@ func startupSelfTest(ctx context.Context, in *install, log *slog.Logger) error {
 		return explain("the sandbox's self-test could not run: %s\nSee more with: %s", errText(err), mention("maestro doctor"))
 	}
 	if rep.OldImage {
-		return explain("the sandbox image %s was built by an older Maestro, which cannot run the sandbox's self-test.\n"+
-			"Build it again with: %s", in.cfg.Sandbox.Image, mention("maestro image"))
+		return explain("%s", in.oldProbe())
 	}
 	if failed := rep.Failed(); len(failed) > 0 {
 		var b strings.Builder

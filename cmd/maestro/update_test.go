@@ -99,3 +99,30 @@ func TestUpdateRejectsAStrangeLatestTag(t *testing.T) {
 		t.Fatal("a tag without v was taken")
 	}
 }
+
+func TestUpdateBringsTheLauncherOnLinux(t *testing.T) {
+	var b bytes.Buffer
+	zw := gzip.NewWriter(&b)
+	tw := tar.NewWriter(zw)
+	for name, body := range map[string]string{"maestro": "new binary", "maestro-launch": "new launcher"} {
+		tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	zw.Close()
+	srv := releaseServer(t, b.Bytes(), "")
+	files, err := downloadFiles(context.Background(), srv.Client(), srv.URL+"/releases/download/v0.5.19", "darwin", "arm64")
+	if err != nil || string(files["maestro"]) != "new binary" || string(files["maestro-launch"]) != "new launcher" {
+		t.Fatalf("%v %v", files, err)
+	}
+	dir := t.TempDir()
+	if err := replaceBinary(filepath.Join(dir, "maestro-launch"), files["maestro-launch"]); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "maestro-launch")); string(got) != "new launcher" {
+		t.Errorf("%q", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".*")); len(left) != 0 {
+		t.Errorf("left behind: %v", left)
+	}
+}

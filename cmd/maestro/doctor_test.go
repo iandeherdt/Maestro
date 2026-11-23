@@ -37,7 +37,7 @@ func TestDoctorPrintsTheSelfTest(t *testing.T) {
 		{Profile: "none", Name: "runs as an ordinary user", OK: true},
 		{Profile: "agent", Name: "cannot connect to anything directly", Detail: "1.1.1.1:443"},
 		{Profile: "hooks", Name: "the memory limit is in force", Advisory: true, Detail: "no limit is set"},
-	}})
+	}}, "")
 	for _, want := range []string{
 		"ok    a step without network: runs as an ordinary user",
 		"FAIL  the agent: cannot connect to anything directly", "1.1.1.1:443", "does not start",
@@ -52,7 +52,7 @@ func TestDoctorPrintsTheSelfTest(t *testing.T) {
 	}
 	out.Reset()
 	d = &doctor{out: &out}
-	d.selfTest(dockerbox.SelfTestReport{OldImage: true})
+	d.selfTest(dockerbox.SelfTestReport{OldImage: true}, "Build it again with: maestro image")
 	if d.fails != 1 || !strings.Contains(out.String(), "maestro image") {
 		t.Errorf("old image:\n%s", out.String())
 	}

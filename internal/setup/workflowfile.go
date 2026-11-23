@@ -132,7 +132,10 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 		look = exec.LookPath
 	}
 	engine := Engine(goos, look)
-	if engine == "" {
+	switch {
+	case st.Sandbox == SandboxSystemd:
+		engine = SandboxSystemd
+	case engine == "":
 		engine = "docker"
 	}
 	text := render(engine, st, m[1], verify, ci)

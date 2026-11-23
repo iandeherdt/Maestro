@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/iandeherdt/Maestro/internal/sandbox"
@@ -95,6 +96,13 @@ func (l *Launcher) IDs(name string) (int, int, error) {
 	return uid, gid, nil
 }
 
+func (l *Launcher) fchown(f *os.File, uid, gid int) error {
+	if l.Chown != nil {
+		return l.Chown(f.Name(), uid, gid)
+	}
+	return f.Chown(uid, gid)
+}
+
 func (l *Launcher) chown(path string, uid, gid int) error {
 	if l.Chown != nil {
 		return l.Chown(path, uid, gid)
@@ -105,6 +113,20 @@ func (l *Launcher) chown(path string, uid, gid int) error {
 // Handle runs one request and returns the step's exit status. An error
 // means the step was refused or could not be run.
 func (l *Launcher) Handle(ctx context.Context, req sandbox.Request, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	switch req.Step {
+	case sandbox.StepLoginStatus, sandbox.StepSelfTest:
+		// The launcher chooses everything these run.
+		if req.WorkspaceKey != "" || len(req.Argv) != 0 || len(req.Env) != 0 || req.Populate != nil || req.Limits.TimeoutMS != 0 {
+			return 0, refuse("%s takes a network profile only", req.Step)
+		}
+		if req.Step == sandbox.StepLoginStatus {
+			if req.NetworkProfile != sandbox.NetAgent {
+				return 0, refuse("login-status uses the agent network profile")
+			}
+			return l.loginStatus(ctx, stdout, stderr)
+		}
+		return l.selfTest(ctx, req.NetworkProfile, stdout, stderr)
+	}
 	if !sandbox.ValidKey(req.WorkspaceKey) {
 		return 0, refuse("invalid workspace key")
 	}
@@ -189,7 +211,8 @@ func (l *Launcher) run(ctx context.Context, u *unit, stdin io.Reader, stdout, st
 // which kills every process in it.
 func systemdRun(ctx context.Context, unit string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	cmd := exec.Command("/usr/bin/systemd-run", args...)
-	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
+	// The canary is for the self-test: no step may see this environment.
+	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", sandbox.CanaryName + "=" + unitToken()}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	if err := cmd.Start(); err != nil {
 		return 0, err
@@ -411,24 +434,123 @@ func (l *Launcher) export(ctx context.Context, s spec, stdout, stderr io.Writer)
 		return code, err
 	}
 	produced := dir + "/" + sandbox.BundleName
-	fi, err := os.Lstat(produced)
+	// Opened without following a link, and changed through the open
+	// file, so no path can redirect what root does.
+	f, err := os.OpenFile(produced, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil // nothing to hand over: no new commits
 	}
+	if err != nil {
+		return 0, errors.New("the export left something that is not a regular file")
+	}
+	defer f.Close()
+	fi, err := f.Stat()
 	if err != nil {
 		return 0, err
 	}
 	if !fi.Mode().IsRegular() {
 		return 0, errors.New("the export left something that is not a regular file")
 	}
+	if err := l.fchown(f, suid, sgid); err != nil {
+		return 0, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		return 0, err
+	}
 	// The unit has ended and every process in it is gone, so nothing can
-	// swap the file between the check and the rename.
-	if err := os.Rename(produced, final); err != nil {
+	// swap the file between the open and the rename.
+	return 0, os.Rename(produced, final)
+}
+
+// Time limits of the steps the launcher makes up itself.
+const (
+	loginTimeoutMS    = 15 * 60 * 1000
+	statusTimeoutMS   = 60 * 1000
+	selfTestTimeoutMS = 2 * 60 * 1000
+)
+
+// claudeSpec is Claude Code with the agent's state and network and no
+// workspace, for the login and its status.
+func claudeSpec(step sandbox.Step, timeout int64) spec {
+	return spec{step: step, noWorkspace: true, claude: true, network: sandbox.NetAgent, workdir: "/tmp", timeout: timeout}
+}
+
+// Login runs Claude Code's sign-in on the caller's terminal
+// (`maestro-launch <worker> login`).
+func (l *Launcher) Login(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	s := claudeSpec("login", loginTimeoutMS)
+	s.pty = true
+	u, err := l.Cfg.build(s, []string{l.Cfg.tools() + "/claude", "auth", "login", "--claudeai"}, nil)
+	if err != nil {
+		return 0, refuse("%v", err)
+	}
+	u.env["TERM"] = "xterm-256color"
+	delete(u.env, "CI")
+	return l.run(ctx, u, stdin, stdout, stderr)
+}
+
+// loginStatus prints `claude auth status --json`.
+func (l *Launcher) loginStatus(ctx context.Context, stdout, stderr io.Writer) (int, error) {
+	u, err := l.Cfg.build(claudeSpec(sandbox.StepLoginStatus, statusTimeoutMS),
+		[]string{l.Cfg.tools() + "/claude", "auth", "status", "--json"}, nil)
+	if err != nil {
+		return 0, refuse("%v", err)
+	}
+	return l.run(ctx, u, nil, stdout, stderr)
+}
+
+// selfTest runs the probe in a workspace made for it, which is removed
+// again.
+func (l *Launcher) selfTest(ctx context.Context, profile string, stdout, stderr io.Writer) (int, error) {
+	network := ""
+	switch profile {
+	case sandbox.NetNone:
+	case sandbox.NetAgent, sandbox.NetHooks:
+		network = profile
+	default:
+		return 0, refuse("unknown network profile")
+	}
+	c := l.Cfg
+	s := spec{step: sandbox.StepSelfTest, key: "selftest-" + unitToken(), network: network, workdir: workDir, timeout: selfTestTimeoutMS}
+	uid, gid, err := l.IDs(c.User)
+	if err != nil {
 		return 0, err
 	}
-	if err := l.chown(final, suid, sgid); err != nil {
-		os.Remove(final)
+	dir := c.workspace(s.key)
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		return 0, err
 	}
-	return 0, os.Chmod(final, 0o600)
+	defer func() {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		l.remove(cctx, s, io.Discard)
+	}()
+	if err := l.chown(dir, uid, gid); err != nil {
+		return 0, err
+	}
+	argv := []string{c.tools() + "/maestro", "probe", "--profile", profile,
+		"--canary", sandbox.CanaryName, "--deny", sandbox.ProbeDenyHost}
+	if c.TasksMax > 0 {
+		argv = append(argv, "--pids", strconv.Itoa(c.TasksMax))
+	}
+	if n, ok := memoryBytes(c.MemoryMax); ok {
+		argv = append(argv, "--memory", strconv.FormatInt(n, 10))
+	}
+	u, err := c.build(s, argv, nil)
+	if err != nil {
+		return 0, refuse("%v", err)
+	}
+	return l.run(ctx, u, nil, stdout, stderr)
+}
+
+// memoryBytes turns systemd's "4G" into bytes.
+func memoryBytes(s string) (int64, bool) {
+	if !memRE.MatchString(s) {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s[:len(s)-1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n << map[byte]uint{'K': 10, 'M': 20, 'G': 30}[s[len(s)-1]], true
 }

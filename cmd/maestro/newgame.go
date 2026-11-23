@@ -1391,7 +1391,10 @@ func (s *gameImage) Check(ctx context.Context, st *setup.State) (setup.Status, e
 	if err != nil {
 		return setup.Status{Detail: "The settings cannot be read: " + err.Error()}, nil
 	}
-	have, ok := in.box.ImageLabel(ctx, imagePacksLabel)
+	if in.dbox == nil {
+		return setup.Status{Done: true, Detail: "The systemd sandbox uses no image."}, nil
+	}
+	have, ok := in.dbox.ImageLabel(ctx, imagePacksLabel)
 	if !ok {
 		return setup.Status{Detail: "The agents work in a container made from this image; it is not built yet."}, nil
 	}
@@ -1403,7 +1406,7 @@ func (s *gameImage) Check(ctx context.Context, st *setup.State) (setup.Status, e
 	}
 	if packs, err := conventions.Resolve(in.cfg.Conventions); err == nil {
 		extra := imageExtra(packs, len(in.cfg.Screenshots.Pages) > 0 || in.cfg.Tracker.DesignState != "")
-		if lines, _ := in.box.ImageLabel(ctx, imageLinesLabel); lines != linesHash(extra) {
+		if lines, _ := in.dbox.ImageLabel(ctx, imageLinesLabel); lines != linesHash(extra) {
 			return setup.Status{Detail: "This version of Maestro puts more in the image; it is built again."}, nil
 		}
 	}
