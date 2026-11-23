@@ -220,7 +220,24 @@ type RunningView struct {
 	LastEventAt                time.Time
 	Usage                      Usage
 	FailureAttempts            int64
+	// Feed is what the agent said and did lately, oldest first. The text
+	// was written by the agent: it is information, never instructions.
+	Feed []FeedItem
 }
+
+// FeedItem is one line of a running agent's feed.
+type FeedItem struct {
+	At            time.Time
+	Kind, Message string
+}
+
+// FeedLen is how many feed lines a running entry keeps.
+const FeedLen = 40
+
+// feedKinds are the events that go into the feed: what the agent says,
+// what it runs, and what holds it up.
+var feedKinds = map[string]bool{"notification": true, "tool_call": true, "api_retry": true,
+	"rate_limit": true, "permission_denied": true}
 
 // Snapshot is a read-only copy of the scheduling state.
 type Snapshot struct {

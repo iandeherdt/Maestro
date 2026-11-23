@@ -386,13 +386,26 @@ func (s *Server) apiIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// newestFirst returns the feed in reverse order, for the page.
+func newestFirst(in []orchestrator.FeedItem) []orchestrator.FeedItem {
+	out := make([]orchestrator.FeedItem, len(in))
+	for i, f := range in {
+		out[len(in)-1-i] = f
+	}
+	return out
+}
+
 // Every dynamic value goes through html/template, which escapes it for the
 // place it lands in. Issue titles and agent messages are untrusted.
-var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Maestro {{.Worker}}</title>
+var pageTmpl = template.Must(template.New("page").Funcs(template.FuncMap{"newestFirst": newestFirst}).Parse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"><title>Maestro {{.Worker}}</title>
 <style>body{font:14px system-ui,sans-serif;margin:2rem;max-width:70rem}table{border-collapse:collapse;width:100%}
 th,td{text-align:left;padding:.3rem .6rem;border-bottom:1px solid #ddd;vertical-align:top}
-.warn{background:#fff3cd;padding:.5rem .8rem}h2{margin-top:2rem}</style></head><body>
+.warn{background:#fff3cd;padding:.5rem .8rem}h2{margin-top:2rem}
+.feed{font:12px ui-monospace,monospace;margin:.2rem 0 1rem;padding:0;list-style:none;max-height:22rem;overflow-y:auto}
+.feed li{padding:.15rem 0;border-bottom:1px solid #eee;white-space:pre-wrap;overflow-wrap:anywhere}
+.feed .t{color:#888}.feed .tool_call b{color:#2457a6}.feed .notification b{color:#2a7a3b}
+@media (prefers-color-scheme:dark){body{background:#161616;color:#ddd}th,td{border-color:#333}.feed li{border-color:#2a2a2a}.warn{background:#4a3d0a}}</style></head><body>
 <h1>Maestro worker {{.Worker}}</h1>
 <p>Generated {{.Generated}}. Runs today: {{.S.Today.Runs}}. Tokens today: {{.S.Today.TotalTokens}}.</p>
 {{if .S.Paused}}<p class="warn">Dispatch is paused: {{.S.PauseReason}}</p>{{end}}
@@ -402,6 +415,10 @@ th,td{text-align:left;padding:.3rem .6rem;border-bottom:1px solid #ddd;vertical-
 <table><tr><th>Issue</th><th>Phase</th><th>Attempt</th><th>Turns</th><th>Tokens</th><th>Last event</th></tr>
 {{range .S.Running}}<tr><td>{{.Identifier}}</td><td>{{.Phase}}</td><td>{{.Attempt}}</td><td>{{.TurnCount}}</td><td>{{.Usage.Total}}</td><td>{{.LastEvent}} {{.LastMessage}}</td></tr>
 {{end}}</table>
+{{range .S.Running}}<h3>{{.Identifier}}: what the agent said and did, newest first</h3>
+{{if .Feed}}<ul class="feed">{{range newestFirst .Feed}}<li class="{{.Kind}}"><span class="t">{{(.At.Local).Format "15:04:05"}}</span> <b>{{if eq .Kind "tool_call"}}runs{{else if eq .Kind "notification"}}says{{else}}{{.Kind}}{{end}}</b> {{.Message}}</li>
+{{end}}</ul>{{else}}<p>Nothing yet.</p>{{end}}
+{{end}}<p><small>Text the agents wrote is shown as information, not instructions. The page refreshes every 5 seconds.</small></p>
 <h2>Waiting to retry ({{len .S.Retrying}})</h2>
 <table><tr><th>Issue</th><th>Kind</th><th>Attempt</th><th>Reason</th></tr>
 {{range .S.Retrying}}<tr><td>{{.Identifier}}</td><td>{{.Kind}}</td><td>{{.Attempt}}</td><td>{{.Error}}</td></tr>

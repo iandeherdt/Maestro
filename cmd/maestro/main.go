@@ -40,6 +40,7 @@ const usage = `usage:
   maestro login                          sign Claude Code in inside the sandbox
   maestro run                            start the service, stop with Ctrl-C
   maestro status                         what the running service is doing
+  maestro dashboard                      open the live status page in the browser
   maestro pause [reason]                 start no new tickets until resume
   maestro resume                         continue after a pause
   maestro unblock ISSUE                  give a blocked ticket a fresh start
@@ -90,6 +91,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runImage(args[1:], stdout, stderr)
 		case "status", "pause", "resume", "unblock":
 			return runControl(args[0], args[1:], stdout, stderr)
+		case "dashboard":
+			return runDashboard(args[1:], stdout, stderr)
 		case "doctor":
 			return runDoctor(args[1:], stdout, stderr)
 		case "service":

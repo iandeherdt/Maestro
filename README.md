@@ -407,6 +407,15 @@ Todo (or put `status:todo` back on it), or:
 maestro unblock GH-12       # or just: maestro unblock 12
 ```
 
+### Watching the agents: `maestro dashboard`
+
+`maestro dashboard` opens the service's status page in the browser. It refreshes every few
+seconds and shows, per running ticket, its phase, turns and tokens, and a feed of what the agent
+said and which commands and tools it ran, newest first. The text comes from the agent and is
+shown as plain text. The page only listens on this machine; from another computer, open an SSH
+tunnel to it (the command prints how). With several projects, each has its own page:
+`maestro dashboard --project NAME`.
+
 ### When something is not right: `maestro doctor`
 
 `maestro doctor` checks, without starting the service and without changing anything, what the
