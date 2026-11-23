@@ -53,6 +53,7 @@ const usage = `usage:
   maestro linear                         the Linear API key, when the board is Linear
   maestro assistant                      let Claude Code on this machine ask and pause the service
   maestro projects                       the projects on this machine; add and remove them
+  maestro update                         install the latest release and restart the service
   maestro version                        print the version
 
 Several projects on one machine: name one with --project NAME on any command.
@@ -65,6 +66,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		fmt.Fprintln(stdout, "maestro", version)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "update" {
+		return runUpdate(args[1:], stdout, stderr)
 	}
 	if len(args) > 0 && args[0] == "proxy" {
 		return runProxy(args[1:], stderr)

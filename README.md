@@ -101,6 +101,12 @@ checksum file, and puts `maestro` in `~/.local/bin`. It does not use `sudo`. To 
 running it, open [install.sh](install.sh). To choose a version or a directory, set
 `MAESTRO_VERSION=v0.1.0` or `MAESTRO_INSTALL_DIR=/some/dir` before `sh`.
 
+To move to a newer release later, run `maestro update` as the user that runs Maestro. It
+downloads the release, checks it the same way, replaces the binary in place, and restarts the
+background services that run that binary. An agent turn that was running is stopped by the
+restart. `maestro update --version v0.5.19` picks a version, and `--no-restart` leaves the
+service on the old version until it restarts.
+
 Or build it yourself with Go 1.26 or newer:
 
 ```sh
