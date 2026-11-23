@@ -66,3 +66,29 @@ func TestDoctorWithoutSettingsSaysSo(t *testing.T) {
 		t.Errorf("exit %d:\n%s%s", code, out.String(), errb.String())
 	}
 }
+
+func TestGitPackagesOfAUnityManifest(t *testing.T) {
+	got, err := gitPackages([]byte(`{"dependencies": {
+		"com.unity.inputsystem": "1.11.2",
+		"com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v8.0.0",
+		"com.example.ssh": "git@gitlab.com:team/pkg.git",
+		"com.example.auth": "git+https://user@git.example.org:8443/pkg.git",
+		"com.example.local": "file:../pkg"
+	}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"com.coplaydev.unity-mcp": "github.com", "com.example.ssh": "gitlab.com", "com.example.auth": "git.example.org"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: %q, want %q", k, got[k], v)
+		}
+	}
+	if !proxyAllows([]string{"*.github.com", "GitHub.com"}, "github.com") || proxyAllows([]string{"*.github.com"}, "github.com") ||
+		!proxyAllows([]string{"*.example.org"}, "git.example.org") {
+		t.Error("proxyAllows does not follow the proxy's rule")
+	}
+}

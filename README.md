@@ -702,6 +702,12 @@ are made in the Editor. The skill
 `unity-dev` tells the agent how to work without the editor: scenes and prefabs are edited as
 text, every new asset gets a `.meta` file with a new GUID, packages are left to you.
 
+Packages come from Unity's own registry, which the checks may reach. A package that Unity fetches
+with git, such as one from github.com, is refused by the checks' proxy, and `maestro doctor` names
+it. Embed such a package (copy its folder into `Packages/` and drop its line from
+`Packages/manifest.json`), or add its host to `sandbox.network.allow_hooks`. The second is
+weaker: code the agent wrote can then reach that host during the checks, which have the licence.
+
 Not yet run against Unity's servers: the activation, the package download in `prepare.sh` and the
 tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the
 workspace as pointer files.

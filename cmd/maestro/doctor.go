@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -151,6 +152,11 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 
 	d.section("GitHub")
 	d.github(ctx, in)
+
+	if slices.Contains(in.cfg.Conventions, "unity") {
+		d.section("Unity")
+		d.unityPackages(ctx, in)
+	}
 
 	d.section("Service")
 	d.service(ctx, in)
@@ -354,4 +360,100 @@ func (d *doctor) service(ctx context.Context, in *install) {
 		d.warn("the service keeps running when you log out",
 			"systemd stops your services when you log out. Keep them running with:\n  sudo loginctl enable-linger "+user)
 	}
+}
+
+// gitPackages lists the packages of a Unity manifest that Unity fetches
+// with git, and the host of each.
+func gitPackages(manifest []byte) (map[string]string, error) {
+	var m struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal(manifest, &m); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for name, v := range m.Dependencies {
+		if host := gitHost(v); host != "" {
+			out[name] = host
+		}
+	}
+	return out, nil
+}
+
+// gitHost is the host of a git package reference, such as
+// "https://github.com/o/r.git?path=/p#v1" or "git@github.com:o/r.git".
+func gitHost(v string) string {
+	v = strings.TrimSpace(v)
+	if rest, ok := strings.CutPrefix(v, "git@"); ok {
+		host, _, _ := strings.Cut(rest, ":")
+		return strings.ToLower(host)
+	}
+	for _, p := range []string{"git+https://", "git+ssh://", "https://", "http://", "ssh://", "git://"} {
+		if rest, ok := strings.CutPrefix(v, p); ok {
+			host, _, _ := strings.Cut(rest, "/")
+			if i := strings.LastIndex(host, "@"); i >= 0 {
+				host = host[i+1:]
+			}
+			host, _, _ = strings.Cut(host, ":")
+			return strings.ToLower(host)
+		}
+	}
+	return ""
+}
+
+// unityPackages warns about packages the checks cannot fetch: Unity
+// clones a git package itself, and the checks reach only the hosts on
+// their list.
+func (d *doctor) unityPackages(ctx context.Context, in *install) {
+	ref := "HEAD"
+	if in.cfg.Workspace.BaseBranch != "" {
+		ref = in.cfg.Workspace.BaseBranch
+	}
+	raw, err := exec.CommandContext(ctx, "git", "--git-dir", in.mirrorDir, "show", ref+":Packages/manifest.json").Output()
+	if err != nil {
+		return
+	}
+	pkgs, err := gitPackages(raw)
+	if err != nil {
+		d.warn("Packages/manifest.json can be read", err.Error())
+		return
+	}
+	names := make([]string, 0, len(pkgs))
+	for n := range pkgs {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	blocked := false
+	for _, n := range names {
+		host := pkgs[n]
+		if proxyAllows(in.cfg.Sandbox.AllowHooks, host) {
+			d.ok("Unity can fetch the package " + n + " from " + host)
+			continue
+		}
+		blocked = true
+		d.warn("Unity can fetch the package "+n,
+			"It comes from "+host+" with git, and the checks may not reach "+host+", so Unity's checks fail.\n"+
+				"The safer way is to embed it: copy the package's folder into Packages/ and commit it, then\n"+
+				"remove its line from Packages/manifest.json. The other way is to add "+host+" to\n"+
+				"sandbox.network.allow_hooks; code the agent wrote can then reach "+host+" during the checks,\n"+
+				"which have the Unity licence.")
+	}
+	if !blocked && len(names) == 0 {
+		d.ok("Unity's packages come from Unity's own registry")
+	}
+}
+
+// proxyAllows is the proxy's rule: an exact name, or "*.domain" for the
+// names below it.
+func proxyAllows(list []string, host string) bool {
+	for _, e := range list {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == host {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(e, "*."); ok && strings.HasSuffix(host, "."+rest) {
+			return true
+		}
+	}
+	return false
 }
