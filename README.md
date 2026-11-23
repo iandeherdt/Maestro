@@ -861,15 +861,14 @@ tracker:
     team_key: ENG                  # the team's key, the letters before the number of a ticket
     project: ""                    # optional: only the tickets of this project
   allowed_authors: [you@example.com]
-  active_states: [Todo, In Progress]
   terminal_states: [Done, Canceled]
   handoff_state: In Review         # Linear's name; the default is Human Review
 ---
 ```
 
-The rest of the file is as above. The team needs a workflow state for each of these, and also
-`Blocked` and `Rework`, which Linear does not have to begin with: add them under the team's
-settings, Workflow. Setup and `maestro doctor` name any that are missing. To store a new API key
+The rest of the file is as above. Besides Linear's own Todo, In Progress, Done and Canceled, the
+team needs the states `Rework` and `Blocked`, and `Idea`, `Planned` and `Design` for planning:
+add them under the team's settings, Workflow. Setup and `maestro doctor` name any that are missing. To store a new API key
 later: `maestro linear key`.
 
 Make the key in Linear under Settings, Security & access, Personal API keys, limited to the team
@@ -881,7 +880,10 @@ that in the ticket's history, and that history is what the service reads. A tick
 `blocked by` another open ticket waits for it. The status of the work is one comment on the ticket,
 which the service edits as it goes, and the pull request links back to the ticket.
 
-Not yet on Linear: planning an idea first and designs. Those still need GitHub's board.
+Planning works as on GitHub's board (see [Something bigger](#something-bigger-let-it-plan-first)):
+move a ticket with the machine's label to `Idea`, answer the questions in its comments, and move it
+to `Planned` to approve the plan. The tasks become sub-issues of the idea, in the idea's project,
+and a task that depends on another is `blocked by` it.
 
 ## Project status
 
@@ -927,7 +929,7 @@ Last updated 2026-11-23, at release 0.5.17.
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | Native Linux sandbox (systemd) | Not started |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
-| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, with `maestro setup` for Linear, and tested against a fake Linear server. Not yet run against Linear itself. Planning and designs are not on Linear yet. |
+| Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, with `maestro setup` for Linear and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
 | Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
 
 ## Documentation

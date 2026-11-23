@@ -464,9 +464,10 @@ func (b *builder) tracker(s *section) {
 	t.InProgressState = s.str("in_progress_state", "In Progress")
 	t.BlockedState = s.str("blocked_state", "Blocked")
 	t.DoneState = s.str("done_state", "Done")
-	// Planning needs a board, so it is on by default only there.
+	// Planning needs a board, so it is on by default only there: a
+	// GitHub Project, or Linear.
 	planDefault := ""
-	if t.Provider["state_source"] == "project" {
+	if t.Provider["state_source"] == "project" || t.Kind == "linear" {
 		planDefault = "Idea"
 	}
 	t.PlanningState = strings.TrimSpace(s.str("planning_state", planDefault))

@@ -121,7 +121,7 @@ func TestLinearSetup(t *testing.T) {
 	}
 
 	// The operator adds the states; now only the label is left.
-	f.states = append(f.states, "Rework", "Blocked")
+	f.states = append(f.states, "Rework", "Blocked", "Idea", "Planned", "Design")
 	u, out = ui("\n\nian@example.com\ny\n")
 	if err := step.Run(ctx, u, st); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -153,7 +153,7 @@ func TestLinearSetup(t *testing.T) {
 
 func TestLinearSetupWithTheServiceAsTheAuthorAndARefusedLabel(t *testing.T) {
 	f := newLinear(t)
-	f.states = append(f.states, "Rework", "Blocked")
+	f.states = append(f.states, "Rework", "Blocked", "Idea", "Planned", "Design")
 	f.refuse = true
 	g := newGitHub(t)
 	st := installed(t, g)

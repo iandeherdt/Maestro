@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,8 @@ type fakeLinear struct {
 	calls    int
 	auth     string
 	failNext int
+	labels   []labelNode
+	created  int
 }
 
 type fIssue struct {
@@ -142,6 +145,67 @@ func (f *fakeLinear) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		data = map[string]any{"issue": page("inverseRelations", nodes)}
 	case strings.Contains(q, "comments("):
 		data = map[string]any{"issue": page("comments", f.comments[v["id"].(string)])}
+	case strings.Contains(q, "issueLabelCreate"):
+		in := v["input"].(map[string]any)
+		l := labelNode{ID: "l-" + in["name"].(string), Name: in["name"].(string)}
+		f.labels = append(f.labels, l)
+		f.writes = append(f.writes, "label:"+l.Name)
+		data = map[string]any{"issueLabelCreate": map[string]any{"success": true, "issueLabel": map[string]any{"id": l.ID}}}
+	case strings.Contains(q, "issueLabels("):
+		want := strings.ToLower(v["name"].(string))
+		var nodes []labelNode
+		for _, l := range f.labels {
+			n := strings.ToLower(l.Name)
+			if n == want || strings.Contains(q, "startsWith") && strings.HasPrefix(n, want) {
+				nodes = append(nodes, l)
+			}
+		}
+		data = page("issueLabels", nodes)
+	case strings.Contains(q, "issueCreate"):
+		in := v["input"].(map[string]any)
+		f.created++
+		n := 10 + f.created
+		id := "id-t" + string(rune('0'+f.created))
+		st := f.stateByName("Todo")
+		for i := range f.states {
+			if f.states[i].ID == in["stateId"] {
+				st = &f.states[i]
+			}
+		}
+		li := lnIssue{ID: id, Identifier: "ENG-" + string(rune('0'+n/10)) + string(rune('0'+n%10)), Title: in["title"].(string),
+			CreatedAt: "2026-11-21T10:00:00Z", UpdatedAt: "2026-11-21T10:00:00Z", Creator: &f.me, State: st}
+		li.Team = &struct {
+			Key string `json:"key"`
+		}{"ENG"}
+		f.issues[id] = &fIssue{li: li}
+		f.writes = append(f.writes, "create:"+li.Identifier+":"+st.Name)
+		data = map[string]any{"issueCreate": map[string]any{"success": true, "issue": map[string]any{"id": id, "identifier": li.Identifier}}}
+	case strings.Contains(q, "IssueUpdateInput"):
+		fi := f.issues[v["id"].(string)]
+		in := v["input"].(map[string]any)
+		for i := range f.states {
+			if f.states[i].ID == in["stateId"] {
+				fi.move(&f.me, &f.states[i], "2026-11-21T11:00:00Z")
+			}
+		}
+		for _, lid := range in["addedLabelIds"].([]any) {
+			for _, l := range f.labels {
+				if l.ID == lid {
+					fi.label(&f.me, l.Name, "2026-11-21T11:00:00Z")
+					fi.li.Labels.Nodes = append(fi.li.Labels.Nodes, struct {
+						Name string `json:"name"`
+					}{l.Name})
+				}
+			}
+		}
+		f.writes = append(f.writes, "place:"+fi.li.Identifier+":parent="+in["parentId"].(string)+":"+fmt.Sprint(in["projectId"]))
+		data = map[string]any{"issueUpdate": map[string]any{"success": true}}
+	case strings.Contains(q, "issueRelationCreate"):
+		in := v["input"].(map[string]any)
+		b, t := f.issues[in["issueId"].(string)], f.issues[in["relatedIssueId"].(string)]
+		t.blockedBy = append(t.blockedBy, struct{ id, identifier, stateType string }{b.li.ID, b.li.Identifier, b.li.State.Type})
+		f.writes = append(f.writes, "blocks:"+b.li.Identifier+">"+t.li.Identifier)
+		data = map[string]any{"issueRelationCreate": map[string]any{"success": true}}
 	case strings.Contains(q, "issueUpdate"):
 		fi := f.issues[v["id"].(string)]
 		for i := range f.states {
@@ -435,5 +499,88 @@ func TestMissingStates(t *testing.T) {
 	got, err := a.MissingStates(context.Background(), []string{"todo", "In Progress", "Todo", "", "Shipping"})
 	if err != nil || strings.Join(got, ",") != "Shipping" {
 		t.Errorf("%v %v", got, err)
+	}
+}
+
+func TestPlanBecomesSubIssues(t *testing.T) {
+	f, a := setup(t)
+	ctx := context.Background()
+	f.labels = []labelNode{{ID: "l-1", Name: "run:linux"}, {ID: "l-2", Name: "Run:Mac"}, {ID: "l-3", Name: "bug"}}
+	workers, err := a.Workers(ctx)
+	if err != nil || strings.Join(workers, ",") != "linux,mac" {
+		t.Fatalf("workers %v %v", workers, err)
+	}
+	idea := f.add(1, ian, "Todo", "run:linux")
+	idea.li.Project = &struct {
+		ID string `json:"id"`
+	}{"p-game"}
+	parent := issue.Issue{ID: idea.li.ID, Identifier: idea.li.Identifier}
+	if err := a.PostComment(ctx, parent, "A plan"); err != nil || len(f.comments[idea.li.ID]) != 1 {
+		t.Fatalf("comment: %v", err)
+	}
+
+	first, err := a.CreateTask(ctx, tracker.Task{Title: "Health component", Body: "b", Worker: "linux"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := a.CreateTask(ctx, tracker.Task{Title: "Damage UI", Body: "b", Worker: "mac"})
+	if _, err := a.CreateTask(ctx, tracker.Task{Title: " "}); err == nil {
+		t.Error("a task without a title was created")
+	}
+	// Created in the backlog: not on the way to any machine yet.
+	got, _ := a.FetchIssuesByIDs(ctx, []string{first.ID})
+	if len(got) != 1 || got[0].State != "Backlog" || got[0].Dispatchable {
+		t.Fatalf("new task: %+v", got)
+	}
+	for i := 0; i < 2; i++ { // the second time changes nothing
+		if err := a.AddBlocker(ctx, second, first); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.PlaceTask(ctx, parent, first, "linux", "Todo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PlaceTask(ctx, parent, second, "mac", "Todo"); err != nil {
+		t.Fatal(err)
+	}
+	want := "create:ENG-11:Backlog,create:ENG-12:Backlog,blocks:ENG-11>ENG-12," +
+		"place:ENG-11:parent=id-1:p-game,place:ENG-12:parent=id-1:p-game"
+	if strings.Join(f.writes[1:], ",") != want {
+		t.Errorf("writes\n got %v\nwant %v", f.writes[1:], want)
+	}
+	// The service placed its own task: that is the owner's approval of the
+	// plan, so the first task may start and the second waits for it.
+	got, err = a.FetchIssuesByStates(ctx, []string{"Todo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := byID(got)
+	if !m["ENG-11"].Dispatchable || m["ENG-12"].Dispatchable || len(m["ENG-12"].BlockedBy) != 1 {
+		t.Errorf("after placing: %+v\n%+v", m["ENG-11"], m["ENG-12"])
+	}
+	// A stranger who moves a task back into Todo takes the approval away.
+	f.issues[first.ID].move(&stranger, f.stateByName("Todo"), "2026-11-21T12:00:00Z")
+	got, _ = a.FetchIssuesByIDs(ctx, []string{first.ID})
+	if got[0].Dispatchable {
+		t.Error("a stranger's move counted")
+	}
+}
+
+func TestPlaceTaskMakesAMissingWorkerLabel(t *testing.T) {
+	f, a := setup(t)
+	ctx := context.Background()
+	idea := f.add(1, ian, "Todo", "run:linux")
+	task, _ := a.CreateTask(ctx, tracker.Task{Title: "T", Body: "b", Worker: "win"})
+	if err := a.PlaceTask(ctx, issue.Issue{ID: idea.li.ID, Identifier: idea.li.Identifier}, task, "win", "Todo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(f.writes, ","), "label:run:win,place:ENG-11:parent=id-1:<nil>") {
+		t.Errorf("writes %v", f.writes)
+	}
+	if err := a.PlaceTask(ctx, issue.Issue{ID: "id-gone", Identifier: "ENG-99"}, task, "win", "Todo"); err == nil {
+		t.Error("placed under an idea that does not exist")
+	}
+	if _, err := a.Workers(ctx); err != nil {
+		t.Errorf("workers: %v", err)
 	}
 }

@@ -667,18 +667,22 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	// way.
 	var trk tracker.Tracker
 	var ghBoard *github.Adapter
+	var planner tracker.Planner // the board the planning stage writes to
 	var linearKey string
 	if cfg.Tracker.Kind == "linear" {
 		la, key, err := in.linear(ctx, log)
 		if err != nil {
 			return err
 		}
-		trk, linearKey = la, key
+		trk, planner, linearKey = la, la, key
 	} else {
 		if ghBoard, err = github.New(cfg, github.Options{Token: tickets.Token, Log: log}); err != nil {
 			return err
 		}
 		trk = ghBoard
+		if onBoard {
+			planner = ghBoard
+		}
 	}
 	if onBoard {
 		// Cards of other repositories on this project's board were put
@@ -732,12 +736,12 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	// at start; changing them takes a restart.
 	var plans orchestrator.Plans
 	var designs orchestrator.Designs
-	if onBoard && cfg.Tracker.PlanningState != "" {
+	if planner != nil && cfg.Tracker.PlanningState != "" {
 		plansDir, err := plan.OpenStore(filepath.Join(cfg.Budget.StateDir, "plans"))
 		if err != nil {
 			return err
 		}
-		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: ghBoard, PlanningState: cfg.Tracker.PlanningState,
+		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: planner, PlanningState: cfg.Tracker.PlanningState,
 			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0],
 			DesignState: cfg.Tracker.DesignState, DesignFolder: cfg.Design.Folder, Designs: pub,
 			TerminalStates: cfg.Tracker.TerminalStates}
@@ -782,6 +786,10 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		fmt.Fprintf(stdout, "It looks at the Linear team %v every %d seconds. To give it a ticket: add the label run:%s\n",
 			cfg.Tracker.Provider["team_key"], cfg.Polling.IntervalMS/1000, cfg.Worker.Name)
 		fmt.Fprintf(stdout, "and move it to %s. The pull request goes to %s on GitHub.\n", cfg.Tracker.ActiveStates[0], cfg.Workspace.Repo)
+		if plans != nil {
+			fmt.Fprintf(stdout, "For something bigger, move it to %s instead: an agent asks you questions on the ticket and proposes\n", cfg.Tracker.PlanningState)
+			fmt.Fprintf(stdout, "a plan of small tasks. Move it to %s to approve the plan; the tasks become its sub-issues.\n", cfg.Tracker.PlannedState)
+		}
 	} else if onBoard {
 		fmt.Fprintf(stdout, "It looks at the board every %d seconds. To give it a ticket: put an issue of %s on the board,\n", cfg.Polling.IntervalMS/1000, cfg.Workspace.Repo)
 		fmt.Fprintf(stdout, "set the card's Worker to %s, and move the card to the column %s.\n", cfg.Worker.Name, cfg.Tracker.ActiveStates[0])

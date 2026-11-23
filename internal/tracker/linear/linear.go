@@ -65,11 +65,12 @@ type Adapter struct {
 	authors     map[string]bool   // user ids and emails, lowercased
 	commenters  map[string]bool
 
-	mu     sync.Mutex
-	me     *user             // the user the API key acts as
-	teamID string            // resolved from the key
-	states map[string]string // normalized state name -> id
-	cache  map[string]*cached
+	mu      sync.Mutex
+	me      *user             // the user the API key acts as
+	teamID  string            // resolved from the key
+	states  map[string]string // normalized state name -> id
+	backlog string            // a state of type backlog, where new tasks wait
+	cache   map[string]*cached
 }
 
 type cached struct {
@@ -245,6 +246,9 @@ type lnIssue struct {
 	Team        *struct {
 		Key string `json:"key"`
 	} `json:"team"`
+	Project *struct {
+		ID string `json:"id"`
+	} `json:"project"`
 	Labels struct {
 		Nodes []struct {
 			Name string `json:"name"`
@@ -253,7 +257,7 @@ type lnIssue struct {
 }
 
 const issueFields = `id identifier title description priority url branchName createdAt updatedAt
-creator { id email } assignee { id email } state { id name type } team { key }
+creator { id email } assignee { id email } state { id name type } team { key } project { id }
 labels(first: 100) { nodes { name } }`
 
 // ---- setup -----------------------------------------------------------------
@@ -349,11 +353,15 @@ func (a *Adapter) teamStates(ctx context.Context) (string, map[string]string, er
 	}
 	t := out.Teams.Nodes[0]
 	states = map[string]string{}
+	backlog := ""
 	for _, s := range t.States.Nodes {
 		states[norm(s.Name)] = s.ID
+		if s.Type == "backlog" && backlog == "" {
+			backlog = s.ID
+		}
 	}
 	a.mu.Lock()
-	a.teamID, a.states = t.ID, states
+	a.teamID, a.states, a.backlog = t.ID, states, backlog
 	a.mu.Unlock()
 	return t.ID, states, nil
 }
@@ -698,6 +706,9 @@ pageInfo { hasNextPage endCursor } } } }`
 	// The required labels. A label set when the issue was made shows as
 	// added in its first history entry, or not at all; without any record
 	// the creator added it.
+	if !is.HasLabels(a.required) {
+		return false, nil
+	}
 	for _, want := range a.required {
 		var by *historyEntry
 		for i := range entries {

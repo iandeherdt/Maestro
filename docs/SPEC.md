@@ -1629,7 +1629,14 @@ Account requirements, checked by `doctor`: the key works and acts as a user who 
 `allowed_authors` (a warning otherwise), and the team has no members outside `allowed_authors`
 (a warning listing them).
 
-Not yet on Linear: the planning stage and designs (Section 22).
+Planning (Section 22) is on by default, as on a GitHub Project: `planning_state` defaults to
+`Idea`. `workers` are the names of the labels `run:<name>` the team can use. `create_task`
+creates an issue in the team's first `backlog` state, without labels, so it cannot be dispatched.
+`place_task` makes it a sub-issue of the idea, puts it in the idea's project, adds the label
+`run:<worker>` (creating the label in the team if needed) and moves it to the first active state.
+`add_blocker` creates a `blocks` relation unless one exists. A task the service created and placed
+counts as approved through the rule above, because the owner approved its plan. Independently of
+the history, an issue without every required label is never approved.
 
 ## 13. Prompt Construction and Context Assembly
 
@@ -2134,7 +2141,7 @@ Steps:
    can see, and gives the e-mail address whose moves approve a ticket; it must belong to a team
    member, and using the key's own user needs an explicit yes. Adding workflow states takes a
    team admin, so the wizard lists the states the team lacks (Todo, In Progress, In Review or
-   Human Review, Rework, Blocked, Done) and waits until the operator has added them. It creates
+   Human Review, Rework, Blocked, Done, Idea, Planned, Design) and waits until the operator has added them. It creates
    the label `run:<worker>` in the team, or, when the key may not, asks the operator to.
    For a GitHub organization, a board: the operator names the worker and gives the GitHub
    login whose issues are worked on, which becomes `allowed_authors`. The wizard lists the

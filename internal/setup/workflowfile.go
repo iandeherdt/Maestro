@@ -214,7 +214,6 @@ func renderLinear(b *strings.Builder, st *State) {
 	b.WriteString("tracker:\n  kind: linear\n  provider:\n")
 	b.WriteString("    team_key: " + st.LinearTeam + "\n")
 	b.WriteString("  allowed_authors: " + quoted([]string{st.LinearAuthor}) + "\n")
-	b.WriteString("  active_states: [Todo, In Progress]\n")
 	b.WriteString("  terminal_states: " + quoted(terminal) + "\n")
 	b.WriteString("  handoff_state: " + strconv.Quote(st.LinearHandoff) + "\n")
 }

@@ -95,6 +95,9 @@ var linearStates = []struct{ name, kind string }{
 	{"Rework", "Started"},
 	{"Blocked", "Started"},
 	{"Done", "Completed"},
+	{"Idea", "Backlog"},
+	{"Planned", "Backlog"},
+	{"Design", "Backlog"},
 }
 
 var emailRE = regexp.MustCompile(`^[^\s@,\[\]{}"'#]+@[^\s@,\[\]{}"'#]+\.[^\s@,\[\]{}"'#]+$`)
