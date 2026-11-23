@@ -19,6 +19,7 @@ type fakeLinear struct {
 	states  []string
 	labels  []string
 	refuse  bool // label creation is not allowed
+	noAdmin bool // state creation is not allowed
 	created []string
 }
 
@@ -44,6 +45,15 @@ func (f *fakeLinear) serve(w http.ResponseWriter, r *http.Request) {
 	reply := func(data any) { json.NewEncoder(w).Encode(map[string]any{"data": data}) }
 	viewer := map[string]any{"id": "u-bot", "email": "maestro@example.com"}
 	switch q := req.Query; {
+	case strings.Contains(q, "workflowStateCreate"):
+		if f.noAdmin {
+			json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": "Forbidden"}}})
+			return
+		}
+		in := req.Variables["input"].(map[string]any)
+		f.states = append(f.states, in["name"].(string))
+		f.created = append(f.created, "state:"+in["name"].(string)+":"+in["type"].(string))
+		reply(map[string]any{"workflowStateCreate": map[string]any{"success": true}})
 	case strings.Contains(q, "issueLabelCreate"):
 		if f.refuse {
 			json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": "Forbidden"}}})
@@ -89,6 +99,7 @@ func (f *fakeLinear) serve(w http.ResponseWriter, r *http.Request) {
 
 func TestLinearSetup(t *testing.T) {
 	f := newLinear(t)
+	f.noAdmin = true
 	g := newGitHub(t)
 	st := installed(t, g)
 	step := &Tickets{GitHub: GitHub{WebURL: g.srv.URL, APIURL: g.srv.URL}, GOOS: "linux", Linear: LinearBoard{Endpoint: f.srv.URL}}
@@ -96,7 +107,7 @@ func TestLinearSetup(t *testing.T) {
 	// Linear, a refused key then a good one, the machine's name, the
 	// second team, a wrong and a right e-mail, Enter after adding the
 	// states, and yes to the label.
-	answers := "2\nlin_api_bad\nlin_api_good\n\n2\nbob@example.com\nian@example.com\n"
+	answers := "2\nlin_api_bad\nlin_api_good\n\n2\nbob@example.com\nian@example.com\ny\n"
 	u, out := ui(answers)
 	err := step.Run(ctx, u, st)
 	if !errors.Is(err, ErrAborted) {
@@ -105,7 +116,7 @@ func TestLinearSetup(t *testing.T) {
 	if !st.UsesLinear() || st.LinearTeam != "ENG" || st.LinearAuthor != "ian@example.com" || st.Worker != "linux" {
 		t.Fatalf("state %+v", st)
 	}
-	for _, want := range []string{"did not accept", "nobody on the team ENG", "Rework", "Blocked", "Settings, Teams, ENG, Workflow"} {
+	for _, want := range []string{"did not accept", "nobody on the team ENG", "Rework", "Blocked", "did not let the key create them", "Settings, Teams, ENG, Workflow"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the output lacks %q:\n%s", want, out)
 		}
@@ -187,5 +198,30 @@ func TestSwitchTracker(t *testing.T) {
 	}
 	if _, err := SwitchTracker(st, "jira"); err == nil {
 		t.Error("an unknown board was accepted")
+	}
+}
+
+func TestLinearSetupCreatesTheStatesWhenAllowed(t *testing.T) {
+	f := newLinear(t)
+	g := newGitHub(t)
+	st := installed(t, g)
+	st.Tracker = TrackerLinear
+	if err := WriteLinearKey(st.Dir(), "lin_api_good"); err != nil {
+		t.Fatal(err)
+	}
+	step := &LinearBoard{Endpoint: f.srv.URL, GOOS: "linux"}
+	u, out := ui("\n2\nian@example.com\ny\ny\n")
+	if err := step.Run(ctx, u, st); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := "state:Rework:started,state:Blocked:started,state:Idea:backlog,state:Planned:backlog,state:Design:backlog,run:linux@t-eng"
+	if strings.Join(f.created, ",") != want {
+		t.Errorf("created %v", f.created)
+	}
+	if strings.Contains(out.String(), "Settings, Teams") {
+		t.Errorf("asked to add states by hand although they were created:\n%s", out)
+	}
+	if s, err := step.Check(ctx, st); err != nil || !s.Done {
+		t.Errorf("after: %+v %v", s, err)
 	}
 }

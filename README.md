@@ -849,7 +849,8 @@ stay on GitHub. The board is one Linear team, and a ticket is given to a machine
 `run:<worker>`, for example `run:linux`, because Linear has no field for it.
 
 `maestro setup` asks where you keep the tickets. Pick Linear, and it asks for the API key, the
-team and your Linear e-mail address, lists the states the team still needs, and makes the label.
+team and your Linear e-mail address, creates the states the team still needs (or, when the key
+is not allowed to, lists them for you to add) and makes the label.
 A machine that was set up for GitHub switches with `maestro setup --board linear`; its old
 settings file is kept next to the new one. The file it writes looks like this:
 
@@ -867,8 +868,8 @@ tracker:
 ```
 
 The rest of the file is as above. Besides Linear's own Todo, In Progress, Done and Canceled, the
-team needs the states `Rework` and `Blocked`, and `Idea`, `Planned` and `Design` for planning:
-add them under the team's settings, Workflow. Setup and `maestro doctor` name any that are missing. To store a new API key
+team needs the states `Rework` and `Blocked`, and `Idea`, `Planned` and `Design` for planning;
+setup creates them, and `maestro doctor` names any that go missing later. To store a new API key
 later: `maestro linear key`.
 
 Make the key in Linear under Settings, Security & access, Personal API keys, limited to the team
