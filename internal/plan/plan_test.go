@@ -313,3 +313,22 @@ func TestFinishedOnceEveryTaskIsDone(t *testing.T) {
 		t.Fatalf("all tasks done: %v %d %v", done, n, err)
 	}
 }
+
+// The machine that plans comes first, so a task with no reason to go
+// elsewhere stays on it.
+func TestBriefPutsSelfFirst(t *testing.T) {
+	d, f := desk(t)
+	f.WorkerNames = []string{"mac", "linux", "maestro-mac-mini"}
+	d.Self = "Maestro-Mac-Mini"
+	b, err := d.Brief(ctx, idea)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(b.Workers, ",") != "maestro-mac-mini,mac,linux" {
+		t.Errorf("workers %v", b.Workers)
+	}
+	d.Self = "elsewhere"
+	if b, _ = d.Brief(ctx, idea); strings.Join(b.Workers, ",") != "mac,linux,maestro-mac-mini" {
+		t.Errorf("unknown self: %v", b.Workers)
+	}
+}

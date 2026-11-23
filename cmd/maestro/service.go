@@ -744,7 +744,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		desk := &plan.Desk{Store: plansDir, Tracker: trk, Planner: planner, PlanningState: cfg.Tracker.PlanningState,
 			PlannedState: cfg.Tracker.PlannedState, TaskState: cfg.Tracker.ActiveStates[0],
 			DesignState: cfg.Tracker.DesignState, DesignFolder: cfg.Design.Folder, Designs: pub,
-			TerminalStates: cfg.Tracker.TerminalStates}
+			TerminalStates: cfg.Tracker.TerminalStates, Self: cfg.Worker.Name}
 		wk.Planning, plans = desk, desk
 		if cfg.Tracker.DesignState != "" {
 			wk.Designing, designs = desk, desk
