@@ -269,6 +269,9 @@ Later versions: `maestro update` as `maestro`, see [Install](#install).
 
 ## Use
 
+`maestro help` lists every command. `maestro help COMMAND`, or `maestro COMMAND --help`, says
+what one command does, when to use it, its flags and examples.
+
 While `maestro run` is running, it looks at the board every 30 seconds.
 
 If the board opens as a table, click the small arrow next to the name of the view and choose

@@ -33,41 +33,14 @@ func main() {
 // version is set at build time for releases.
 var version = "dev"
 
-const usage = `usage:
-  maestro setup [--dir DIR] [--port N] [--board github|linear]
-                                        guided installation, safe to run again
-  maestro new                            guided start of a Unity or Godot game for the agents
-  maestro check [path-to-WORKFLOW.md]    validate a workflow file
-  maestro image                          build the sandbox image (needs Docker)
-  maestro login                          sign Claude Code in inside the sandbox
-  maestro run                            start the service, stop with Ctrl-C
-  maestro status                         what the running service is doing
-  maestro dashboard                      open the live status page in the browser
-  maestro pause [reason]                 start no new tickets until resume
-  maestro resume                         continue after a pause
-  maestro unblock ISSUE                  give a blocked ticket a fresh start
-  maestro doctor                         check this machine, the sandbox and GitHub
-  maestro service install                run in the background, start at login
-  maestro service uninstall              stop running in the background
-  maestro conventions                    rule packs per kind of project, enforced by tools
-  maestro skills                         give the agents extra skills and agent files
-  maestro unity                          the Unity licence the checks of a Unity project use
-  maestro linear                         the Linear API key, when the board is Linear
-  maestro assistant                      let Claude Code on this machine ask and pause the service
-  maestro projects                       the projects on this machine; add and remove them
-  maestro update                         install the latest release and restart the service
-  maestro version                        print the version
-
-Several projects on one machine: name one with --project NAME on any command.
-With several and no name, maestro asks which one.
-
-The usual order the first time: setup, image, login, doctor, run.`
-
 func run(args []string, stdout, stderr io.Writer) int {
 	chosen = selection{}
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		fmt.Fprintln(stdout, "maestro", version)
 		return 0
+	}
+	if code, done := runHelp(args, stdout, stderr); done {
+		return code
 	}
 	if len(args) > 0 && args[0] == "update" {
 		return runUpdate(args[1:], stdout, stderr)
@@ -126,7 +99,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNew(args[1:], os.Stdin, stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "check" || len(args) > 2 {
-		fmt.Fprintln(stderr, usage)
+		if len(args) > 0 && findHelp(args[0]) == nil {
+			fmt.Fprintf(stderr, "maestro has no command %q.\n\n", args[0])
+		}
+		writeOverview(stderr)
 		return 2
 	}
 	explicit := ""
