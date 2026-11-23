@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Unit describes the installed service.
@@ -33,6 +34,28 @@ type Unit struct {
 	UID  int
 	// Run executes a command. Tests replace it.
 	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// Sleep waits; tests replace it.
+	Sleep func(time.Duration)
+}
+
+func (u *Unit) sleep(d time.Duration) {
+	if u.Sleep != nil {
+		u.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+// stopped waits until launchd no longer knows the service. A bootout
+// returns before the service has gone, and a bootstrap made before that
+// fails with "Input/output error".
+func (u *Unit) stopped(ctx context.Context) {
+	for i := 0; i < 40 && ctx.Err() == nil; i++ {
+		if _, err := u.run(ctx, "launchctl", "print", u.domain()+"/"+u.Label()); err != nil {
+			return
+		}
+		u.sleep(250 * time.Millisecond)
+	}
 }
 
 var workerRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}$`)
@@ -215,6 +238,7 @@ func (u *Unit) Install(ctx context.Context) error {
 		}
 		// Not loaded is fine here.
 		u.run(ctx, "launchctl", "bootout", u.domain()+"/"+u.Label())
+		u.stopped(ctx)
 	}
 	if err := os.WriteFile(u.Path(), []byte(text), 0o644); err != nil {
 		return err
@@ -228,8 +252,19 @@ func (u *Unit) Install(ctx context.Context) error {
 			{"systemctl", "--user", "restart", u.Label() + ".service"}}
 	}
 	for _, s := range steps {
-		if out, err := u.run(ctx, s[0], s[1:]...); err != nil {
-			return fmt.Errorf("%s: %w: %s", strings.Join(s, " "), err, strings.TrimSpace(string(out)))
+		out, err := u.run(ctx, s[0], s[1:]...)
+		// launchd can still be letting go of the old service: try again.
+		for try := 0; err != nil && u.GOOS == "darwin" && try < 4 && ctx.Err() == nil; try++ {
+			u.sleep(time.Second)
+			out, err = u.run(ctx, s[0], s[1:]...)
+		}
+		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			if u.GOOS == "darwin" {
+				msg += ". Is this user logged in on the Mac itself (not only over sudo or SSH)? " +
+					"A LaunchAgent runs in that login"
+			}
+			return fmt.Errorf("%s: %w: %s", strings.Join(s, " "), err, msg)
 		}
 	}
 	return nil

@@ -19,7 +19,7 @@ if grep -qE 'An error occurred while resolving packages|Cannot resolve package' 
     grep -A 5 -E 'An error occurred while resolving packages|Cannot resolve package' "$log" >&2
     exit 1
 fi
-if [ "$status" -ne 0 ] && ! grep -q 'error CS' "$log"; then
+if [ "$status" -ne 0 ] && ! grep -qE ': error [A-Z]+[0-9]+' "$log"; then
     tail -n 40 "$log" >&2
     exit "$status"
 fi
