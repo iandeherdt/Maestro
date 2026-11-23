@@ -484,7 +484,8 @@ func (d *doctor) linearBoard(ctx context.Context, in *install) {
 	t := in.cfg.Tracker
 	team := fmt.Sprint(t.Provider["team_key"])
 	names := append(append([]string{}, t.ActiveStates...), t.TerminalStates...)
-	names = append(names, t.InProgressState, t.HandoffState, t.BlockedState, t.DoneState, "Rework")
+	names = append(names, t.InProgressState, t.HandoffState, t.BlockedState, t.DoneState, "Rework",
+		t.PlanningState, t.PlannedState, t.DesignState)
 	missing, err := la.MissingStates(ctx, names)
 	switch {
 	case err != nil:
