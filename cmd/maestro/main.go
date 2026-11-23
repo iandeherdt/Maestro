@@ -347,6 +347,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.Tickets{Linear: setup.LinearBoard{Endpoint: linearEndpoint,
 			AskKey: func(ui *setup.UI, prompt string) (string, error) { return askSecret(ui.In, stdin, ui.Out, prompt) }}},
 		&setup.WorkflowFile{},
+		newSetupUnity(),
 	}
 	// Ctrl-C ends whatever the wizard waits for on the network. A question
 	// that waits for the keyboard is not ended by that, so after a moment

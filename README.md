@@ -140,6 +140,11 @@ What the setup does:
    that one. For a repository on a personal account this step creates the labels instead.
 5. **Writes the settings file** from two questions (how you test the repository, and whether it
    runs checks on pull requests), shows it to you first, and validates it.
+6. **Sets up Unity's checks**, when the repository holds a Unity project: it switches the `unity`
+   pack on. On a Mac with Apple silicon it also finds the Editor that Unity Hub installed for the
+   project's version (in `/Applications` or, without an administrator, in `~/Applications`),
+   writes it into the settings file, and waits until Hub has a licence. On Linux it tells you to
+   run `maestro unity activate` after `maestro image`.
 
 If the machine has no browser, the setup shows an `ssh -L` command to run on your own computer so
 that the page opens there.

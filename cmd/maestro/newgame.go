@@ -500,7 +500,9 @@ func (s *gameFolder) localEditor(version string) string {
 	var rel string
 	switch s.goos {
 	case "darwin":
-		roots = []string{"/Applications/Unity/Hub/Editor"}
+		// A user without an administrator's password installs into
+		// the home folder.
+		roots = []string{"/Applications/Unity/Hub/Editor", filepath.Join(s.home, "Applications", "Unity", "Hub", "Editor")}
 		rel = "Unity.app/Contents/MacOS/Unity"
 	case "windows":
 		roots = []string{`C:\Program Files\Unity\Hub\Editor`}
