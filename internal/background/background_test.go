@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func unit(t *testing.T, goos string) (*Unit, *[]string) {
@@ -19,11 +20,12 @@ func unit(t *testing.T, goos string) (*Unit, *[]string) {
 		LogFile:      filepath.Join(home, "state", "service.log"), Home: home, UID: 501}
 	u.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
-		if strings.Contains(strings.Join(args, " "), "bootout") {
+		if a := strings.Join(args, " "); strings.Contains(a, "bootout") || strings.HasPrefix(a, "print ") {
 			return []byte("not loaded"), errors.New("exit status 3")
 		}
 		return nil, nil
 	}
+	u.Sleep = func(time.Duration) {}
 	return u, &calls
 }
 
@@ -64,7 +66,7 @@ func TestLaunchdAgent(t *testing.T) {
 	if !u.Installed() || u.Path() != filepath.Join(u.Home, "Library/LaunchAgents/com.maestro.mac.plist") {
 		t.Fatalf("path %s", u.Path())
 	}
-	want := "launchctl bootout gui/501/com.maestro.mac,launchctl bootstrap gui/501 " + u.Path()
+	want := "launchctl bootout gui/501/com.maestro.mac,launchctl print gui/501/com.maestro.mac,launchctl bootstrap gui/501 " + u.Path()
 	if strings.Join(*calls, ",") != want {
 		t.Errorf("commands = %v", *calls)
 	}
@@ -192,5 +194,32 @@ func TestRestartOnlyTheServicesOfThisBinary(t *testing.T) {
 	}
 	if len(ran) != 1 || ran[0] != "launchctl kickstart -k gui/501/com.maestro.mini" {
 		t.Errorf("ran %v", ran)
+	}
+}
+
+func TestBootstrapWaitsForTheOldServiceAndRetries(t *testing.T) {
+	u, calls := unit(t, "darwin")
+	prints, boots := 0, 0
+	u.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		a := strings.Join(args, " ")
+		*calls = append(*calls, a)
+		switch {
+		case strings.HasPrefix(a, "print "):
+			if prints++; prints < 3 {
+				return nil, nil // still there
+			}
+			return nil, errors.New("exit status 113")
+		case strings.HasPrefix(a, "bootstrap "):
+			if boots++; boots < 2 {
+				return []byte("Bootstrap failed: 5: Input/output error"), errors.New("exit status 5")
+			}
+		}
+		return nil, nil
+	}
+	if err := u.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if prints != 3 || boots != 2 {
+		t.Errorf("prints %d, bootstraps %d: %v", prints, boots, *calls)
 	}
 }
