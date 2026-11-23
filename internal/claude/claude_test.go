@@ -397,3 +397,32 @@ func TestSummaryIsOneBoundedLine(t *testing.T) {
 		t.Fatalf("summary = %q", got)
 	}
 }
+
+type fakeTrace struct {
+	lines []string
+	ended int
+	err   error
+}
+
+func (f *fakeTrace) Line(raw []byte) { f.lines = append(f.lines, string(raw)) }
+func (f *fakeTrace) End(err error)   { f.ended++; f.err = err }
+
+func TestTraceSeesEveryLineAndTheEnd(t *testing.T) {
+	g := newRig(0, "", initLine, result("success", "done", ""))
+	ft := &fakeTrace{}
+	var got worker.Turn
+	g.r.Trace = func(t worker.Turn) TurnTrace { got = t; return ft }
+	if _, err := g.turn(""); err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkspaceKey != "GH-1" || len(ft.lines) != 2 || ft.lines[0] != initLine || ft.ended != 1 || ft.err != nil {
+		t.Errorf("turn %+v, trace %+v", got, ft)
+	}
+
+	g = newRig(3, "", initLine)
+	ft = &fakeTrace{}
+	g.r.Trace = func(worker.Turn) TurnTrace { return ft }
+	if _, err := g.turn(""); err == nil || ft.ended != 1 || ft.err == nil {
+		t.Errorf("a failed turn is not ended with its error: %+v", ft)
+	}
+}

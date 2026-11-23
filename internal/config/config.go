@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -39,6 +40,7 @@ type Config struct {
 	Budget      Budget
 	Worker      Worker
 	Server      Server
+	Traces      Traces
 
 	// Warnings are non-fatal findings, such as ignored unknown keys.
 	Warnings []string
@@ -226,6 +228,13 @@ type Worker struct {
 	RequireRoutingLabel bool
 }
 
+// Traces is where the agents' turns are sent as traces, such as to a
+// local Arize Phoenix. URL is "" when they are not sent.
+type Traces struct {
+	URL     string
+	Project string
+}
+
 type Server struct {
 	// Port is nil when the HTTP extension is disabled.
 	Port *int64
@@ -299,6 +308,7 @@ func Build(def *workflow.Definition, opt Options) (*Config, error) {
 	b.budget(root.sub("budget"))
 	b.worker(root.sub("worker"))
 	b.server(root.sub("server"))
+	b.traces(root.sub("traces"))
 
 	for _, k := range root.unknown() {
 		c.Warnings = append(c.Warnings, fmt.Sprintf("unknown top-level key %q ignored", k))
@@ -977,6 +987,31 @@ func (b *builder) server(s *section) {
 	b.lenient(s)
 	if p := b.cfg.Server.Port; p != nil && (*p < 0 || *p > 65535) {
 		b.fail("server.port", "must be between 0 and 65535")
+	}
+}
+
+var loopbackHosts = map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
+
+func (b *builder) traces(s *section) {
+	t := &b.cfg.Traces
+	t.URL = strings.TrimSpace(s.str("url", ""))
+	t.Project = strings.TrimSpace(s.str("project", b.cfg.Worker.Name))
+	b.lenient(s)
+	if t.URL == "" {
+		return
+	}
+	u, err := url.Parse(t.URL)
+	switch {
+	case err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "":
+		b.fail("traces.url", "must be a collector's OTLP/HTTP traces URL, such as http://127.0.0.1:6006/v1/traces")
+	case u.Scheme == "http" && !loopbackHosts[u.Hostname()]:
+		// The traces hold the agents' prompts, code and command output.
+		b.fail("traces.url", "must use https, or http to this machine only (127.0.0.1 or localhost)")
+	case u.Scheme != "http" && u.Scheme != "https":
+		b.fail("traces.url", "must start with http:// or https://")
+	}
+	if t.Project == "" {
+		t.Project = "maestro"
 	}
 }
 

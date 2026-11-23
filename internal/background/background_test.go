@@ -171,3 +171,26 @@ func TestServiceUnderTheOldNameIsReplaced(t *testing.T) {
 		}
 	}
 }
+
+func TestRestartOnlyTheServicesOfThisBinary(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "Library", "LaunchAgents")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "com.maestro.mini.plist"), []byte("<string>/Users/m/.local/bin/maestro</string>"), 0o644)
+	os.WriteFile(filepath.Join(dir, "com.maestro.other.plist"), []byte("<string>/opt/maestro</string>"), 0o644)
+	var ran []string
+	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		ran = append(ran, name+" "+strings.Join(args, " "))
+		return nil, nil
+	}
+	got, err := Restart(context.Background(), "darwin", home, 501, "/Users/m/.local/bin/maestro", run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "com.maestro.mini" {
+		t.Errorf("restarted %v", got)
+	}
+	if len(ran) != 1 || ran[0] != "launchctl kickstart -k gui/501/com.maestro.mini" {
+		t.Errorf("ran %v", ran)
+	}
+}

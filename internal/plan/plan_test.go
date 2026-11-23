@@ -313,3 +313,31 @@ func TestFinishedOnceEveryTaskIsDone(t *testing.T) {
 		t.Fatalf("all tasks done: %v %d %v", done, n, err)
 	}
 }
+
+// Every task of a plan goes to the machine the idea was given to.
+func TestBriefOffersOnlySelf(t *testing.T) {
+	d, f := desk(t)
+	f.WorkerNames = []string{"mac", "linux", "maestro-mac-mini"}
+	d.Self = "Maestro-Mac-Mini"
+	b, err := d.Brief(ctx, idea)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(b.Workers, ",") != "maestro-mac-mini" {
+		t.Errorf("workers %v", b.Workers)
+	}
+	// A plan that names another machine anyway still lands on this one.
+	p, err := Parse(strings.ReplaceAll(twoTasks, `"Server"`, `"mac"`), b.Workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range p.Tasks {
+		if task.Worker != "maestro-mac-mini" {
+			t.Errorf("task for %q", task.Worker)
+		}
+	}
+	d.Self = "elsewhere"
+	if b, _ = d.Brief(ctx, idea); strings.Join(b.Workers, ",") != "mac,linux,maestro-mac-mini" {
+		t.Errorf("unknown self: %v", b.Workers)
+	}
+}

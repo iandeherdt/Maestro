@@ -41,7 +41,12 @@ type Desk struct {
 	Designs                   DesignReviews
 	// TerminalStates are the states a finished task is in.
 	TerminalStates []string
-	Now            func() time.Time
+	// Self is the worker name of this machine, the one that plans. The
+	// idea was given to this machine, so every task of its plan goes to
+	// it too: when the board lists Self, it is the only worker the
+	// planner is offered.
+	Self string
+	Now  func() time.Time
 }
 
 func (d *Desk) now() time.Time {
@@ -57,6 +62,7 @@ func (d *Desk) Brief(ctx context.Context, is issue.Issue) (Brief, error) {
 	if err != nil {
 		return Brief{}, err
 	}
+	workers = onlySelf(workers, d.Self)
 	rec, err := d.Store.Load(is.ID)
 	if err != nil {
 		return Brief{}, err
@@ -248,4 +254,15 @@ func (d *Desk) Finished(ctx context.Context, is issue.Issue) (bool, int, error) 
 		}
 	}
 	return true, len(ids), nil
+}
+
+// onlySelf narrows the workers to the one named self. The list is left
+// as it is when self is not on it.
+func onlySelf(workers []string, self string) []string {
+	for _, w := range workers {
+		if self != "" && strings.EqualFold(w, self) {
+			return []string{w}
+		}
+	}
+	return workers
 }

@@ -80,6 +80,9 @@ type runEntry struct {
 	lastMessage   string
 	usage         Usage
 	turnCount     int
+	// feed is the agent's recent messages and tool calls, oldest first,
+	// for the status page.
+	feed []FeedItem
 	// label is the working label the idea carries while this run lasts.
 	label string
 }
@@ -767,6 +770,7 @@ func (o *Orchestrator) onEvent(id string, gen uint64, ev Event) {
 		at = o.now()
 	}
 	e.lastEvent, e.lastEventAt, e.lastMessage = ev.Kind, at, ev.Message
+	e.feed = addFeed(e.feed, ev, at)
 	if ev.SessionID != "" {
 		e.sessionID = ev.SessionID
 	}
@@ -1427,7 +1431,7 @@ func (o *Orchestrator) Snapshot() Snapshot {
 			SessionID: e.sessionID, PID: e.pid, Phase: e.phase, Attempt: e.attempt,
 			TurnCount: e.turnCount, StartedAt: e.startedAt, LastEvent: e.lastEvent,
 			LastMessage: e.lastMessage, LastEventAt: e.lastEventAt, Usage: e.usage,
-			FailureAttempts: o.d.Budget.Failures(id),
+			FailureAttempts: o.d.Budget.Failures(id), Feed: append([]FeedItem(nil), e.feed...),
 		})
 	}
 	sort.Slice(s.Running, func(a, b int) bool { return s.Running[a].Identifier < s.Running[b].Identifier })
@@ -1442,4 +1446,17 @@ func (o *Orchestrator) Snapshot() Snapshot {
 		return s.AwaitingChecks[a].Identifier < s.AwaitingChecks[b].Identifier
 	})
 	return s
+}
+
+// addFeed appends an event to a feed when it says something worth showing,
+// and keeps the last FeedLen lines.
+func addFeed(feed []FeedItem, ev Event, at time.Time) []FeedItem {
+	if ev.Message == "" || !feedKinds[ev.Kind] {
+		return feed
+	}
+	feed = append(feed, FeedItem{At: at, Kind: ev.Kind, Message: ev.Message})
+	if len(feed) > FeedLen {
+		feed = append([]FeedItem(nil), feed[len(feed)-FeedLen:]...)
+	}
+	return feed
 }

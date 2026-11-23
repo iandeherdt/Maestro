@@ -101,6 +101,12 @@ checksum file, and puts `maestro` in `~/.local/bin`. It does not use `sudo`. To 
 running it, open [install.sh](install.sh). To choose a version or a directory, set
 `MAESTRO_VERSION=v0.1.0` or `MAESTRO_INSTALL_DIR=/some/dir` before `sh`.
 
+To move to a newer release later, run `maestro update` as the user that runs Maestro. It
+downloads the release, checks it the same way, replaces the binary in place, and restarts the
+background services that run that binary. An agent turn that was running is stopped by the
+restart. `maestro update --version v0.5.19` picks a version, and `--no-restart` leaves the
+service on the old version until it restarts.
+
 Or build it yourself with Go 1.26 or newer:
 
 ```sh
@@ -191,6 +197,44 @@ removes the task again.
 Unity's checks run inside the container with the Unity Editor for Linux, as on any Linux machine.
 A Unity Editor installed on Windows is not used: Windows has no sandbox like the one the Mac
 checks run in.
+
+### A Mac as an always-on agent machine
+
+A Mac (a Mac mini, say) that does nothing else makes a good agent machine. This is how to set it
+up so that the agents cannot reach your own files and accounts.
+
+1. **Your own account stays the administrator** and is the only one with your Apple account,
+   GitHub login, SSH keys and passwords.
+2. **A standard user for Maestro**, named `maestro`, made in System Settings, **Users & Groups**.
+   It is not an administrator and has no Apple account. Maestro, Docker Desktop and the GitHub
+   App's key live there and nowhere else. Do not sign in to GitHub or claude.ai in its browser;
+   the agents use the login made by `maestro login`, inside the container.
+3. **Optionally, a second standard user for your own Claude Code sessions**, such as `claude`,
+   with its own projects folder. Give it access to only the repositories it needs, for example
+   with a deploy key or a fine-grained token for those repositories, not your own login. A
+   program that both users need (Blender, say) can stay in `/Applications`.
+4. **Close the home folders** to each other: `sudo chmod 700 /Users/maestro /Users/claude`.
+5. **FileVault on** (System Settings, **Privacy & Security**). Each of these users must be able
+   to unlock the disk: `sudo fdesetup list` shows who can. After a power cut or a restart, the
+   Mac waits at the FileVault screen until someone unlocks it, at the keyboard or over
+   SSH (recent macOS versions can unlock FileVault over SSH). Then use Screen Sharing.
+6. **Never sleep, and start again after a power cut:**
+   `sudo pmset -a sleep 0 disksleep 0 autorestart 1 womp 1`. The display may sleep.
+7. **Docker Desktop for the `maestro` user only**: install it with
+   `sudo /Applications/Docker.app/Contents/MacOS/install --user=maestro` and start it once while
+   logged in as `maestro`. Set its memory to what the agents need (about 4 GB per agent that
+   runs at the same time, plus Unity).
+8. As `maestro`: the install command above, `maestro setup`, `maestro image`, `maestro login`,
+   `maestro doctor` and `maestro service install`. The service then runs whenever `maestro` is
+   logged in. Use fast user switching, so that `maestro` stays logged in while you use your own
+   account.
+9. **Remote access**: turn on **Remote Login** (SSH) and **Screen Sharing** in System Settings,
+   **General**, **Sharing**, for your own account. From another computer,
+   `ssh you@<the Mac's name>.local`. For access from outside your home, use a VPN to your home
+   network rather than opening ports on your router. `maestro dashboard` and Phoenix are reached
+   through an SSH tunnel.
+
+Later versions: `maestro update` as `maestro`, see [Install](#install).
 
 ## Use
 
@@ -326,6 +370,11 @@ of Todo (set its Worker first).
 
 Before step 5 you can also ask for a design first, see the next section.
 
+Every task of a plan goes to the machine the idea was given to: the planner is offered only
+that machine's Worker option, and a plan that names another machine is corrected. With several
+machines on one board, put the idea on the machine that should build it. Only when the board has
+no Worker option for the planning machine does the planner choose among all of them.
+
 Moving the card to Planned is your approval of every task in the plan, so read them. Each task
 then goes through the same steps as a ticket you wrote yourself and ends as a pull request for
 you to review.
@@ -406,6 +455,53 @@ Todo (or put `status:todo` back on it), or:
 ```sh
 maestro unblock GH-12       # or just: maestro unblock 12
 ```
+
+### Watching the agents: `maestro dashboard`
+
+`maestro dashboard` opens the service's status page in the browser. It refreshes every few
+seconds and shows, per running ticket, its phase, turns and tokens, and a feed of what the agent
+said and which commands and tools it ran, newest first. The text comes from the agent and is
+shown as plain text. The page only listens on this machine; from another computer, open an SSH
+tunnel to it (the command prints how). With several projects, each has its own page:
+`maestro dashboard --project NAME`.
+
+### Every step of every turn: traces in Arize Phoenix
+
+For more than the feed, Maestro can send each agent turn as a trace to an OpenTelemetry
+collector. [Arize Phoenix](https://github.com/Arize-ai/phoenix) is a free, open-source viewer
+that runs on your own machine. A turn becomes one trace with these parts:
+
+- the prompt and the final result;
+- an entry for each thing the model said or thought, with its token counts;
+- an entry for each tool call, with its full input and what came back, marked red when it failed.
+
+The turns of a ticket are grouped as one session. Maestro sends the traces from the service,
+outside the sandbox: the agent gets no extra network, and a collector that is down never slows
+an agent.
+
+Start Phoenix once, as the user that runs Maestro, so it listens on this machine only:
+
+```sh
+docker run -d --name phoenix --restart unless-stopped \
+  -p 127.0.0.1:6006:6006 -e PHOENIX_WORKING_DIR=/mnt/data -v phoenix-data:/mnt/data \
+  arizephoenix/phoenix:latest
+```
+
+Pin a version from Phoenix's releases instead of `latest` if you want it to stay put. Then add
+this to the settings file:
+
+```yaml
+traces:
+  url: http://127.0.0.1:6006/v1/traces
+  # project: games   # the Phoenix project; the default is the worker's name
+```
+
+The service reads it on its next reload. Open http://localhost:6006 to see the traces. From
+another computer, use an SSH tunnel: `ssh -L 6006:127.0.0.1:6006 USER@HOST`.
+
+The traces hold what the agents read and wrote: code, command output, and anything a command
+printed. That is why `url` must be `https`, or `http` to this machine only. Each input or output
+is cut at 32 KB.
 
 ### When something is not right: `maestro doctor`
 
@@ -650,7 +746,10 @@ The Unity Editor for Linux exists for Intel only, and it crashes when it runs em
 Mac with Apple Silicon the agent's container runs emulated, while Unity's own checks (opening the
 project, compiling it and running the tests) run with the Unity Editor that Unity Hub installed on
 the Mac, with Unity Hub's licence. `maestro new` finds that Editor and writes it into the settings
-file:
+file. For a Unity repository that already exists, `maestro setup` does the same in its last step:
+it reads the Unity version from `ProjectSettings/ProjectVersion.txt`, switches the `unity` pack
+on, finds that version's Editor in `/Applications/Unity/Hub/Editor` or
+`~/Applications/Unity/Hub/Editor`, and waits until Unity Hub has a licence:
 
 ```yaml
 unity:
@@ -663,7 +762,8 @@ The service then checks out exactly what it would push into a folder of its own
 proxy lets through only Unity's hosts and the hooks' allowlist; no writes outside that folder, the
 temporary folders and Unity's own; no reads of your home folder outside Unity's part of its
 Library, so not your documents, your other projects, your keys or Maestro's setup and state; and
-no opening or steering of your other apps. That fence is weaker than the container, because the
+no opening or steering of your other apps. The folders above the check's own folder can be passed
+through, so that full paths into it work, but not listed or read. That fence is weaker than the container, because the
 code the agent wrote runs as you and whatever the fence does not name is allowed, so use it for
 your own projects.
 
@@ -846,6 +946,9 @@ changed ones:
 | `budget.max_runs_per_day` | 20 | Daily limit on agent runs |
 | `policy.deny_paths` | built-in list | Extra paths the agent may never change |
 | `policy.flag_paths` | none | Paths whose changes are pointed out in the pull request |
+| `unity.editor` | none | On a Mac with Apple silicon, the Unity Editor that runs Unity's checks, see [Unity](#unity) |
+| `traces.url` | none | Where each agent turn is sent as a trace, see [traces in Arize Phoenix](#every-step-of-every-turn-traces-in-arize-phoenix) |
+| `traces.project` | `worker.name` | The Phoenix project the traces are filed under |
 
 ### Linear as the board
 
@@ -933,6 +1036,11 @@ Last updated 2026-11-23, at release 0.5.18.
 | Closing ways past the gates (release 0.5.17) | Done: a base commit that moved after the run, changes hidden from git, and a secret in an earlier commit of the branch are all refused (#78). The mirror and the hand-off folders are closed to other users of the machine (#79). Setup says when the GitHub App could push to an unprotected base branch, and how to close that (#80). On a Mac, Unity's checks read only Unity's part of the home folder and write only Unity's folders (#81, #82). |
 | `maestro doctor`, start-up self-test (release 0.5.18) | Done. Run on a new Mac mini with release 0.5.18, together with `maestro setup`. The self-test also runs in real containers in the tests, on Docker, and the service's end-to-end test starts through it. Not yet run on Podman on RHEL. The SPEC 11.6 checks for leftover processes after a step and for exceeding the limits are not part of it yet. |
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
+| `maestro dashboard`, live feed on the status page | Written and tested against a running service's status file and a stand-in orchestrator. Not yet opened on a real Mac. |
+| Traces in Arize Phoenix (`traces:`) | Written. The OTLP encoding is tested by decoding it again, and a turn of a real stream's shape is followed to its spans. Not yet sent to a real Phoenix. |
+| `maestro update` | Written. The download, the checksum, the archive and the restart of the right service are tested against a stand-in for GitHub's releases. Not yet run against a real release. |
+| Tasks of a plan stay on the planning machine | Written and tested against a stand-in board, after a plan on a Mac mini put its tasks on a worker no machine ran. |
+| Unity's checks on a Mac, started from `maestro setup` | Written. The setup step is tested against a stand-in for GitHub. The checks failed on a Mac mini with "Not a directory" because the sandbox closed the folders above the check's own; that is fixed but not yet run again on the Mac. |
 | Native Linux sandbox (systemd) | Started. In release 0.5.18: the root launcher `maestro-launch`, and the service's side that sends it each step through one sudo rule. Since then: the service can run on `sandbox.backend: systemd`, with its proxies on unix sockets, `maestro login`, the start-up self-test and `maestro doctor` through the launcher. All tested with a simulated systemd and sudo. Setup does not install the launcher, the sandbox user and the sudo rule yet; that and a real run are the next steps ([plan](docs/PLAN.md)). |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
