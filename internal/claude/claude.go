@@ -55,6 +55,10 @@ type Runner struct {
 	// Audit, when set, returns where the raw stream of a turn is appended
 	// before it is interpreted (SPEC 16.2). A failing writer is ignored.
 	Audit func(workspaceKey string) io.Writer
+	// Trace, when set, starts the trace of a turn: it is given each stream
+	// line next to the audit, and how the turn ended. It returns nil when
+	// traces are off.
+	Trace func(t worker.Turn) TurnTrace
 	// Now, NewID and Location are for tests. Location is where "resets
 	// 3:45pm" is read; it defaults to the service's local time zone.
 	Now      func() time.Time
@@ -198,9 +202,27 @@ type turnState struct {
 	foreignSession bool
 }
 
+// TurnTrace receives what a turn does, for a trace. It must not block.
+type TurnTrace interface {
+	Line(raw []byte)
+	End(err error)
+}
+
 // RunTurn runs one turn and waits for it. When ctx ends the sandbox unit
 // is killed through the launcher's context.
 func (r *Runner) RunTurn(ctx context.Context, t worker.Turn, onEvent func(orchestrator.Event)) (worker.TurnResult, error) {
+	var tr TurnTrace
+	if r.Trace != nil {
+		tr = r.Trace(t)
+	}
+	res, err := r.runTurn(ctx, t, onEvent, tr)
+	if tr != nil {
+		tr.End(err)
+	}
+	return res, err
+}
+
+func (r *Runner) runTurn(ctx context.Context, t worker.Turn, onEvent func(orchestrator.Event), tr TurnTrace) (worker.TurnResult, error) {
 	var none worker.TurnResult
 	cfg := r.Config()
 	c := cfg.Claude
@@ -295,6 +317,9 @@ loop:
 			idle.Reset(time.Duration(c.TurnTimeoutMS) * time.Millisecond)
 			if audit != nil && !l.tooLong {
 				audit.Write(append(l.data, '\n'))
+			}
+			if tr != nil && !l.tooLong {
+				tr.Line(l.data)
 			}
 			st.events++
 			r.handle(st, l, id, resume, emit)
