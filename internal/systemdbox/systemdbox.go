@@ -24,6 +24,10 @@ import (
 const (
 	// Launcher is where setup installs the launcher.
 	Launcher = "/usr/local/libexec/maestro-launch"
+	// Sudo is the system's sudo, called by its path. A sudo found first
+	// on the PATH can be another one: Red Hat's toolsets put a wrapper
+	// script in front that mangles options and long arguments.
+	Sudo = "/usr/bin/sudo"
 	// refused is the launcher's status for a request it refused or could
 	// not run.
 	refused = 125
@@ -58,7 +62,7 @@ func fail(format string, a ...any) error { return &sandbox.Error{Msg: fmt.Sprint
 func (b *Box) command(ctx context.Context, extra ...string) *exec.Cmd {
 	sudo, launcher := b.Sudo, b.LauncherPath
 	if sudo == "" {
-		sudo = "sudo"
+		sudo = Sudo
 	}
 	if launcher == "" {
 		launcher = Launcher

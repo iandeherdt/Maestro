@@ -107,3 +107,12 @@ func TestCancelAsksTheLauncherToStop(t *testing.T) {
 		t.Error("the launcher was not sent SIGTERM")
 	}
 }
+
+// The system's sudo is called by its path, never a wrapper found first on
+// the PATH, such as the one of Red Hat's gcc toolset.
+func TestTheSystemsSudo(t *testing.T) {
+	cmd := (&Box{Worker: "linux"}).command(context.Background(), "run")
+	if cmd.Path != Sudo || cmd.Args[1] != "-n" || cmd.Args[3] != Launcher {
+		t.Errorf("%s %q", cmd.Path, cmd.Args)
+	}
+}

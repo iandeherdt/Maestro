@@ -182,7 +182,7 @@ func claudeIs(ctx context.Context, path, version string) bool {
 func sudoAllows(ctx context.Context, cmd ...string) bool {
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	return exec.CommandContext(c, "sudo", append([]string{"-n", "-l"}, cmd...)...).Run() == nil
+	return exec.CommandContext(c, systemdbox.Sudo, append([]string{"-n", "-l"}, cmd...)...).Run() == nil
 }
 
 // script is what root runs. Every path in it passed the launcher's path
@@ -299,7 +299,7 @@ func (s *setupSystemd) Run(ctx context.Context, ui *setup.UI, st *setup.State) e
 	if !ok {
 		return setup.ErrAborted
 	}
-	cmd := exec.CommandContext(ctx, "sudo", "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, systemdbox.Sudo, "/bin/sh", "-c", script)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, ui.Out, ui.Out
 	if err := cmd.Run(); err != nil {
 		return explain("the commands stopped: %v. Nothing after the failing line ran; run `maestro setup` again once it is fixed.", err)

@@ -2,15 +2,19 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 	"github.com/iandeherdt/Maestro/internal/wsl"
 )
 
@@ -75,18 +79,26 @@ func (m *Machine) systemdProblems(ctx context.Context) []string {
 		out = append(out, "This machine uses cgroups v1, where systemd cannot apply the sandbox's memory and CPU limits. "+
 			"Switch to cgroups v2 and restart: sudo grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && sudo reboot")
 	}
-	if _, err := m.LookPath("sudo"); err != nil {
-		out = append(out, "sudo is not installed. Setup uses it once to install the sandbox's root launcher: sudo dnf install sudo")
+	// The sudo that counts is the system's: one found first on the PATH,
+	// such as a toolset's wrapper script, is not used.
+	if !m.Exists("/usr/bin/sudo") {
+		out = append(out, "sudo is not installed in /usr/bin. Setup uses it once to install the sandbox's root launcher: sudo dnf install sudo")
 	}
 	if v, err := m.Output(ctx, "/usr/bin/node", "--version"); err != nil {
 		out = append(out, "Node.js is not installed in /usr/bin. The steps run Claude Code with it: sudo dnf install nodejs npm")
 	} else if g := nodeVersionRE.FindStringSubmatch(strings.TrimSpace(v)); g == nil {
 		out = append(out, "The Node.js version could not be read.")
 	} else if n, _ := strconv.Atoi(g[1]); n < 18 {
-		out = append(out, fmt.Sprintf("Node.js %d is too old; 18 or newer is needed: sudo dnf module install nodejs:20", n))
+		// RHEL 8 keeps Node.js 10 as its default stream, and dnf does not
+		// switch streams without a reset. A Node.js in the operator's own
+		// account (nvm) does not count: the steps cannot see it.
+		out = append(out, fmt.Sprintf("Node.js %d in /usr/bin is too old; 18 or newer is needed there (one in your own account does not count). "+
+			"On RHEL 8: sudo dnf module reset -y nodejs, then sudo dnf module install -y nodejs:20", n))
 	}
-	if _, err := m.LookPath("npm"); err != nil {
-		out = append(out, "npm is not installed. Setup installs Claude Code for the steps with it: sudo dnf install npm")
+	// Root runs npm with sudo's own path, so the one that counts is the
+	// system's, not one in the operator's account.
+	if !m.Exists("/usr/bin/npm") {
+		out = append(out, "npm is not installed in /usr/bin. Setup installs Claude Code for the steps with it: sudo dnf install npm")
 	}
 	return out
 }
@@ -247,6 +259,13 @@ func SwitchSandbox(st *State, kind string, goos string, lookPath func(string) (s
 	if st.Sandbox == kind {
 		return nil
 	}
+	if kind == SandboxSystemd && st.WorkflowFile != "" && usesUnity(st.WorkflowFile) {
+		// Refused before anything changes: Unity's Editor comes with the
+		// container image, and the systemd sandbox has none.
+		return errors.New("this project uses the unity pack, which needs the container sandbox: Unity's Editor for Linux comes " +
+			"with the sandbox image. Nothing was changed. To try the systemd sandbox, make another project for a repository " +
+			"that is not a Unity game: maestro projects add NAME, then maestro setup --project NAME --sandbox systemd")
+	}
 	st.Sandbox = kind
 	if st.WorkflowFile != "" {
 		raw, err := os.ReadFile(st.WorkflowFile)
@@ -267,4 +286,16 @@ func SwitchSandbox(st *State, kind string, goos string, lookPath func(string) (s
 		}
 	}
 	return st.Save()
+}
+
+// usesUnity reports whether the settings file at path turns on the unity
+// pack. A file that cannot be read says no.
+func usesUnity(path string) bool {
+	def, err := workflow.Load(path)
+	if err != nil {
+		return false
+	}
+	home, _ := os.UserHomeDir()
+	cfg, err := config.Build(def, config.Options{Env: os.Getenv, HomeDir: home})
+	return err == nil && slices.Contains(cfg.Conventions, "unity")
 }

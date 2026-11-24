@@ -798,7 +798,7 @@ func TestMachineForTheSystemdSandbox(t *testing.T) {
 	}{
 		"old systemd": {answers("systemd 219\n", "v20.1.0"), "too old; 239"},
 		"no node":     {answers("systemd 239\n", ""), "Node.js is not installed"},
-		"old node":    {answers("systemd 239\n", "v16.20.0"), "Node.js 16 is too old"},
+		"old node":    {answers("systemd 239\n", "v16.20.0"), "dnf module reset -y nodejs"},
 	} {
 		p := tc.m.problems(ctx, SandboxSystemd)
 		if len(p) != 1 || !strings.Contains(p[0], tc.want) {
@@ -839,5 +839,30 @@ func TestSwitchSandboxRewritesTheBackendLine(t *testing.T) {
 	os.WriteFile(st.WorkflowFile, []byte("sandbox:\n  backend: podman\n# backend copy\nother:\n  backend: docker\n"), 0o600)
 	if err := SwitchSandbox(st, SandboxSystemd, "linux", look); err == nil {
 		t.Error("a file with two backend lines was changed")
+	}
+}
+
+func TestSwitchSandboxRefusesAUnityProject(t *testing.T) {
+	st, _ := LoadState(t.TempDir())
+	st.Host, st.HostURL, st.Repo, st.GiteaBot, st.Reviewer, st.Tracker = HostGitea, "https://git.example.com", "team/app", "maestro-bot", "ian", TrackerLinear
+	st.Worker, st.LinearTeam, st.LinearAuthor, st.LinearHandoff = "linux", "ENG", "ian@example.com", "In Review"
+	wf := &WorkflowFile{GOOS: "linux", LookPath: func(string) (string, error) { return "/usr/bin/podman", nil }}
+	u, out := ui("\ny\ny\n")
+	if err := Run(context.Background(), u, st, []Step{wf}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	raw, _ := os.ReadFile(st.WorkflowFile)
+	unity := strings.Replace(string(raw), "worker:\n", "conventions: [unity]\nworker:\n", 1)
+	os.WriteFile(st.WorkflowFile, []byte(unity), 0o600)
+	if !usesUnity(st.WorkflowFile) {
+		t.Fatalf("the unity pack is not seen in:\n%s", unity)
+	}
+	look := func(string) (string, error) { return "/usr/bin/podman", nil }
+	err := SwitchSandbox(st, SandboxSystemd, "linux", look)
+	if err == nil || !strings.Contains(err.Error(), "maestro projects add") {
+		t.Fatalf("a Unity project was switched: %v", err)
+	}
+	if after, _ := os.ReadFile(st.WorkflowFile); string(after) != unity || st.Sandbox != "" {
+		t.Errorf("something changed: %q\n%s", st.Sandbox, after)
 	}
 }

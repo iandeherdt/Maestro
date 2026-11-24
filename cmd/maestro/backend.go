@@ -39,7 +39,7 @@ func (in *install) systemdReady(ctx context.Context) error {
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	// -l with a command only says whether the rule allows it.
-	if err := exec.CommandContext(c, "sudo", "-n", "-l", systemdbox.Launcher, in.cfg.Worker.Name).Run(); err != nil {
+	if err := exec.CommandContext(c, systemdbox.Sudo, "-n", "-l", systemdbox.Launcher, in.cfg.Worker.Name).Run(); err != nil {
 		return explain(launcherHelp, systemdbox.Launcher, "sudo does not allow it for this user without a password.", mention("maestro setup"))
 	}
 	return nil
