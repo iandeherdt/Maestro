@@ -109,9 +109,14 @@ running it, open [install.sh](install.sh). To choose a version or a directory, s
 
 To move to a newer release later, run `maestro update` as the user that runs Maestro. It
 downloads the release, checks it the same way, replaces the binary in place, and restarts the
-background services that run that binary. An agent turn that was running is stopped by the
-restart. `maestro update --version v0.5.19` picks a version, and `--no-restart` leaves the
-service on the old version until it restarts.
+background services that run that binary. The restart is graceful: no new ticket is started,
+the agents at work finish first (up to two hours, `--wait 4h` for longer), and then the
+service restarts and picks up tickets again. `--now` restarts at once and cuts a running turn
+off; the ticket is tried again. `maestro update --version v0.5.19` picks a version, and
+`--no-restart` leaves the service on the old version until it restarts.
+
+`maestro restart` does the same restart without an update, and `maestro restart --now` restarts
+at once.
 
 Or build it yourself with Go 1.26 or newer:
 

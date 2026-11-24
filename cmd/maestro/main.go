@@ -80,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runLogin(args[1:], os.Stdin, stdout, stderr)
 		case "conventions":
 			return runConventions(args[1:], stdout, stderr)
+		case "restart":
+			return runRestart(args[1:], stdout, stderr)
 		case "settings":
 			return runSettings(args[1:], stdout, stderr)
 		case "skills":

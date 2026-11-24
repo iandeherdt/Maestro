@@ -257,6 +257,13 @@ remove deletes the skill again and says how to remove the tools.`,
 		see:     []string{"setup", "status"},
 	},
 	{
+		name: "restart", group: "Running the service",
+		usage:   "maestro restart [--wait DURATION]\nmaestro restart --now",
+		summary: "restart the background service, after the running agents finish or at once",
+		body:    strings.TrimPrefix(restartUsage, "usage:\n"),
+		see:     []string{"service", "update", "status"},
+	},
+	{
 		name: "settings", group: "Watching and steering",
 		usage:   "maestro settings\nmaestro settings set NAME VALUE",
 		summary: "show and change the daily limits, models and other everyday settings",
