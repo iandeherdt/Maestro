@@ -40,6 +40,22 @@ fi
 $G fetch --quiet origin "refs/heads/$1"
 # Forward only. A branch that went another way is left as it is.
 $G merge --quiet --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+# Bring in the newest base branch, so that work on a base that moved on
+# does not conflict with it on the pull request, where CI then does not
+# run. A conflict is left in the tree for the agent to resolve and commit.
+# The base the work is measured from becomes the newest base: what the
+# merge brings in is not the agent's work.
+if [ -n "${2:-}" ] && [ -z "$($G status --porcelain)" ] && [ ! -f .git/MERGE_HEAD ] &&
+  $G fetch --quiet origin "refs/heads/$2" 2>/dev/null; then
+  new="$($G rev-parse FETCH_HEAD)"
+  if ! $G merge-base --is-ancestor "$new" HEAD; then
+    if $G merge --quiet --no-ff --no-edit -m "Merge $2 into $1" "$new" >/dev/null 2>&1 || [ -f .git/MERGE_HEAD ]; then
+      echo "$new" > .git/maestro-base
+    else
+      $G merge --abort >/dev/null 2>&1 || true
+    fi
+  fi
+fi
 cat .git/maestro-base
 `
 

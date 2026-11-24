@@ -973,6 +973,12 @@ is supplied through an ephemeral `GIT_ASKPASS` helper.
      as is.
    - If the pull request branch exists in the mirror and is ahead of the workspace branch (pushed
      by a previous process), fast-forward the workspace branch to it.
+   - If that branch is published and the newest base branch in the mirror is not in it, merge the
+     base branch into it with a merge commit, when the tree is clean and no merge is in progress.
+     `base_sha` becomes the newest base, so what the merge brings in is not counted as the
+     agent's work. A conflict is left in the tree: the prompt tells the agent to resolve it and
+     commit the merge first. GitHub runs no pull request workflow on a branch that conflicts with
+     its base, so without this such a branch could never pass its checks.
 4. Population failure on a new workspace removes the partial directory. A reused workspace is
    never destructively reset.
 
@@ -2017,7 +2023,9 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
    writing a state: their choice stands.
 2. Read the pull request. If it is closed or merged, block the issue with `pull_request_closed`.
    If its head is not `head_sha`, someone else pushed to the branch: block the issue with
-   `foreign_push`.
+   `foreign_push`. If the host says it conflicts with its base branch (GitHub's
+   `mergeable_state` `dirty`, GitLab's `has_conflicts`), block the issue with `merge_conflict`:
+   its CI does not run, so waiting would only end at the deadline.
 3. Read the check runs (latest run per check) and the commit statuses for `head_sha`. A check
    run counts as passed when it completed with `success`, `neutral` or `skipped`; any other
    completed conclusion is a failure. When two results carry the same name, the worse one counts.
@@ -2034,7 +2042,9 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
 6. Any required check failed: pass each failed check's name and report to the agent as feedback
    with source `ci`, and schedule a `gate` retry with category `checks_failed`.
 7. Deadline passed, including when the checks could not be read until then: set the issue to the
-   blocked state with `checks_timeout`.
+   blocked state with `checks_timeout`. The blocked comment says that the checks did not finish
+   in time, not that attempts failed, and lists the checks still waited for, each `not started`
+   or `still running`.
 8. Still pending with not a single check reported for the commit, 10 minutes after publishing:
    update the status comment once to say so, with the deadline and the `required_checks: none`
    setting for a repository without CI. Nothing else changes; no check is still not a pass.

@@ -189,7 +189,10 @@ type pull struct {
 	MergedAt string `json:"merged_at"`
 	Draft    bool   `json:"draft"`
 	NodeID   string `json:"node_id"`
-	User     struct {
+	// MergeableState is "dirty" when the pull request has conflicts.
+	// GitHub computes it in the background; until then it is "unknown".
+	MergeableState string `json:"mergeable_state"`
+	User           struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	Head struct {
@@ -205,7 +208,8 @@ type pull struct {
 }
 
 func (pr pull) change() change {
-	c := change{Number: pr.Number, State: changeClosed, Draft: pr.Draft, HeadSHA: pr.Head.SHA, Author: pr.User.Login, id: pr.NodeID}
+	c := change{Number: pr.Number, State: changeClosed, Draft: pr.Draft, HeadSHA: pr.Head.SHA, Author: pr.User.Login, id: pr.NodeID,
+		Conflicted: pr.MergeableState == "dirty"}
 	switch {
 	case pr.Merged || pr.MergedAt != "":
 		c.State = changeMerged

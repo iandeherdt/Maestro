@@ -68,6 +68,8 @@ var everydaySettings = []setting{
 		func(c *config.Config) string { return c.Claude.Model }},
 	{"claude.planning_model", word, "the model for planning an idea; empty means claude.model",
 		func(c *config.Config) string { return c.Claude.PlanningModel }},
+	{"publish.checks_timeout_ms", whole, "milliseconds to wait for a pull request's checks before the ticket is blocked",
+		func(c *config.Config) string { return strconv.FormatInt(c.Publish.ChecksTimeoutMS, 10) }},
 	{"polling.interval_ms", whole, "milliseconds between two looks at the board",
 		func(c *config.Config) string { return strconv.FormatInt(c.Polling.IntervalMS, 10) }},
 }

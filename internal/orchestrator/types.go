@@ -270,6 +270,10 @@ const (
 	ChecksForeignPush
 	// ChecksClosed: the pull request was closed or merged by someone.
 	ChecksClosed
+	// ChecksConflict: the pull request conflicts with its base branch.
+	// GitHub does not run pull request workflows on it, so waiting for the
+	// checks would only end at the deadline.
+	ChecksConflict
 )
 
 // CheckStatus is the result of one look at a pull request's checks.

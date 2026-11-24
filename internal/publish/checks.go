@@ -38,6 +38,9 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 		// The operator said this repository has no checks to wait for.
 		return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
 	}
+	if pr.Conflicted {
+		return orchestrator.CheckStatus{State: orchestrator.ChecksConflict}, nil
+	}
 	results, complete, err := h.checks(ctx, rec.HeadSHA)
 	if err != nil {
 		return none, err
@@ -51,12 +54,16 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 		}
 	}
 	sort.Strings(names)
-	var failedNames []string
+	var failedNames, waitingFor []string
 	waiting := 0
 	for _, n := range names {
 		switch c, ok := results[n]; {
-		case !ok || c.res == resPending:
+		case !ok:
 			waiting++
+			waitingFor = append(waitingFor, clean(n, 100)+": not started")
+		case c.res == resPending:
+			waiting++
+			waitingFor = append(waitingFor, clean(n, 100)+": still running")
 		case c.res == resFailed:
 			failedNames = append(failedNames, n)
 		}
@@ -74,9 +81,17 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 		}
 		return st, nil
 	case waiting > 0 || len(names) == 0 || !complete:
+		detail := fmt.Sprintf("%d of %d check(s) not finished", waiting, len(names))
+		switch {
+		case len(names) == 0:
+			detail = "no check has started on the pull request"
+		case len(waitingFor) > 10:
+			detail += ":\n" + strings.Join(waitingFor[:10], "\n") + fmt.Sprintf("\nand %d more", len(waitingFor)-10)
+		case len(waitingFor) > 0:
+			detail += ":\n" + strings.Join(waitingFor, "\n")
+		}
 		return orchestrator.CheckStatus{State: orchestrator.ChecksPending,
-			Detail:       fmt.Sprintf("%d of %d check(s) not finished", waiting, len(names)),
-			NoneReported: len(results) == 0}, nil
+			Detail: detail, NoneReported: len(results) == 0}, nil
 	}
 	return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
 }
