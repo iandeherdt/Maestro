@@ -148,6 +148,10 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		if st.GitLabBot == "" || st.GitLabProject <= 0 {
 			return nil, explain("the GitLab project is not set up in %s. Run `maestro setup --host gitlab` first.", dir)
 		}
+	case st.UsesGitea():
+		if st.GiteaBot == "" || st.HostURL == "" {
+			return nil, explain("the Gitea repository is not set up in %s. Run `maestro setup --host gitea` first.", dir)
+		}
 	case st.AppID == "" || st.AppKeyFile == "" || st.InstallationID == "" || st.AppSlug == "":
 		return nil, explain("the GitHub App is not set up in %s. Run `maestro setup` first.", dir)
 	}
@@ -163,8 +167,11 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	in.auditDir = filepath.Join(stateDir, "audit")
 	in.handoffDir = filepath.Join(in.cfg.Workspace.Root, ".handoff")
 	bot := st.AppSlug + "[bot]"
-	if st.UsesGitLab() {
+	switch {
+	case st.UsesGitLab():
 		bot = st.GitLabBot
+	case st.UsesGitea():
+		bot = st.GiteaBot
 	}
 	in.dir = dir
 	in.skills = skills.Store{Dir: filepath.Join(dir, "agent-files")}

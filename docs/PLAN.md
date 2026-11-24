@@ -111,7 +111,9 @@ In this order, one pull request each:
    certificates the system already trusts. Steps: 10a moves the GitHub calls of the publisher
    behind a host interface and adds `workspace.host` (written); 10b GitLab, with a project access
    token (written: merge requests, checks from commit statuses, reviews from approvals, the
-   token's renewal, `maestro setup --host gitlab`, `maestro gitlab`, doctor); 10c Gitea, with a bot account's token; 10d a real run on each.
+   token's renewal, `maestro setup --host gitlab`, `maestro gitlab`, doctor); 10c Gitea and Forgejo,
+   with a bot account's token (written: pull requests, checks from commit statuses, reviews,
+   `maestro setup --host gitea`, `maestro gitea`, doctor; pictures are not stored there yet); 10d a real run on each.
 
 ## Phase 0 status
 

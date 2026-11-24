@@ -46,7 +46,7 @@ func runGitLab(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	if !st.UsesGitLab() {
-		fmt.Fprintln(stdout, "This project's code is on GitHub. For GitLab: "+mention("maestro setup --host gitlab"))
+		fmt.Fprintln(stdout, "This project's code is on "+st.HostLabel()+". For GitLab: "+mention("maestro setup --host gitlab"))
 		return 0
 	}
 	ctx, stop := interruptible()

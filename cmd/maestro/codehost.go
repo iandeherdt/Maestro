@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/iandeherdt/Maestro/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/gitea"
 	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/mirror"
 )
@@ -38,7 +39,7 @@ type codeSide struct {
 
 // botEmail is the commit address of the service's identity.
 func (in *install) botEmail() string {
-	if in.state != nil && in.state.UsesGitLab() {
+	if in.state != nil && in.state.OffGitHub() {
 		host := "gitlab.com"
 		if u, err := url.Parse(in.cfg.Workspace.HostURL); err == nil && u.Hostname() != "" {
 			host = u.Hostname()
@@ -50,8 +51,11 @@ func (in *install) botEmail() string {
 
 func (in *install) codeSide(ctx context.Context, gh endpoints, log *slog.Logger) (*codeSide, error) {
 	cfg := in.cfg
-	if cfg.Workspace.Host == "gitlab" {
+	switch cfg.Workspace.Host {
+	case "gitlab":
 		return in.gitLabSide(ctx, log)
+	case "gitea":
+		return in.giteaSide(ctx, log)
 	}
 	app, err := ghapp.New(ghapp.Config{AppID: in.state.AppID, InstallationID: in.state.InstallationID,
 		KeyFile: in.state.AppKeyFile, APIURL: gh.api})
@@ -175,5 +179,78 @@ func gitLabUnguarded(p gitlab.Protection, web, repo, branch string) string {
 	fmt.Fprintf(&b, "  2. Protect %s with Allowed to merge: Maintainers, Allowed to push and merge: No one,\n", branch)
 	fmt.Fprintln(&b, "     and Allowed to force push off.")
 	fmt.Fprintln(&b, "On GitLab Premium, also require one approval under Settings, Merge requests, Merge request approvals.")
+	return b.String()
+}
+
+// fixedToken is a token that does not change while the service runs, such
+// as Gitea's, which does not expire.
+type fixedToken string
+
+func (t fixedToken) Token(context.Context) (string, error) { return string(t), nil }
+func (t fixedToken) Current() string                       { return string(t) }
+
+func (in *install) giteaSide(ctx context.Context, log *slog.Logger) (*codeSide, error) {
+	cfg := in.cfg
+	tok, err := gitea.ReadToken(in.dir)
+	if err != nil {
+		return nil, err
+	}
+	if tok == "" {
+		return nil, explain("no Gitea token is stored in %s. Store one with `maestro gitea token`.", gitea.TokenFile(in.dir))
+	}
+	c := &gitea.Client{Web: cfg.Workspace.HostURL, Token: tok}
+	u, err := c.Who(ctx)
+	if err != nil {
+		return nil, explain("%v.\nStore a new token with `maestro gitea token`.", err)
+	}
+	if !strings.EqualFold(u.Login, in.bot) {
+		return nil, explain("the stored Gitea token acts as %s, but setup recorded %s. Run `maestro setup --host gitea` again.",
+			u.Login, in.bot)
+	}
+	r, err := c.Repo(ctx, cfg.Workspace.Repo)
+	if err != nil {
+		return nil, explain("the Gitea repository %s cannot be reached: %v", cfg.Workspace.Repo, err)
+	}
+	// The service never merges. An administrator's token could, and could
+	// change the protection, so it is not used.
+	if why := gitea.Usable(u, r, in.state.Reviewer); why != "" {
+		return nil, explain("%s.\nStore another token with `maestro gitea token`.", why)
+	}
+	return &codeSide{code: fixedToken(tok), remote: cfg.Workspace.HostURL + "/" + cfg.Workspace.Repo + ".git",
+		defaultBranch: func(context.Context) (string, error) {
+			if !mirror.ValidBranch(r.DefaultBranch) {
+				return "", fmt.Errorf("the repository's default branch has a name the service does not accept")
+			}
+			return r.DefaultBranch, nil
+		},
+		guard: func(ctx context.Context, base string, out io.Writer) {
+			p, err := c.Branch(ctx, cfg.Workspace.Repo, base)
+			if err != nil {
+				log.Warn("whether Gitea protects the base branch could not be read", "branch", base, "error", err)
+				return
+			}
+			if note := giteaUnguarded(p, cfg.Workspace.HostURL, cfg.Workspace.Repo, base); note != "" {
+				log.Warn("Gitea lets the service's account push or merge to the base branch", "branch", base)
+				fmt.Fprint(out, note)
+			}
+		},
+	}, nil
+}
+
+// giteaUnguarded explains how to protect the base branch when the
+// service's account may push or merge to it. It is empty when the branch
+// is protected well enough.
+func giteaUnguarded(p gitea.Protection, web, repo, branch string) string {
+	if p.Protected && !p.UserCanPush && !p.UserCanMerge {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nNote: Gitea lets the service's account push or merge to %s.\n", branch)
+	fmt.Fprintln(&b, "Maestro never pushes to that branch and never merges. But a mistake in Maestro or a copy of its")
+	fmt.Fprintln(&b, "token could. To have Gitea refuse it:")
+	fmt.Fprintf(&b, "  1. Open %s/%s/settings/branches and add a rule for %s.\n", web, repo, branch)
+	fmt.Fprintln(&b, "  2. Push: allow only listed users, and list only yourself (or disable push).")
+	fmt.Fprintln(&b, "  3. Merge: allow only listed users, and list only yourself.")
+	fmt.Fprintln(&b, "  4. Require one approval, and block merging on rejected reviews.")
 	return b.String()
 }

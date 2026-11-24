@@ -16,6 +16,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/gitea"
 	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
@@ -169,10 +170,14 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 		d.selfTest(rep, in.oldProbe())
 	}
 
-	if in.state.UsesGitLab() {
+	switch {
+	case in.state.UsesGitLab():
 		d.section("GitLab")
 		d.gitLab(ctx, in)
-	} else {
+	case in.state.UsesGitea():
+		d.section("Gitea")
+		d.gitea(ctx, in)
+	default:
 		d.section("GitHub")
 		d.github(ctx, in)
 	}
@@ -427,6 +432,46 @@ func (d *doctor) gitLab(ctx context.Context, in *install) {
 		d.warn("GitLab protects "+base+" from Developers", strings.TrimPrefix(note, "\n"))
 	default:
 		d.ok("GitLab protects " + base + ": only Maintainers merge, nobody pushes")
+	}
+}
+
+// gitea checks the Gitea token, its account and the base branch.
+func (d *doctor) gitea(ctx context.Context, in *install) {
+	w := in.cfg.Workspace
+	tok, err := gitea.ReadToken(in.dir)
+	if err != nil || tok == "" {
+		d.fail("a Gitea token is stored", "Store one with "+mention("maestro gitea token")+".")
+		return
+	}
+	c := &gitea.Client{Web: w.HostURL, Token: tok}
+	u, err := c.Who(ctx)
+	if err != nil {
+		d.fail("Gitea accepts the token", err.Error()+"\nStore a new one with "+mention("maestro gitea token")+".")
+		return
+	}
+	d.ok("Gitea accepts the token; it acts as " + u.Login)
+	r, err := c.Repo(ctx, w.Repo)
+	if err != nil {
+		d.fail("the token can reach "+w.Repo, err.Error())
+		return
+	}
+	if why := gitea.Usable(u, r, in.state.Reviewer); why != "" {
+		d.fail("the token's account has Write and no more", why+". The service refuses to start with it.")
+	} else {
+		d.ok(u.Login + " has Write on " + w.Repo + " and does not administer it")
+	}
+	base := w.BaseBranch
+	if base == "" {
+		base = r.DefaultBranch
+	}
+	p, err := c.Branch(ctx, w.Repo, base)
+	switch note := giteaUnguarded(p, w.HostURL, w.Repo, base); {
+	case err != nil:
+		d.warn("Gitea protects "+base, "This could not be read: "+err.Error())
+	case note != "":
+		d.warn("Gitea protects "+base+" from the service's account", strings.TrimPrefix(note, "\n"))
+	default:
+		d.ok("Gitea protects " + base + ": the service's account can neither push nor merge")
 	}
 }
 

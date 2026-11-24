@@ -1111,7 +1111,7 @@ Last updated 2026-11-23, at release 0.5.18.
 | Native Linux sandbox (systemd) | Written, not yet run on a real server. In release 0.5.18: the root launcher `maestro-launch` and the service's side that sends it each step through one sudo rule. Since then: the service runs on `sandbox.backend: systemd` with its proxies on unix sockets, `maestro login`, the start-up self-test and `maestro doctor` through the launcher, and `maestro setup --sandbox systemd` installs the launcher, the sandbox user, Claude Code and the sudo rule. Releases and `maestro update` carry the launcher. Tested with a simulated systemd and sudo; a run on the RHEL server is next ([plan](docs/PLAN.md)). |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
-| Code hosts other than GitHub (GitLab, Gitea) | GitLab written (`workspace.host: gitlab`, `maestro setup --host gitlab`, `maestro gitlab`) and tested against a fake GitLab; not yet run against GitLab itself. Gitea next. |
+| Code hosts other than GitHub (GitLab, Gitea, Forgejo) | Written: `workspace.host: gitlab` with `maestro setup --host gitlab` and `maestro gitlab`, and `workspace.host: gitea` (also for Forgejo) with `maestro setup --host gitea` and `maestro gitea`. Tested against a fake GitLab and a fake Gitea; not yet run against either. |
 
 ## Documentation
 

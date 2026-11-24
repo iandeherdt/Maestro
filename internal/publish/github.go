@@ -38,8 +38,8 @@ type api struct {
 	base  *url.URL
 	hc    *http.Client
 	token func(context.Context) (string, error)
-	// gitlab leaves out GitHub's own headers.
-	gitlab bool
+	// plain leaves out GitHub's own headers.
+	plain bool
 }
 
 // url joins the base and an escaped path.
@@ -86,7 +86,7 @@ func (a *api) do(ctx context.Context, method, path string, query url.Values, bod
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-	if !a.gitlab {
+	if !a.plain {
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", apiVersion)
 	}

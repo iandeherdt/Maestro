@@ -139,6 +139,12 @@ func (p *Publisher) host() (host, error) {
 			return nil, err
 		}
 		return g, nil
+	case "gitea":
+		g, err := p.gitea(w.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return g, nil
 	default:
 		return nil, errors.New("workspace.host " + w.Host + " is not supported")
 	}
@@ -156,8 +162,11 @@ func (p *Publisher) host() (host, error) {
 // validRepo reports whether the repository in the settings can be named
 // on its host.
 func validRepo(w config.Workspace) bool {
-	if w.Host == "gitlab" {
+	switch w.Host {
+	case "gitlab":
 		return ValidGitLabPath(w.Repo)
+	case "gitea":
+		return ValidGiteaRepo(w.Repo)
 	}
 	m := repoRE.FindStringSubmatch(w.Repo)
 	return m != nil && !strings.HasSuffix(m[2], ".git") && m[2] != "." && m[2] != ".."

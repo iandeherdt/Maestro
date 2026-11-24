@@ -9,7 +9,7 @@ import (
 // Every command a person types has a help page.
 var typedCommands = []string{"setup", "new", "check", "image", "login", "run", "status", "dashboard",
 	"pause", "resume", "unblock", "doctor", "service", "conventions", "skills", "unity", "linear",
-	"assistant", "projects", "gitlab", "update", "version", "help"}
+	"assistant", "projects", "gitlab", "gitea", "update", "version", "help"}
 
 func TestEveryCommandHasAPage(t *testing.T) {
 	for _, name := range typedCommands {

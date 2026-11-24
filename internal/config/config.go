@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/iandeherdt/Maestro/internal/conventions"
+	"github.com/iandeherdt/Maestro/internal/gitea"
 	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 )
@@ -76,8 +77,8 @@ type Polling struct{ IntervalMS int64 }
 type Workspace struct {
 	Root string
 	Repo string
-	// Host is where the repository is: github, and gitlab or gitea once
-	// they are built (phase 10). HostURL is a self-managed instance; empty
+	// Host is where the repository is: github, gitlab or gitea (also for
+	// Forgejo). HostURL is a self-managed instance; empty
 	// means the host's public site.
 	Host       string
 	HostURL    string
@@ -615,6 +616,10 @@ func (b *builder) workspace(s *section) {
 	w.Root = b.path("workspace.root", s.str("root", ""))
 	w.Repo = s.str("repo", "")
 	w.Host = strings.ToLower(s.str("host", "github"))
+	if w.Host == "forgejo" {
+		// Forgejo keeps Gitea's API.
+		w.Host = "gitea"
+	}
 	w.HostURL = s.str("host_url", "")
 	w.BaseBranch = s.str("base_branch", "")
 	w.CloneDepth = b.nonNegative("workspace.clone_depth", s.integer("clone_depth", 0))
@@ -626,7 +631,9 @@ func (b *builder) workspace(s *section) {
 		if !gitlab.ValidPath(w.Repo) {
 			b.fail("workspace.repo", "must be the project's path on GitLab, such as group/name or group/sub/name")
 		}
-	case !repoRE.MatchString(w.Repo):
+	case w.Host == "gitea" && !gitea.ValidRepo(w.Repo):
+		b.fail("workspace.repo", "must have the form owner/name")
+	case w.Host != "gitea" && !repoRE.MatchString(w.Repo):
 		b.fail("workspace.repo", "must have the form owner/name")
 	}
 	if w.BaseBranch != "" && !validBranch(w.BaseBranch) {
@@ -644,9 +651,13 @@ func (b *builder) workspace(s *section) {
 		}
 		w.HostURL = web
 	case "gitea":
-		b.fail("workspace.host", "gitea is not built yet; github and gitlab are")
+		web, err := gitea.CheckWeb(w.HostURL)
+		if err != nil {
+			b.fail("workspace.host_url", "%v", err)
+		}
+		w.HostURL = web
 	default:
-		b.fail("workspace.host", "must be github or gitlab")
+		b.fail("workspace.host", "must be github, gitlab or gitea (gitea also for Forgejo)")
 	}
 }
 

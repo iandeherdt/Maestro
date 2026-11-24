@@ -64,7 +64,7 @@ func (p *Publisher) gitLab(path string) (*gitLab, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.gitlab = true
+	a.plain = true
 	return &gitLab{a: a, web: web, path: path, prefix: "/projects/" + url.PathEscape(path)}, nil
 }
 

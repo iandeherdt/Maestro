@@ -15,30 +15,52 @@ import (
 const (
 	HostGitHub = "github"
 	HostGitLab = "gitlab"
+	// HostGitea is Gitea, and Forgejo, which keeps Gitea's API.
+	HostGitea = "gitea"
 )
 
 // UsesGitLab reports whether the code is on GitLab.
 func (s *State) UsesGitLab() bool { return s.Host == HostGitLab }
 
-// SwitchHost sets where the code is. On GitLab the tickets are kept in
+// UsesGitea reports whether the code is on Gitea or Forgejo.
+func (s *State) UsesGitea() bool { return s.Host == HostGitea }
+
+// OffGitHub reports whether the code is on another host than GitHub, where
+// the service has no GitHub App.
+func (s *State) OffGitHub() bool { return s.UsesGitLab() || s.UsesGitea() }
+
+// HostLabel is the code host's name for people.
+func (s *State) HostLabel() string {
+	switch {
+	case s.UsesGitLab():
+		return "GitLab"
+	case s.UsesGitea():
+		return "Gitea"
+	}
+	return "GitHub"
+}
+
+// SwitchHost sets where the code is. Off GitHub the tickets are kept in
 // Linear: GitHub's issues live in a GitHub repository.
 func SwitchHost(st *State, kind string) error {
+	if kind == "forgejo" {
+		kind = HostGitea
+	}
 	switch kind {
-	case HostGitHub:
-		if st.UsesGitLab() {
-			// Another host is another repository: the earlier answers no
-			// longer apply.
-			st.Repo, st.HostURL, st.GitLabBot, st.GitLabProject, st.Reviewer = "", "", "", 0, ""
-		}
-		st.Host = ""
-	case HostGitLab:
-		if !st.UsesGitLab() {
-			st.Repo = ""
-		}
-		st.Host = HostGitLab
-		st.Tracker = TrackerLinear
+	case HostGitHub, HostGitLab, HostGitea:
 	default:
-		return fmt.Errorf("the code host is %s or %s", HostGitHub, HostGitLab)
+		return fmt.Errorf("the code host is %s, %s or %s (also for Forgejo)", HostGitHub, HostGitLab, HostGitea)
+	}
+	if kind != st.HostName() {
+		// Another host is another repository: the earlier answers no
+		// longer apply.
+		st.Repo, st.HostURL, st.GitLabBot, st.GitLabProject, st.GiteaBot, st.Reviewer = "", "", "", 0, "", ""
+	}
+	st.Host = kind
+	if kind == HostGitHub {
+		st.Host = ""
+	} else {
+		st.Tracker = TrackerLinear
 	}
 	return st.Save()
 }
@@ -62,7 +84,7 @@ func (g *GitLabProject) client(st *State, token string) *gitlab.Client {
 
 func (g *GitLabProject) Check(ctx context.Context, st *State) (Status, error) {
 	if !st.UsesGitLab() {
-		return Status{Done: true, Detail: "Not needed: the code is on GitHub."}, nil
+		return Status{Done: true, Detail: "Not needed: the code is on " + st.HostLabel() + "."}, nil
 	}
 	if st.Repo == "" || st.GitLabBot == "" || st.GitLabProject <= 0 || st.Reviewer == "" {
 		return Status{Detail: "The service needs a project access token of its own, so that it never acts as you."}, nil
@@ -193,8 +215,8 @@ func orDefault(s, def string) string {
 
 // HostName is the code host as the settings file names it.
 func (s *State) HostName() string {
-	if s.UsesGitLab() {
-		return HostGitLab
+	if s.OffGitHub() {
+		return s.Host
 	}
 	return HostGitHub
 }

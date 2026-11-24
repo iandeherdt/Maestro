@@ -352,10 +352,10 @@ Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sa
   here. MUST be owned by `maestro-agent`, mode `0700`, on a filesystem mounted `nosuid,nodev`.
 - `repo` (string): REQUIRED. Target repository as `owner/name`; on GitLab the project's path,
   which may hold subgroups (`group/subgroup/name`).
-- `host` (string): where the repository is: `github` (default) or `gitlab`. `gitea` is planned
-  (phase 10) and refused until it is built. With `gitlab`, `tracker.kind` MUST NOT be `github`.
+- `host` (string): where the repository is: `github` (default), `gitlab`, or `gitea` (also for
+  Forgejo; `forgejo` is read as `gitea`). Off GitHub, `tracker.kind` MUST NOT be `github`.
 - `host_url` (string): the https address of a self-managed GitLab or Gitea; default
-  `https://gitlab.com` with `gitlab`. Only certificates the system trusts are accepted. Not
+  `https://gitlab.com` with `gitlab`, REQUIRED with `gitea`. Only certificates the system trusts are accepted. Not
   allowed with `github`.
 - `base_branch` (string): default: the repository's default branch.
 - `clone_depth` (integer): default `0` (full history).
@@ -1866,7 +1866,8 @@ feedback. `flag` results are recorded and shown at the top of the pull request.
 
 Built-in `deny` rules (cannot be disabled):
 
-- D1 Any path matching the protected list: `.github/**`, `.gitlab-ci.yml`, `.circleci/**`,
+- D1 Any path matching the protected list: `.github/**`, `.gitlab-ci.yml`, `.gitea/**`,
+  `.forgejo/**`, `.woodpecker/**`, `.woodpecker.yml`, `.drone.yml`, `.circleci/**`,
   `azure-pipelines.yml`, `Jenkinsfile`, `.buildkite/**`, `.claude/**`, `.mcp.json`,
   `.git*` at any depth except `.gitignore`, `CODEOWNERS` at any location, `WORKFLOW.md`,
   `**/.env`, `**/.env.*`, plus `policy.deny_paths`.
@@ -2035,6 +2036,12 @@ The service refuses a token with the role Maintainer or Owner, which could merge
 protection, and refuses a person's token. The base branch SHOULD be protected with merging
 allowed to Maintainers, pushing allowed to no one and force pushes off; when it is not, startup
 and `doctor` warn and say how. The token is renewed by the service 30 days before it expires.
+
+On Gitea and Forgejo the service acts through the token of an account of its own with Write on
+the repository. The service refuses a site administrator, an administrator or the owner of the
+repository, and the reviewer's own account. The base branch SHOULD let only the owner push and
+merge; when the branch lets the service's account push or merge, startup and `doctor` warn and
+say how.
 
 ### 15.8 Hand-off Watch
 

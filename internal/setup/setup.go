@@ -160,14 +160,16 @@ type State struct {
 	// instead of containers (`maestro setup --sandbox systemd`, Linux only).
 	Sandbox string `json:"sandbox,omitempty"`
 
-	// Host is HostGitLab when the code is on GitLab (`maestro setup --host
-	// gitlab`); empty is GitHub. HostURL is the GitLab instance, GitLabBot
-	// the user of the project access token, GitLabProject the project's
-	// number, and Reviewer the GitLab user whose reviews and comments count.
+	// Host is HostGitLab or HostGitea when the code is on GitLab or on
+	// Gitea or Forgejo (`maestro setup --host`); empty is GitHub. HostURL
+	// is the instance, GitLabBot the user of the project access token,
+	// GitLabProject the project's number, GiteaBot the service's own Gitea
+	// account, and Reviewer the user whose reviews and comments count.
 	Host          string `json:"host,omitempty"`
 	HostURL       string `json:"host_url,omitempty"`
 	GitLabBot     string `json:"gitlab_bot,omitempty"`
 	GitLabProject int64  `json:"gitlab_project,omitempty"`
+	GiteaBot      string `json:"gitea_bot,omitempty"`
 	Reviewer      string `json:"reviewer,omitempty"`
 
 	// TakenWorkers are the worker names of the other projects on this

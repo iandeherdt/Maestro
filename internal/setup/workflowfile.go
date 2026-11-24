@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/gitea"
 	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 )
@@ -81,6 +82,10 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 		if !gitlab.ValidPath(st.Repo) || st.GitLabBot == "" || st.Reviewer == "" || !st.UsesLinear() || !workerRE.MatchString(st.Worker) {
 			return errors.New("the earlier steps have to be finished first")
 		}
+	case st.UsesGitea():
+		if !gitea.ValidRepo(st.Repo) || st.GiteaBot == "" || st.Reviewer == "" || st.HostURL == "" || !st.UsesLinear() || !workerRE.MatchString(st.Worker) {
+			return errors.New("the earlier steps have to be finished first")
+		}
 	case m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker):
 		return errors.New("the earlier steps have to be finished first")
 	default:
@@ -130,8 +135,11 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	}
 	ui.Say("")
 	change, ciName := "pull request", "GitHub Actions"
-	if st.UsesGitLab() {
+	switch {
+	case st.UsesGitLab():
 		change, ciName = "merge request", "GitLab CI"
+	case st.UsesGitea():
+		ciName = "Gitea or Forgejo Actions"
 	}
 	ui.Say("  One more: does %s run automatic checks on %ss (%s or another CI)?", st.Repo, change, ciName)
 	ui.Say("  If it does, the service waits until they pass before it hands a %s to you.", change)
@@ -205,6 +213,9 @@ func render(engine string, st *State, owner, verify string, ci bool) string {
 			b.WriteString("  host_url: " + strconv.Quote(st.HostURL) + "\n")
 		}
 	}
+	if st.UsesGitea() {
+		b.WriteString("  host: gitea\n  host_url: " + strconv.Quote(st.HostURL) + "\n")
+	}
 	b.WriteString("sandbox:\n  backend: " + engine + "\n")
 	b.WriteString("verify:\n  command: |\n    " + verify + "\n")
 	if !ci {
@@ -238,8 +249,8 @@ func renderLinear(b *strings.Builder, st *State) {
 	b.WriteString("  allowed_authors: " + quoted([]string{st.LinearAuthor}) + "\n")
 	b.WriteString("  terminal_states: " + quoted(terminal) + "\n")
 	b.WriteString("  handoff_state: " + strconv.Quote(st.LinearHandoff) + "\n")
-	if st.UsesGitLab() {
-		// Reviews and comments on GitLab are by GitLab users.
+	if st.OffGitHub() {
+		// Reviews and comments there are by that host's users.
 		b.WriteString("  allowed_commenters: " + quoted([]string{st.Reviewer}) + "\n")
 	}
 }
