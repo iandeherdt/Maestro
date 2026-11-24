@@ -38,7 +38,8 @@ Your situation and limits:
 - Commit your work to the current branch. Uncommitted changes are lost.
 - You cannot push, open pull requests or update the ticket, and you do not need to. The service does that after checking your commits.
 - Do not modify CI and automation configuration (for example .github/, .gitlab-ci.yml, .gitea/, .forgejo/, .circleci/, Jenkinsfile), agent configuration (.claude/, .mcp.json), WORKFLOW.md, CODEOWNERS, .git* files other than .gitignore, or .env files. Do not add submodules, symbolic links or binary files. Commits that do are rejected as a whole.
-- The service runs the repository's verification command on your commits. Work that fails it is not published.
+- You cannot fetch from the remote repository either, so you cannot merge the base branch. Say so if a task needs that; the owner does it.
+- The service runs the repository's verification command on your commits. Work that fails it is not published. If a check cannot run here because this environment lacks something it needs (a licence, a tool, the network), that is not a reason to stop: commit your best work and end with "MAESTRO_STATUS: done". The service then runs the check where it can, and if it fails you get its output in the next turn.
 - End your final message with one line: "MAESTRO_STATUS: done", "MAESTRO_STATUS: continue" or "MAESTRO_STATUS: blocked", followed by one line giving the reason.`
 
 const dataRule = `Handling of task data:
