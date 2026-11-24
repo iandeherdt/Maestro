@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -509,5 +510,43 @@ func TestSelfTestRunsTheProbeInAThrowawayWorkspace(t *testing.T) {
 	}
 	if n, ok := memoryBytes("512M"); !ok || n != 512<<20 {
 		t.Errorf("memoryBytes %d", n)
+	}
+}
+
+// On RHEL 8's systemd 239, properties it does not know are left out, or
+// systemd-run refuses the unit; what covers them is added instead.
+func TestUnitOnAnOlderSystemd(t *testing.T) {
+	for _, tc := range []struct {
+		systemd     int
+		has, hasNot []string
+		serviceType string
+	}{
+		{239, []string{"ProtectKernelTunables=yes", "SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg", "NoNewPrivileges=yes"},
+			[]string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill"}, "simple"},
+		{252, []string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill"},
+			[]string{"SystemCallFilter=~syslog"}, "exec"},
+		{0, []string{"ProtectKernelLogs=yes", "OOMPolicy=kill"}, nil, "exec"},
+	} {
+		l, f := testLauncher(t)
+		l.Systemd = tc.systemd
+		os.Mkdir(l.Cfg.workspace("GH-12"), 0o700)
+		if _, _, err := handle(l, sandbox.Request{Step: sandbox.StepAgent, WorkspaceKey: "GH-12", NetworkProfile: "agent",
+			Argv: []string{"claude", "-p"}}); err != nil || len(f.calls) != 1 {
+			t.Fatalf("systemd %d: %v", tc.systemd, err)
+		}
+		c := f.calls[0]
+		for _, want := range tc.has {
+			if !c.has(want) {
+				t.Errorf("systemd %d: missing %q", tc.systemd, want)
+			}
+		}
+		for _, not := range tc.hasNot {
+			if c.has(not) {
+				t.Errorf("systemd %d: has %q", tc.systemd, not)
+			}
+		}
+		if !slices.Contains(c.args, "--service-type="+tc.serviceType) {
+			t.Errorf("systemd %d: not --service-type=%s: %q", tc.systemd, tc.serviceType, c.args)
+		}
 	}
 }
