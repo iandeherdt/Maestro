@@ -83,6 +83,9 @@ func baseEnv(network, tools string) map[string]string {
 		// earlier attempt concluded (it wrote "identical to attempts
 		// 6-18" and stopped without trying).
 		"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+		// The sandbox's own git system configuration (gitConfig), in place
+		// of the machine's.
+		"GIT_CONFIG_SYSTEM": GitConfigPath,
 	}
 	if network != "" {
 		proxy := "http://" + proxyAddr

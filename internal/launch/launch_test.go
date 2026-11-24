@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -581,5 +582,30 @@ func TestExportRefusesAHandoffFolderThatIsNotRoots(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(system, "profile.d.bundle")); err == nil {
 		t.Error("a bundle was left behind the link")
+	}
+}
+
+func TestTheStepsGitConfigLetsThemCloneTheMirror(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sandbox.gitconfig")
+	if err := writeGitConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{mirrorDir, repoDir} {
+		cmd := exec.Command("git", "config", "--system", "--get-all", "safe.directory")
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_SYSTEM="+path)
+		out, err := cmd.Output()
+		if err != nil || !strings.Contains(string(out), dir+"\n") {
+			t.Errorf("safe.directory %s: %q %v", dir, out, err)
+		}
+	}
+	// A second run leaves a correct file alone.
+	if err := writeGitConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	l, f := testLauncher(t)
+	os.Mkdir(l.Cfg.workspace("GH-12"), 0o700)
+	handle(l, sandbox.Request{Step: sandbox.StepAgent, WorkspaceKey: "GH-12", NetworkProfile: "agent", Argv: []string{"claude"}})
+	if len(f.calls) != 1 || !f.calls[0].has("GIT_CONFIG_SYSTEM="+GitConfigPath) {
+		t.Errorf("the step's environment has no GIT_CONFIG_SYSTEM: %v", f.calls)
 	}
 }
