@@ -1233,6 +1233,9 @@ The control zone cannot start processes as another user by itself. A small launc
   apply its timeouts and report progress.
 - The launcher is the only root-executed code in the system. It MUST stay small enough to audit in
   one sitting and MUST have no dependency beyond the standard library.
+- The steps' git system configuration is `/etc/maestro/sandbox.gitconfig` (`GIT_CONFIG_SYSTEM`),
+  which the launcher writes. It names `/mirror` and `/workspace/repo` as `safe.directory`: the mirror
+  belongs to the service user, and git refuses to clone from another user's repository otherwise.
 - The Linux launcher is `maestro-launch <worker>`. Its configuration is
   `/etc/maestro/launch-<worker>.json`: the sandbox user, the service user, the workspace root, the
   hand-off root, the mirror, the agent's Claude state, the skills, agents and licence folders, the

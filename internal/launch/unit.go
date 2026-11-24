@@ -78,6 +78,9 @@ func baseEnv(network, tools string) map[string]string {
 		"HOME": "/tmp", "PATH": tools + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"LANG": "C.UTF-8", "TZ": "UTC", "CI": "1", "TERM": "dumb", "NO_PROXY": "",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+		// The sandbox's own git system configuration (gitConfig), in place
+		// of the machine's.
+		"GIT_CONFIG_SYSTEM": GitConfigPath,
 	}
 	if network != "" {
 		proxy := "http://" + proxyAddr
