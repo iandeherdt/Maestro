@@ -75,7 +75,8 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 		return st, nil
 	case waiting > 0 || len(names) == 0 || !complete:
 		return orchestrator.CheckStatus{State: orchestrator.ChecksPending,
-			Detail: fmt.Sprintf("%d of %d check(s) not finished", waiting, len(names))}, nil
+			Detail:       fmt.Sprintf("%d of %d check(s) not finished", waiting, len(names)),
+			NoneReported: len(results) == 0}, nil
 	}
 	return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
 }

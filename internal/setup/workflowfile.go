@@ -32,6 +32,9 @@ type WorkflowFile struct {
 	// PackTests, when set, names the conventions pack's own test command.
 	// The service runs that by itself, so there is nothing to ask.
 	PackTests func() string
+	// FindCI looks in the repository for CI workflow files. known is
+	// false when it could not look; then the question is asked plainly.
+	FindCI func(ctx context.Context, st *State) (found []string, known bool)
 }
 
 func (*WorkflowFile) Title() string { return "Write the workflow file" }
@@ -66,7 +69,7 @@ func validCommand(s string) error {
 	return nil
 }
 
-func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
+func (w *WorkflowFile) Run(ctx context.Context, ui *UI, st *State) error {
 	m := repoRE.FindStringSubmatch(st.Repo)
 	switch {
 	case st.UsesLinear():
@@ -144,6 +147,15 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	ui.Say("  One more: does %s run automatic checks on %ss (%s or another CI)?", st.Repo, change, ciName)
 	ui.Say("  If it does, the service waits until they pass before it hands a %s to you.", change)
 	ui.Say("  If it does not, answer n, or the service would wait for checks that never come.")
+	if w.FindCI != nil {
+		switch found, known := w.FindCI(ctx, st); {
+		case known && len(found) > 0:
+			ui.Say("  The repository has CI workflow files (%s), so most likely yes.", strings.Join(found, ", "))
+		case known:
+			ui.Say("  The repository has no %s workflow files, so most likely no, unless a CI outside", ciName)
+			ui.Say("  the repository reports checks to it.")
+		}
+	}
 	ci, err := ui.Confirm("  Does it run checks on " + change + "s?")
 	if err != nil {
 		return err

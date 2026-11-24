@@ -97,6 +97,9 @@ type Orchestrator struct {
 	// checkedAt and awaitAttempt belong to awaiting entries.
 	checkedAt    map[string]time.Time
 	awaitAttempt map[string]int
+	// noChecksNoted holds the awaiting issues whose card already says that
+	// no check has started.
+	noChecksNoted map[string]bool
 	// handoffAt is when the hand-off watch last ran. closedNoted holds the
 	// issues whose closed pull request was already commented on.
 	handoffAt   time.Time
@@ -140,7 +143,7 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		d:         d,
 		running:   map[string]*runEntry{},
 		awaiting:  map[string]*PublishRecord{},
-		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{}, closedNoted: map[string]bool{},
+		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{}, noChecksNoted: map[string]bool{}, closedNoted: map[string]bool{},
 		planNoted: map[string]bool{}, designNoted: map[string]bool{},
 		claimed:   map[string]bool{},
 		retries:   map[string]*RetryEntry{},
@@ -1082,7 +1085,12 @@ func (o *Orchestrator) dropAwaiting(id string) {
 	delete(o.awaiting, id)
 	delete(o.checkedAt, id)
 	delete(o.awaitAttempt, id)
+	delete(o.noChecksNoted, id)
 }
+
+// noChecksAfter is how long after publishing a pull request with no check
+// at all is pointed out on the card.
+const noChecksAfter = 10 * time.Minute
 
 // watchChecks looks at every published pull request that is due for a look
 // (SPEC 15.6). A ticket reaches the hand-off state only from here: after
@@ -1174,6 +1182,19 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 			if o.now().After(rec.ChecksDeadline) {
 				o.dropAwaiting(id)
 				o.block(ctx, is, "checks_timeout", st.Detail, 0)
+				continue
+			}
+			// Waiting is right while CI runs, but a repository without CI
+			// would only time out after the whole wait. Say so early; no
+			// check is still never read as passed.
+			published := rec.ChecksDeadline.Add(-time.Duration(o.cfg.Publish.ChecksTimeoutMS) * time.Millisecond)
+			if st.NoneReported && !o.noChecksNoted[id] && o.now().Sub(published) >= noChecksAfter {
+				o.noChecksNoted[id] = true
+				o.comment(ctx, is, fmt.Sprintf("No check has started on pull request #%d after %d minutes. "+
+					"The service waits for the repository's CI to pass before it hands the pull request to review, "+
+					"and gives up at %s. If this repository has no CI, add `publish: required_checks: none` to the "+
+					"workflow file; the service then hands pull requests over without waiting.",
+					rec.PRNumber, int(noChecksAfter/time.Minute), rec.ChecksDeadline.UTC().Format("15:04 UTC")), "")
 			}
 		}
 	}
