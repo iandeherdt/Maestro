@@ -2,15 +2,19 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/workflow"
 	"github.com/iandeherdt/Maestro/internal/wsl"
 )
 
@@ -253,6 +257,13 @@ func SwitchSandbox(st *State, kind string, goos string, lookPath func(string) (s
 	if st.Sandbox == kind {
 		return nil
 	}
+	if kind == SandboxSystemd && st.WorkflowFile != "" && usesUnity(st.WorkflowFile) {
+		// Refused before anything changes: Unity's Editor comes with the
+		// container image, and the systemd sandbox has none.
+		return errors.New("this project uses the unity pack, which needs the container sandbox: Unity's Editor for Linux comes " +
+			"with the sandbox image. Nothing was changed. To try the systemd sandbox, make another project for a repository " +
+			"that is not a Unity game: maestro projects add NAME, then maestro setup --project NAME --sandbox systemd")
+	}
 	st.Sandbox = kind
 	if st.WorkflowFile != "" {
 		raw, err := os.ReadFile(st.WorkflowFile)
@@ -273,4 +284,16 @@ func SwitchSandbox(st *State, kind string, goos string, lookPath func(string) (s
 		}
 	}
 	return st.Save()
+}
+
+// usesUnity reports whether the settings file at path turns on the unity
+// pack. A file that cannot be read says no.
+func usesUnity(path string) bool {
+	def, err := workflow.Load(path)
+	if err != nil {
+		return false
+	}
+	home, _ := os.UserHomeDir()
+	cfg, err := config.Build(def, config.Options{Env: os.Getenv, HomeDir: home})
+	return err == nil && slices.Contains(cfg.Conventions, "unity")
 }
