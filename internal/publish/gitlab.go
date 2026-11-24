@@ -104,6 +104,7 @@ type mergeRequest struct {
 	SourceBranch    string `json:"source_branch"`
 	TargetBranch    string `json:"target_branch"`
 	SourceProjectID int64  `json:"source_project_id"`
+	HasConflicts    bool   `json:"has_conflicts"`
 	TargetProjectID int64  `json:"target_project_id"`
 	Author          struct {
 		Username string `json:"username"`
@@ -111,7 +112,8 @@ type mergeRequest struct {
 }
 
 func (m mergeRequest) change() change {
-	c := change{Number: m.IID, State: changeClosed, Draft: m.Draft || m.WorkInProgress, HeadSHA: m.SHA, Author: m.Author.Username}
+	c := change{Number: m.IID, State: changeClosed, Draft: m.Draft || m.WorkInProgress, HeadSHA: m.SHA, Author: m.Author.Username,
+		Conflicted: m.HasConflicts}
 	switch m.State {
 	case "merged":
 		c.State = changeMerged

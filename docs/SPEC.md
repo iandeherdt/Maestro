@@ -2017,7 +2017,9 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
    writing a state: their choice stands.
 2. Read the pull request. If it is closed or merged, block the issue with `pull_request_closed`.
    If its head is not `head_sha`, someone else pushed to the branch: block the issue with
-   `foreign_push`.
+   `foreign_push`. If the host says it conflicts with its base branch (GitHub's
+   `mergeable_state` `dirty`, GitLab's `has_conflicts`), block the issue with `merge_conflict`:
+   its CI does not run, so waiting would only end at the deadline.
 3. Read the check runs (latest run per check) and the commit statuses for `head_sha`. A check
    run counts as passed when it completed with `success`, `neutral` or `skipped`; any other
    completed conclusion is a failure. When two results carry the same name, the worse one counts.

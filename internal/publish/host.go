@@ -73,6 +73,9 @@ type change struct {
 	HeadSHA string
 	// Author is the login of whoever opened it.
 	Author string
+	// Conflicted is true when the host says the change cannot be merged
+	// into its base because of conflicts. Not knowing yet is false.
+	Conflicted bool
 	// id is the host's own handle, such as GitHub's node id.
 	id string
 }

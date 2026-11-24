@@ -1178,6 +1178,9 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 		case ChecksClosed:
 			o.dropAwaiting(id)
 			o.block(ctx, is, "pull_request_closed", "", 0)
+		case ChecksConflict:
+			o.dropAwaiting(id)
+			o.block(ctx, is, "merge_conflict", "", 0)
 		default:
 			if o.now().After(rec.ChecksDeadline) {
 				o.dropAwaiting(id)
@@ -1347,6 +1350,11 @@ func (o *Orchestrator) blockLead(reason string) string {
 	case "foreign_push":
 		return "Blocked: someone else pushed to the pull request's branch (`foreign_push`), " +
 			"so what the service checked is not what is there now."
+	case "merge_conflict":
+		return "Blocked: the pull request has conflicts with its base branch (`merge_conflict`), " +
+			"so its CI does not run and it cannot be merged. Another change to the same files was merged first. " +
+			"Resolve the conflicts on the pull request (GitHub's Resolve conflicts button, or locally); " +
+			"its checks then run, and you review and merge it as usual."
 	case "pull_request_closed":
 		return "Blocked: the pull request was closed before its checks passed (`pull_request_closed`)."
 	}

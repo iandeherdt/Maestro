@@ -38,6 +38,9 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 		// The operator said this repository has no checks to wait for.
 		return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
 	}
+	if pr.Conflicted {
+		return orchestrator.CheckStatus{State: orchestrator.ChecksConflict}, nil
+	}
 	results, complete, err := h.checks(ctx, rec.HeadSHA)
 	if err != nil {
 		return none, err

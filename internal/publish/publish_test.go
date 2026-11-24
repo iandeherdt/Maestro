@@ -562,6 +562,18 @@ func TestCheckStates(t *testing.T) {
 	}
 }
 
+func TestCheckSeesAConflict(t *testing.T) {
+	c, p := newCI(t)
+	c.pr["mergeable_state"] = "dirty"
+	if st, err := p.Check(ctx, record); err != nil || st.State != orchestrator.ChecksConflict {
+		t.Errorf("conflicted: %+v %v", st, err)
+	}
+	c.pr["mergeable_state"] = "unknown" // not computed yet: keep waiting
+	if st, _ := p.Check(ctx, record); st.State != orchestrator.ChecksPending {
+		t.Errorf("unknown: %+v", st)
+	}
+}
+
 func TestPendingChecksAreNamed(t *testing.T) {
 	c, p := newCI(t)
 	c.runs = []map[string]any{run("test", "completed", "success"), run("build", "in_progress", "")}

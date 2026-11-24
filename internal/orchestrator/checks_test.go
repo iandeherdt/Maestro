@@ -123,7 +123,7 @@ func TestFailedChecksCountAgainstTheBudget(t *testing.T) {
 }
 
 func TestForeignPushAndClosedPullRequestBlock(t *testing.T) {
-	for state, reason := range map[CheckState]string{ChecksForeignPush: "foreign_push", ChecksClosed: "pull_request_closed"} {
+	for state, reason := range map[CheckState]string{ChecksForeignPush: "foreign_push", ChecksClosed: "pull_request_closed", ChecksConflict: "merge_conflict"} {
 		e, c := published(t)
 		c.status = CheckStatus{State: state}
 		e.tick()
