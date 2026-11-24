@@ -1292,8 +1292,23 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 	}
 	o.d.Budget.MarkBlocked(is.ID, o.now())
 	o.persist()
-	o.comment(ctx, is, "Blocked after repeated failures. Last error: `"+safeCategory(reason)+
-		"`. Move the card back to an active state to retry with a fresh budget.", detail)
+	text := "Blocked after repeated failures. Last error: `" + safeCategory(reason) +
+		"`. Move the card back to an active state to retry with a fresh budget."
+	o.comment(ctx, is, text, detail)
+	// The status comment is edited in place, so it stays where it was
+	// first posted and the edit notifies no one. The reason also goes in a
+	// new comment, below the others, where the owner looks.
+	if p, ok := o.d.Tracker.(interface {
+		PostComment(context.Context, issue.Issue, string) error
+	}); ok {
+		body := text
+		if detail != "" {
+			body += "\n\n" + tracker.Fence(detail)
+		}
+		if err := p.PostComment(ctx, is, body); err != nil {
+			o.d.Log.Warn("blocked note not posted", "issue", is.Identifier, "error", err)
+		}
+	}
 	o.release(is.ID)
 }
 

@@ -827,6 +827,11 @@ func TestBlockedCommentShowsWhyItStopped(t *testing.T) {
 	if body := ws[len(ws)-1].Value; !strings.Contains(body, "verify_failed") || !strings.Contains(body, "error CS0103") {
 		t.Fatalf("blocked comment does not show the verify output: %q", body)
 	}
+	// The status comment is edited in place; the reason also comes as a
+	// new comment, at the bottom of the ticket.
+	if w := ws[len(ws)-1]; w.Op != "post" {
+		t.Fatalf("last write = %+v, want a new comment", w)
+	}
 
 	// A long report from the agent keeps its end, where the reason is.
 	e = newEnv(t, todo(1))
