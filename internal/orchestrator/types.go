@@ -280,6 +280,9 @@ type CheckStatus struct {
 	Detail string
 	// Feedback describes failed checks for the agent's next attempt.
 	Feedback []issue.Feedback
+	// NoneReported is true while not a single check has been reported for
+	// the pushed commit: the repository may have no CI at all.
+	NoneReported bool
 }
 
 // Checker reads the checks of a published pull request (SPEC 15.6).

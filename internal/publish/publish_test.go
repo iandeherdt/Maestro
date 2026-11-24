@@ -556,6 +556,9 @@ func TestCheckStates(t *testing.T) {
 		if err != nil || st.State != tc.want {
 			t.Errorf("%s: state %v, error %v", name, st.State, err)
 		}
+		if none := len(tc.runs)+len(tc.statuses) == 0; st.NoneReported != none {
+			t.Errorf("%s: NoneReported %v", name, st.NoneReported)
+		}
 	}
 }
 

@@ -207,3 +207,40 @@ func TestChecksWaitWhenTheBoardCannotBeRead(t *testing.T) {
 		t.Fatalf("state %s", lastState(e))
 	}
 }
+
+func TestNoCheckAtAllIsPointedOutOnce(t *testing.T) {
+	e := newEnv(t, todo(1))
+	e.cfg.Publish.ChecksPollIntervalMS = 60000
+	e.cfg.Publish.ChecksTimeoutMS = 60 * 60000
+	c := &fakeChecks{status: CheckStatus{State: ChecksPending, NoneReported: true}}
+	e.o.d.Checks = c
+	e.tick()
+	e.exit(Outcome{Kind: Published, Publish: &PublishRecord{IssueID: "id-1", Identifier: "GH-1", PRNumber: 7,
+		HeadSHA: "abc", ChecksDeadline: e.clock.Now().Add(60 * time.Minute)}})
+	note := "No check has started on pull request #7"
+	e.clock.advance(5 * time.Minute)
+	e.tick()
+	if strings.Contains(comments(e), note) {
+		t.Fatal("pointed out before ten minutes")
+	}
+	e.clock.advance(6 * time.Minute)
+	e.tick()
+	if n := strings.Count(comments(e), note); n != 1 || !strings.Contains(comments(e), "required_checks: none") {
+		t.Fatalf("comments = %q", comments(e))
+	}
+	// Once only, and it is no pass: the ticket still waits.
+	e.clock.advance(5 * time.Minute)
+	e.tick()
+	if n := strings.Count(comments(e), note); n != 1 || lastState(e) != "In Progress" || c.ready != 0 {
+		t.Fatalf("notes %d, state %s, ready %d", n, lastState(e), c.ready)
+	}
+	// Checks that are reported but still running are not pointed out.
+	e, c = published(t)
+	e.cfg.Publish.ChecksTimeoutMS = 30 * 60000
+	c.status = CheckStatus{State: ChecksPending}
+	e.clock.advance(20 * time.Minute)
+	e.tick()
+	if strings.Contains(comments(e), "No check has started") {
+		t.Fatal("pointed out while checks run")
+	}
+}

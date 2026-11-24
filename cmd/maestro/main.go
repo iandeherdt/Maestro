@@ -338,7 +338,7 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		&setup.InstallApp{},
 		&setup.Tickets{Linear: setup.LinearBoard{Endpoint: linearEndpoint,
 			AskKey: func(ui *setup.UI, prompt string) (string, error) { return askSecret(ui.In, stdin, ui.Out, prompt) }}},
-		&setup.WorkflowFile{},
+		&setup.WorkflowFile{FindCI: findCI},
 		&setupSystemd{setupDir: abs},
 		newSetupUnity(),
 	}

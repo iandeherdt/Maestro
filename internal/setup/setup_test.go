@@ -866,3 +866,32 @@ func TestSwitchSandboxRefusesAUnityProject(t *testing.T) {
 		t.Errorf("something changed: %q\n%s", st.Sandbox, after)
 	}
 }
+
+func TestWorkflowFileSaysWhatCIItFound(t *testing.T) {
+	for _, tc := range []struct {
+		found []string
+		known bool
+		want  string
+	}{
+		{[]string{"ci.yml"}, true, "has CI workflow files (ci.yml), so most likely yes"},
+		{nil, true, "has no GitHub Actions workflow files, so most likely no"},
+		{nil, false, ""},
+	} {
+		g := newGitHub(t)
+		st := installed(t, g)
+		st.Worker = "linux"
+		step := &WorkflowFile{GOOS: "linux", LookPath: func(string) (string, error) { return "/usr/bin/x", nil },
+			FindCI: func(context.Context, *State) ([]string, bool) { return tc.found, tc.known }}
+		u, out := ui("\nn\ny\n")
+		if err := Run(ctx, u, st, []Step{step}); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		text := out.String()
+		if tc.want != "" && !strings.Contains(text, tc.want) {
+			t.Errorf("found %v known %v: no %q in\n%s", tc.found, tc.known, tc.want, text)
+		}
+		if tc.want == "" && strings.Contains(text, "most likely") {
+			t.Errorf("a hint without a look:\n%s", text)
+		}
+	}
+}

@@ -2032,6 +2032,9 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
    with source `ci`, and schedule a `gate` retry with category `checks_failed`.
 7. Deadline passed, including when the checks could not be read until then: set the issue to the
    blocked state with `checks_timeout`.
+8. Still pending with not a single check reported for the commit, 10 minutes after publishing:
+   update the status comment once to say so, with the deadline and the `required_checks: none`
+   setting for a repository without CI. Nothing else changes; no check is still not a pass.
 
 A commit with more check runs than the adapter reads (500) stays pending until the deadline.
 
@@ -2269,7 +2272,9 @@ Steps:
    The wizard asks for the test command in plain words. An empty answer writes `true` and says
    that the agent's work will then be published without being tested. It then asks whether the
    repository runs checks on pull requests; a no writes `publish.required_checks: none`, so that
-   the service does not wait an hour for checks that never come.
+   the service does not wait an hour for checks that never come. On GitHub it first lists the
+   repository's `.github/workflows` with the App's read-only token and says what it found, as a
+   hint; the answer stays the operator's.
    The file uses the `docker` backend, and its directories are in the operator's own
    configuration directory.
 6. Service: the users, directories and the systemd or launchd unit are installed after the
