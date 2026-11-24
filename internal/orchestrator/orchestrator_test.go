@@ -812,3 +812,30 @@ func TestLatestAndRequestTick(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestBlockedCommentShowsWhyItStopped(t *testing.T) {
+	// A gate rejection has no message: the verify output is the reason.
+	e := newEnv(t, todo(1))
+	e.cfg.Budget.MaxFailureAttempts = 1
+	e.tick()
+	e.exit(Outcome{Kind: Rejected, Category: "verify_failed",
+		Feedback: []issue.Feedback{{Source: "verify", Body: "Assets/Combat.cs(12,5): error CS0103: The name 'x' does not exist"}}})
+	if got := e.tr.Get("id-1").State; got != "Blocked" {
+		t.Fatalf("state = %q, want Blocked", got)
+	}
+	ws := e.tr.Writes()
+	if body := ws[len(ws)-1].Value; !strings.Contains(body, "verify_failed") || !strings.Contains(body, "error CS0103") {
+		t.Fatalf("blocked comment does not show the verify output: %q", body)
+	}
+
+	// A long report from the agent keeps its end, where the reason is.
+	e = newEnv(t, todo(1))
+	e.cfg.Budget.MaxFailureAttempts = 1
+	e.tick()
+	report := strings.Repeat("What I tried. ", 400) + "\nMAESTRO_STATUS: blocked\nThere is no Unity licence."
+	e.exit(Outcome{Kind: Failed, Category: "agent_declared_blocked", Message: report})
+	ws = e.tr.Writes()
+	if body := ws[len(ws)-1].Value; !strings.Contains(body, "There is no Unity licence.") {
+		t.Fatalf("blocked comment lost the end of the report: %q", body)
+	}
+}
