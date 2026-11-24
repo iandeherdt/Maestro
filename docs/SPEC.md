@@ -1040,6 +1040,9 @@ Each turn is one process, started by the sandbox launcher:
 - `--setting-sources user` excludes the repository's project and local settings, and with them
   project hooks. `--strict-mcp-config` excludes the repository's `.mcp.json`. Without these, print
   mode runs project hooks and MCP servers with no trust prompt.
+- The environment sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The agent's login folder outlives
+  attempts and tickets; a memory note kept there let one attempt's conclusion ("nothing can run
+  here") decide the next ones, which then stopped without trying.
 - `--bare`, `--safe-mode` and `--restricted` MUST NOT be passed. `--bare` never reads the
   subscription login.
 - The CLI version is pinned in the deployment. The documentation states that `--bare` will become
