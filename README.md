@@ -235,7 +235,8 @@ with sudo:
 - one sudo rule that lets your user start the launcher, and nothing else.
 
 On systemd older than 245 (RHEL 8 has 239), the launcher leaves out the unit settings that
-systemd does not know yet, such as ProtectKernelLogs and ProtectClock, and closes what it can in
+systemd does not know yet, such as ProtectKernelLogs and ProtectClock (and LockPersonality, which
+the systemd-run of RHEL 8 refuses), and closes what it can in
 other ways: the steps have no capabilities, cannot read the kernel log, and cannot gain rights from
 a set-user-ID file. RHEL 9's systemd 252 has them all.
 

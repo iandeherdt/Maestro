@@ -191,8 +191,12 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 // refuses a unit with one it does not know ("Unknown assignment"), so on
 // an older systemd the property is left out. RHEL 8 has systemd 239.
 //
+// LockPersonality is older, but the systemd-run of RHEL 8 does not
+// accept it: a comma is missing in its list of properties, so it reads
+// "LockPersonalityRestrictSUIDSGID". It is left out before 240.
+//
 // What each one adds is covered there in another way, except
-// RestrictSUIDSGID and OOMPolicy:
+// RestrictSUIDSGID, LockPersonality and OOMPolicy:
 //   - ProtectKernelLogs: the unit has no CAP_SYSLOG, PrivateDevices hides
 //     /dev/kmsg, /proc/kmsg is made inaccessible and syslog(2) is filtered
 //     (see compat);
@@ -201,6 +205,9 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 //   - RestrictSUIDSGID: NoNewPrivileges keeps a set-user-ID file from
 //     giving the unit more rights; the workspace folders are closed to
 //     other users;
+//   - LockPersonality: SystemCallArchitectures=native still keeps the
+//     unit to the machine's own system calls, and NoNewPrivileges keeps a
+//     changed personality from reaching a program with more rights;
 //   - OOMPolicy: MemoryMax still bounds the unit, and the kernel kills
 //     within it.
 var since = map[string]int{
@@ -209,6 +216,7 @@ var since = map[string]int{
 	"ProtectHostname":   242,
 	"RestrictSUIDSGID":  242,
 	"OOMPolicy":         243,
+	"LockPersonality":   240,
 }
 
 // typeExecSince is the systemd version with Type=exec, which fails the
