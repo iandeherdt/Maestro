@@ -257,6 +257,13 @@ remove deletes the skill again and says how to remove the tools.`,
 		see:     []string{"setup", "status"},
 	},
 	{
+		name: "settings", group: "Watching and steering",
+		usage:   "maestro settings\nmaestro settings set NAME VALUE",
+		summary: "show and change the daily limits, models and other everyday settings",
+		body:    strings.TrimPrefix(settingsUsage, "usage:\n"),
+		see:     []string{"status"},
+	},
+	{
 		name: "skills", group: "Projects, skills and rule packs",
 		usage:   "maestro skills\nmaestro skills add SOURCE [--ref REF] [--path DIR] [--yes]\nmaestro skills remove NAME",
 		summary: "give the agents extra skills and agent files",

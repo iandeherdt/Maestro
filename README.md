@@ -974,6 +974,18 @@ Implement the issue below in this repository.
 Follow the conventions in CLAUDE.md. Add or update tests for every behaviour you change.
 ```
 
+The everyday settings (the daily limits, how many tickets run at once, the models) can be seen
+and changed without opening the file. `set` changes the one line, checks the result, and leaves
+the file as it was when the value is not valid. A running service picks the change up by itself:
+
+```sh
+maestro settings                                      # the values and where the file is
+maestro settings set budget.max_runs_per_day 40
+maestro settings set budget.max_tokens_per_day none   # no limit
+```
+
+When a daily limit stops new tickets, `maestro status` names the command that raises it.
+
 Check a workflow file without starting anything:
 
 ```sh
