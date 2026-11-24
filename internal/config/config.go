@@ -201,8 +201,13 @@ type Publish struct {
 	// person comments on its pull request. ReviewQuietMS is how long that
 	// person has to be quiet first, so that several comments start one run.
 	ReworkOnComments bool
-	ReviewQuietMS    int64
-	MaxBundleBytes   int64
+	// UpdateBranches keeps open pull requests up to date with the base
+	// branch: after a pull request is merged, the service merges the base
+	// into the branch of every other open one. A merge with conflicts is
+	// given to an agent.
+	UpdateBranches bool
+	ReviewQuietMS  int64
+	MaxBundleBytes int64
 }
 
 type Policy struct {
@@ -941,6 +946,7 @@ func (b *builder) publish(s *section) {
 	p.ChecksPollIntervalMS = b.positive("publish.checks_poll_interval_ms", s.integer("checks_poll_interval_ms", 60000))
 	p.ReworkOnChangesRequested = s.boolean("rework_on_changes_requested", true)
 	p.ReworkOnComments = s.boolean("rework_on_comments", true)
+	p.UpdateBranches = s.boolean("update_branches", true)
 	p.ReviewQuietMS = b.positive("publish.review_quiet_ms", s.integer("review_quiet_ms", 120000))
 	p.MaxBundleBytes = b.positive("publish.max_bundle_bytes", s.integer("max_bundle_bytes", 104857600))
 

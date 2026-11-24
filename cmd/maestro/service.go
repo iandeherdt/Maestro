@@ -683,7 +683,12 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 
 	mir := &mirror.Mirror{Dir: in.mirrorDir, OwnerUID: -1, MaxBundleBytes: cfg.Publish.MaxBundleBytes, AllowFileRemote: gh.fileRemote}
 	remote := cs.remote
+	// One fetch at a time: workers refresh the mirror before a workspace,
+	// and the orchestrator before it brings a branch up to date.
+	var mirrorMu sync.Mutex
 	syncMirror := func(ctx context.Context) error {
+		mirrorMu.Lock()
+		defer mirrorMu.Unlock()
 		t, err := code.Token(ctx)
 		if err != nil {
 			return err
@@ -752,7 +757,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			return held
 		},
 		BotName: in.bot, BotEmail: in.botEmail(), BotLogin: in.bot,
-		APIURL: gh.api, GitURL: gh.git,
+		APIURL: gh.api, GitURL: gh.git, Fetch: syncMirror,
 	}
 	spaces := workspace.New(cur.config(), in.box, log)
 	host := in.hostChecks(cur.config, log)
@@ -791,7 +796,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		}
 	}
 	orch := orchestrator.New(cur.config(), orchestrator.Deps{
-		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Plans: plans, Designs: designs, Log: log,
+		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Updater: pub, Plans: plans, Designs: designs, Log: log,
 		Preflight: func() (*config.Config, error) {
 			l, err := in.source.Check()
 			if l == nil {

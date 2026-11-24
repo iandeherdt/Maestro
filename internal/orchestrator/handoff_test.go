@@ -203,3 +203,63 @@ func TestAFailedAcknowledgementStillSendsTheTicketBack(t *testing.T) {
 		t.Fatalf("state writes = %v", got)
 	}
 }
+
+func TestAConflictInReviewGoesBackToWork(t *testing.T) {
+	e, r := handedOff(t, ReviewOpen)
+	e.tick()
+	if len(e.tr.StateWrites("id-1")) != 0 {
+		t.Fatalf("an open pull request was moved: %v", e.tr.StateWrites("id-1"))
+	}
+	r.status["id-1"] = ReviewStatus{State: ReviewOpen, PRNumber: 7, Conflicted: true}
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if w := e.tr.StateWrites("id-1"); len(w) == 0 || w[0] != "Rework" || !strings.Contains(comments(e), "conflicts with its base branch") {
+		t.Fatalf("writes %v, comments %s", w, comments(e))
+	}
+
+	// Without a Rework state the owner is told once.
+	e, r = handedOff(t, ReviewOpen)
+	e.cfg.Tracker.ActiveStates = []string{"Todo", "In Progress"}
+	e.o.SetConfig(e.cfg)
+	r.status["id-1"] = ReviewStatus{State: ReviewOpen, PRNumber: 7, Conflicted: true}
+	e.tick()
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if len(e.tr.StateWrites("id-1")) != 0 || strings.Count(comments(e), "conflicts with its base branch") != 1 {
+		t.Fatalf("writes %v, comments %s", e.tr.StateWrites("id-1"), comments(e))
+	}
+}
+
+func TestAMergeBringsThePullRequestsInReviewUpToDate(t *testing.T) {
+	e := newEnv(t, inReview(1), inReview(2))
+	e.cfg.Publish.ChecksPollIntervalMS = 60000
+	e.cfg.Publish.UpdateBranches = true
+	e.cfg.Tracker.DoneState = "Done"
+	r := &fakeReviews{status: map[string]ReviewStatus{"id-1": {State: ReviewMerged, PRNumber: 7}, "id-2": {State: ReviewOpen, PRNumber: 8}}}
+	u := &fakeUpdater{up: BaseUpdate{State: BaseUpdated, HeadSHA: "def", PRNumber: 8}}
+	e.o.d.Reviews, e.o.d.Updater = r, u
+	e.tick()
+	if len(u.calls) != 0 {
+		t.Fatalf("updated in the run that found the merge: %v", u.calls)
+	}
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if len(u.calls) != 1 || u.calls[0] != "GH-2" || len(e.tr.StateWrites("id-2")) != 0 {
+		t.Fatalf("updates %v, writes %v", u.calls, e.tr.StateWrites("id-2"))
+	}
+	// Once per merge.
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if len(u.calls) != 1 {
+		t.Fatalf("updated again without a merge: %v", u.calls)
+	}
+
+	// A base that does not merge cleanly sends the ticket back to work.
+	u.up = BaseUpdate{State: BaseConflicted, PRNumber: 8}
+	e.o.baseMoved()
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if w := e.tr.StateWrites("id-2"); len(w) == 0 || w[0] != "Rework" {
+		t.Fatalf("writes %v", w)
+	}
+}

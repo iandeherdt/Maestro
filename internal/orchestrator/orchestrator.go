@@ -51,6 +51,9 @@ type Deps struct {
 	// Reviews is optional. Without it nothing follows a ticket once it is
 	// handed to a person.
 	Reviews Reviews
+	// Updater is optional. Without it the service does not merge the base
+	// branch into open pull requests itself.
+	Updater Updater
 	// Plans is optional. Without it ideas are not planned.
 	Plans Plans
 	// Designs is optional. Without it no designs are made.
@@ -104,6 +107,13 @@ type Orchestrator struct {
 	// issues whose closed pull request was already commented on.
 	handoffAt   time.Time
 	closedNoted map[string]bool
+	// needUpdate holds the awaiting issues whose branch has to be brought
+	// up to date because a pull request was merged since. updateHandoff
+	// says the same for the tickets that wait for a person. conflictNoted
+	// holds the handed-off issues whose conflict was already commented on.
+	needUpdate    map[string]bool
+	updateHandoff bool
+	conflictNoted map[string]bool
 	// plansAt is when approved plans were last looked at. planNoted holds
 	// the ideas whose missing or outdated plan was already commented on.
 	plansAt   time.Time
@@ -144,6 +154,7 @@ func New(cfg *config.Config, d Deps) *Orchestrator {
 		running:   map[string]*runEntry{},
 		awaiting:  map[string]*PublishRecord{},
 		checkedAt: map[string]time.Time{}, awaitAttempt: map[string]int{}, noChecksNoted: map[string]bool{}, closedNoted: map[string]bool{},
+		needUpdate: map[string]bool{}, conflictNoted: map[string]bool{},
 		planNoted: map[string]bool{}, designNoted: map[string]bool{},
 		claimed:   map[string]bool{},
 		retries:   map[string]*RetryEntry{},
@@ -1086,6 +1097,36 @@ func (o *Orchestrator) dropAwaiting(id string) {
 	delete(o.checkedAt, id)
 	delete(o.awaitAttempt, id)
 	delete(o.noChecksNoted, id)
+	delete(o.needUpdate, id)
+}
+
+// baseMoved notes that the base branch has new commits, so that every
+// other open pull request is brought up to date with it.
+func (o *Orchestrator) baseMoved() {
+	if o.d.Updater == nil || !o.cfg.Publish.UpdateBranches {
+		return
+	}
+	for id := range o.awaiting {
+		o.needUpdate[id] = true
+	}
+	o.updateHandoff = true
+}
+
+// conflictFeedback is what the agent is told when its pull request
+// conflicts with the base branch.
+const conflictFeedback = "The pull request conflicts with the base branch: other work was merged that changed the same lines. " +
+	"The service merged the newest base branch into your workspace and left the conflicts in the tree. " +
+	"Resolve every conflict so that both changes keep working, check that code that uses what the other work " +
+	"renamed or moved still fits, and commit the merge. Change nothing else."
+
+// resolveConflict gives a published ticket whose pull request conflicts
+// with its base back to an agent. It counts as a failed attempt, so a
+// conflict that keeps coming back ends in the blocked state.
+func (o *Orchestrator) resolveConflict(ctx context.Context, is issue.Issue, rec *PublishRecord) {
+	attempt := o.awaitAttempt[is.ID]
+	o.dropAwaiting(is.ID)
+	o.comment(ctx, is, fmt.Sprintf("Pull request #%d conflicts with its base branch. An agent resolves the conflicts.", rec.PRNumber), "")
+	o.failIssue(ctx, is, attempt, KindGate, "merge_conflict", "", []issue.Feedback{{Source: "ci", Body: conflictFeedback}})
 }
 
 // noChecksAfter is how long after publishing a pull request with no check
@@ -1142,6 +1183,25 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 			continue
 		}
 
+		if o.needUpdate[id] {
+			delete(o.needUpdate, id)
+			up, err := o.d.Updater.UpdateBranch(ctx, is)
+			switch {
+			case err != nil:
+				o.d.Log.Warn("branch not brought up to date with the base", "issue", rec.Identifier, "error", err)
+			case up.State == BaseUpdated:
+				// The checks start again on the merge, and so does the wait.
+				rec.HeadSHA = up.HeadSHA
+				rec.ChecksDeadline = o.now().Add(time.Duration(o.cfg.Publish.ChecksTimeoutMS) * time.Millisecond)
+				delete(o.noChecksNoted, id)
+				o.d.Log.Info("status", "issue", rec.Identifier,
+					"text", fmt.Sprintf("Merged the newest base branch into pull request #%d. Waiting for its checks again.", rec.PRNumber))
+				continue
+			case up.State == BaseConflicted:
+				o.resolveConflict(ctx, is, rec)
+				continue
+			}
+		}
 		st, err := o.d.Checks.Check(ctx, *rec)
 		if err != nil {
 			o.d.Log.Warn("checks could not be read, will retry", "issue", rec.Identifier, "error", err)
@@ -1179,8 +1239,7 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 			o.dropAwaiting(id)
 			o.block(ctx, is, "pull_request_closed", "", 0)
 		case ChecksConflict:
-			o.dropAwaiting(id)
-			o.block(ctx, is, "merge_conflict", "", 0)
+			o.resolveConflict(ctx, is, rec)
 		default:
 			if o.now().After(rec.ChecksDeadline) {
 				o.dropAwaiting(id)
@@ -1223,6 +1282,10 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 		o.d.Log.Warn("hand-off tickets could not be read, will retry", "error", err)
 		return
 	}
+	// A merge found in this run is acted on in the next one, when the host
+	// knows the new base.
+	update := o.updateHandoff
+	o.updateHandoff = false
 	seen := map[string]bool{}
 	for _, is := range issues {
 		// Another worker's tickets, and tickets this worker is busy with,
@@ -1253,6 +1316,7 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 			o.cleanup(ctx, is)
 			o.comment(ctx, is, fmt.Sprintf("Pull request #%d was merged.", st.PRNumber), "")
 			delete(o.closedNoted, is.ID)
+			o.baseMoved()
 		case ReviewClosed:
 			if !o.closedNoted[is.ID] {
 				o.closedNoted[is.ID] = true
@@ -1288,6 +1352,7 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 			}
 		default:
 			delete(o.closedNoted, is.ID)
+			o.keepCurrent(ctx, is, st, update)
 		}
 	}
 	for id := range o.closedNoted {
@@ -1295,6 +1360,51 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 			delete(o.closedNoted, id)
 		}
 	}
+	for id := range o.conflictNoted {
+		if !seen[id] {
+			delete(o.conflictNoted, id)
+		}
+	}
+}
+
+// keepCurrent looks after an open pull request that waits for a person.
+// When another pull request was merged since the last look, the base
+// branch is merged into this one. A pull request that conflicts with its
+// base goes back to work, where an agent resolves the conflicts: left
+// alone, it would wait for the owner to find out.
+func (o *Orchestrator) keepCurrent(ctx context.Context, is issue.Issue, st ReviewStatus, update bool) {
+	conflicted := st.Conflicted
+	if !conflicted && update && o.d.Updater != nil {
+		up, err := o.d.Updater.UpdateBranch(ctx, is)
+		switch {
+		case err != nil:
+			o.d.Log.Warn("branch not brought up to date with the base", "issue", is.Identifier, "error", err)
+		case up.State == BaseUpdated:
+			o.d.Log.Info("status", "issue", is.Identifier,
+				"text", fmt.Sprintf("Merged the newest base branch into pull request #%d. Its checks run again.", st.PRNumber))
+		case up.State == BaseConflicted:
+			conflicted = true
+		}
+	}
+	if !conflicted {
+		delete(o.conflictNoted, is.ID)
+		return
+	}
+	if !o.hasActiveState(reworkState) {
+		if !o.conflictNoted[is.ID] {
+			o.conflictNoted[is.ID] = true
+			o.comment(ctx, is, fmt.Sprintf("Pull request #%d conflicts with its base branch. "+
+				"Move the card to an active state and the agent resolves the conflicts, or resolve them yourself on the pull request.", st.PRNumber), "")
+		}
+		return
+	}
+	if err := o.d.Tracker.SetState(ctx, is, reworkState); err != nil {
+		o.d.Log.Warn("rework state not written, will retry", "issue", is.Identifier, "error", err)
+		return
+	}
+	delete(o.conflictNoted, is.ID)
+	o.comment(ctx, is, fmt.Sprintf("Pull request #%d conflicts with its base branch after other work was merged. "+
+		"Back to work: an agent resolves the conflicts.", st.PRNumber), "")
 }
 
 func (o *Orchestrator) hasActiveState(state string) bool {
@@ -1352,10 +1462,10 @@ func (o *Orchestrator) blockLead(reason string) string {
 			"so what the service checked is not what is there now."
 	case "merge_conflict":
 		return "Blocked: the pull request has conflicts with its base branch (`merge_conflict`), " +
-			"so its CI does not run and it cannot be merged. Another change to the same files was merged first. " +
-			"Move the card back to Todo: before the next attempt the service merges the base branch into the branch, " +
-			"and the agent resolves the conflicts. Or resolve them yourself on the pull request; " +
-			"its checks then run, and you review and merge it as usual."
+			"so its CI does not run and it cannot be merged. Another change to the same files was merged first, " +
+			"and the agent did not get the conflicts resolved in the attempts it had. " +
+			"Move the card back to Todo for another try: before each attempt the service merges the base branch into the branch. " +
+			"Or resolve them yourself on the pull request; its checks then run, and you review and merge it as usual."
 	case "pull_request_closed":
 		return "Blocked: the pull request was closed before its checks passed (`pull_request_closed`)."
 	}
