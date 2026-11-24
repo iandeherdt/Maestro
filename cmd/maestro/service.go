@@ -192,6 +192,10 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 				"Use `sandbox.backend: podman` (or docker) for this project.")
 		}
 		in.box = &systemdbox.Box{Worker: in.cfg.Worker.Name, SocketDir: filepath.Join(stateDir, "proxy-sockets"), Log: log}
+		// The launcher acts on the hand-off folder as root, so it is
+		// root's: `maestro setup` makes it, and the service only reads the
+		// bundles the launcher leaves there for it.
+		in.handoffDir = systemdHandoff(in.cfg.Worker.Name)
 		return in, nil
 	}
 	in.dbox = &dockerbox.Box{
@@ -331,6 +335,9 @@ func (in *install) up(ctx context.Context) error {
 // alone.
 func (in *install) dirs() error {
 	for _, d := range []string{in.cfg.Budget.StateDir, in.handoffDir, in.auditDir} {
+		if in.cfg.Sandbox.Backend == "systemd" && d == in.handoffDir {
+			continue // root's, with the systemd sandbox
+		}
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err
 		}
@@ -610,6 +617,9 @@ func runService(args []string, stdout, stderr io.Writer) int {
 	}
 	if err == nil {
 		err = in.image(ctx)
+	}
+	if err == nil {
+		err = systemdCurrent(in)
 	}
 	if err == nil {
 		err = serve(ctx, in, gitHub, log, stdout)

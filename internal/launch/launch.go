@@ -36,6 +36,9 @@ type Launcher struct {
 	// Lookup and Chown work on the machine's users; tests replace them.
 	Lookup func(name string) (uid, gid int, err error)
 	Chown  func(path string, uid, gid int) error
+	// OwnerCheck says whether a folder is root's alone, with only such
+	// folders above it. Default: the real check; tests replace it.
+	OwnerCheck func(path string) error
 }
 
 // ErrRequest is a request the launcher refuses.
@@ -432,6 +435,15 @@ func (l *Launcher) export(ctx context.Context, s spec, stdout, stderr io.Writer)
 	suid, sgid, err := l.IDs(c.ServiceUser)
 	if err != nil {
 		return 0, err
+	}
+	// What follows removes and creates folders as root, by path. That is
+	// only safe in a folder nobody else can change or replace by a link.
+	check := l.OwnerCheck
+	if check == nil {
+		check = rootOwned
+	}
+	if err := check(c.HandoffRoot); err != nil {
+		return 0, fmt.Errorf("the hand-off folder is not root's alone (%v). Run `maestro setup` again, which makes it", err)
 	}
 	dir, final := c.handoff(s.key), c.bundle(s.key)
 	os.Remove(final)

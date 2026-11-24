@@ -1254,8 +1254,9 @@ The control zone cannot start processes as another user by itself. A small launc
 - `maestro setup --sandbox systemd` installs all of this once, as root through sudo, after
   showing every command, the launcher's settings and the sudo rule: the user `maestro-agent`
   (system user, no login, no home), `/opt/maestro/bin` with the pinned Claude Code and a copy of
-  `maestro`, the launcher, its settings, `/var/lib/maestro/<worker>/workspaces` (root, 0711) and
-  `/var/lib/maestro/<worker>/claude` (the sandbox user, 0700), and
+  `maestro`, the launcher, its settings, `/var/lib/maestro/<worker>` (root and the service
+  user's group, 0710), in it `workspaces` and `handoff` (root, 0711) and `claude` (the sandbox
+  user, 0700), and
   `/etc/sudoers.d/maestro-<worker>`, checked with `visudo -c` first. Paths under `/home`, `/root`
   and `/run/user` are already hidden by `ProtectHome`; the service's folders outside them are
   hidden by name. Releases for Linux carry `maestro-launch` next to `maestro`; `maestro doctor`
@@ -1266,7 +1267,10 @@ The control zone cannot start processes as another user by itself. A small launc
   write. The launcher takes the bundle only if it is a regular file, moves it to
   `<handoff_root>/<key>.bundle` and gives it to the service user with mode 0600. It opens the
   bundle without following links and changes owner and mode through the open file, so no path
-  that another user can change redirects what root does.
+  that another user can change redirects what root does. The hand-off root is
+  `/var/lib/maestro/<worker>/handoff`: the launcher removes and creates folders in it by path,
+  so it MUST be root's alone, with only root-owned folders above it, and the launcher refuses an
+  export when it is not. The service only reads the bundle there.
 
 ### 11.3 Linux Backend (`systemd`)
 
@@ -1314,6 +1318,12 @@ BindReadOnlyPaths=<proxy socket of the profile>:/run/maestro-proxy.sock   # only
 - `RestrictNamespaces=yes` is added unless `claude.inner_sandbox` is true.
 - The agent's Claude Code state directory is bound for `agent` steps only. `hook`, `verify`,
   `populate` and `export` steps do not see it, so repository scripts cannot read the login.
+  Every step runs as the sandbox user, who owns the login and all workspaces, so not binding
+  them is not enough: `/var/lib/maestro/<worker>` is closed to that user (0710, root and the
+  service user's group), and a step reaches its own workspace only through the mount. The
+  service does not start while that folder is open to other users. Not closed yet: two steps
+  that run at the same time see each other's processes, and so each other's files through
+  `/proc/<pid>/root`. Closing that takes a user per kind of step.
 - SELinux stays enforcing. The unit runs in a confined domain if a policy module is provided.
 - To verify on the chosen distribution: every property above is supported and effective, and
   systemd creates the bind destinations (`/workspace`, `/claude` and the others) under
@@ -1684,7 +1694,7 @@ Approval provenance: the adapter reads the issue history (`IssueHistory.actor`, 
 recent addition of each required label, were made by an allowlisted user. With no transition in
 the history, the creator counts. A change made by an integration or automation (`botActor`) or
 with no actor never counts. The user the API key acts as counts only for the states the service
-writes itself (in progress, handoff, blocked, done, `Rework`), and for issues it created itself.
+writes itself (in progress, handoff, blocked, done, `Rework`, and the design state), and for issues it created itself.
 For that reason the first active state MUST NOT be a state the service writes. The result is
 cached per issue until `updatedAt` changes.
 
@@ -2183,7 +2193,8 @@ As upstream Section 13.7, loopback only:
   fails. Not built yet: `--repo`, the readiness check of Appendix C.
 - `maestro pause [reason]`, `maestro resume`: through the loopback API. A pause is stored and
   survives a restart.
-- `maestro unblock <identifier>`: through the loopback API, reset `failure_attempts` for an issue.
+- `maestro unblock <identifier>`: through the loopback API, reset `failure_attempts` for an issue, and move an issue
+  in the blocked state to Rework. The approval state is never written.
   An issue in `blocked_state` that is routed to this worker is also moved back to the first active
   state, with a status comment. The identifier may be given as its number alone (`12`, `#12`).
 - Exit status: `0` on normal shutdown, nonzero on startup failure or abnormal exit.

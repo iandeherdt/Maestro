@@ -84,7 +84,9 @@ func testLauncher(t *testing.T) (*Launcher, *fakeSystemd) {
 	me := os.Getuid()
 	l := &Launcher{Cfg: cfg, Self: "/usr/local/libexec/maestro-launch", SystemdRun: f.run,
 		Lookup: func(name string) (int, int, error) { return me, os.Getgid(), nil },
-		Chown:  func(string, int, int) error { return nil }}
+		Chown:  func(string, int, int) error { return nil },
+		// The test folders are not root's.
+		OwnerCheck: func(string) error { return nil }}
 	return l, f
 }
 
@@ -549,5 +551,35 @@ func TestUnitOnAnOlderSystemd(t *testing.T) {
 		if !slices.Contains(c.args, "--service-type="+tc.serviceType) {
 			t.Errorf("systemd %d: not --service-type=%s: %q", tc.systemd, tc.serviceType, c.args)
 		}
+	}
+}
+
+// The launcher removes and creates folders in the hand-off folder as root.
+// In a folder another user can change, a link in its place would send that
+// elsewhere, so such a folder is refused before anything is touched.
+func TestExportRefusesAHandoffFolderThatIsNotRoots(t *testing.T) {
+	l, f := testLauncher(t)
+	l.OwnerCheck = nil    // the real check
+	system := t.TempDir() // stands for a folder only root may change
+	victim := filepath.Join(system, "profile.d")
+	os.Mkdir(victim, 0o755)
+	os.WriteFile(filepath.Join(victim, "keep.sh"), []byte("keep\n"), 0o644)
+	os.RemoveAll(l.Cfg.HandoffRoot)
+	if err := os.Symlink(system, l.Cfg.HandoffRoot); err != nil {
+		t.Fatal(err)
+	}
+	os.Mkdir(l.Cfg.workspace("profile.d"), 0o700)
+	_, _, err := handle(l, sandbox.Request{Step: sandbox.StepExport, WorkspaceKey: "profile.d"})
+	if err == nil || !strings.Contains(err.Error(), "maestro setup") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Error("a unit was started")
+	}
+	if _, err := os.Stat(filepath.Join(victim, "keep.sh")); err != nil {
+		t.Errorf("the folder behind the link was touched: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(system, "profile.d.bundle")); err == nil {
+		t.Error("a bundle was left behind the link")
 	}
 }

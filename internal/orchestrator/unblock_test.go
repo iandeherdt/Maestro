@@ -27,14 +27,14 @@ func TestUnblockMovesABlockedIssueBackWithAFreshBudget(t *testing.T) {
 	e.wantStarts(3)
 
 	res := unblockNow(e, "#1")
-	if !res.Found || res.Identifier != "GH-1" || res.Failures != 3 || res.MovedTo != "Todo" || res.Err != nil {
+	if !res.Found || res.Identifier != "GH-1" || res.Failures != 3 || res.MovedTo != "Rework" || res.Err != nil {
 		t.Fatalf("result = %+v", res)
 	}
 	if e.b.Failures("id-1") != 0 || e.b.BlockMarked("id-1") {
 		t.Fatal("budget not cleared")
 	}
-	if got := e.tr.Get("id-1").State; got != "Todo" {
-		t.Fatalf("state = %q, want Todo", got)
+	if got := e.tr.Get("id-1").State; got != "Rework" {
+		t.Fatalf("state = %q, want Rework", got)
 	}
 	ws := e.tr.Writes()
 	if last := ws[len(ws)-1]; last.Op != "comment" || !strings.Contains(last.Value, "maestro unblock") {
@@ -97,5 +97,21 @@ func TestSameIdentifier(t *testing.T) {
 		if got := SameIdentifier(c.typed, c.id); got != c.want {
 			t.Errorf("SameIdentifier(%q, %q) = %v", c.typed, c.id, got)
 		}
+	}
+}
+
+// Without Rework among the active states there is nowhere the service may
+// move the card: the count is cleared and the owner is told.
+func TestUnblockWithoutReworkOnlyClearsTheCount(t *testing.T) {
+	e := newEnv(t, todo(1))
+	e.cfg.Tracker.ActiveStates = []string{"Todo", "In Progress"}
+	e.o.SetConfig(e.cfg)
+	e.tr.Move("id-1", "Blocked")
+	res := unblockNow(e, "1")
+	if !res.Found || res.Err == nil || res.MovedTo != "" {
+		t.Fatalf("result = %+v", res)
+	}
+	if got := e.tr.Get("id-1").State; got != "Blocked" {
+		t.Fatalf("state = %q", got)
 	}
 }

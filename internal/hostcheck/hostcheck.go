@@ -141,15 +141,20 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 			"and add a licence (Preferences, Licenses, Add, Get a free personal licence)")
 	}
 
-	dir := filepath.Join(r.WorkDir, key)
+	// Two folders per workspace. The check may write only in work. What
+	// the service itself runs or reads again later (git's own folder, the
+	// shims, the profile) is in service, which the check can read but not
+	// change: a hook or a link planted there would act outside the fence.
+	top := filepath.Join(r.WorkDir, key)
+	dir, service := filepath.Join(top, "work"), filepath.Join(top, "service")
 	repo := filepath.Join(dir, "repo")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := layout(top, dir, service); err != nil {
 		return Result{}, err
 	}
-	if err := r.checkout(ctx, repo, key, head); err != nil {
+	if err := r.checkout(ctx, filepath.Join(service, "git"), repo, key, head); err != nil {
 		return Result{}, fmt.Errorf("the change could not be checked out for the Unity checks: %w", err)
 	}
-	shim, fakeHome, err := shims(dir, editor, version, home)
+	shim, fakeHome, err := shims(service, dir, editor, version, home)
 	if err != nil {
 		return Result{}, err
 	}
@@ -173,13 +178,13 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 
 	argv := []string{"/bin/sh", "-c", script}
 	if !r.noSandbox {
-		profile := filepath.Join(dir, "sandbox.sb")
+		profile := filepath.Join(service, "sandbox.sb")
 		// An Editor below the home folder has to stay readable.
 		root := editor
 		if i := strings.Index(filepath.ToSlash(editor), "/Editor/"+version+"/"); i >= 0 {
 			root = editor[:i+len("/Editor/"+version)]
 		}
-		text, err := Profile(dir, home, r.Secret, []string{root})
+		text, err := Profile(dir, home, r.Secret, []string{root}, service)
 		if err != nil {
 			return Result{}, err
 		}
@@ -234,13 +239,60 @@ func (r *Runner) Forget(key string) {
 	}
 }
 
-// git runs git as the service, without the user's or the system's git
+// layout makes the two folders of a workspace's checks. A folder from
+// before they were apart is taken along, without the git folder, the shims
+// and the profile that a check could have changed.
+func layout(top, dir, service string) error {
+	if st, err := os.Lstat(dir); err == nil && !st.IsDir() {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if old := filepath.Join(top, "repo"); isDir(old) {
+		os.RemoveAll(filepath.Join(old, ".git"))
+		if err := os.Rename(old, filepath.Join(dir, "repo")); err != nil {
+			os.RemoveAll(old)
+		}
+	}
+	for _, name := range []string{"shim", "home", "sandbox.sb"} {
+		os.RemoveAll(filepath.Join(top, name))
+	}
+	if st, err := os.Lstat(service); err == nil && !st.IsDir() {
+		if err := os.RemoveAll(service); err != nil {
+			return err
+		}
+	}
+	return os.MkdirAll(service, 0o700)
+}
+
+// isDir reports whether path is a folder itself, not a link to one.
+func isDir(path string) bool {
+	st, err := os.Lstat(path)
+	return err == nil && st.IsDir()
+}
+
+// gitEnv is git as the service, without the user's or the system's git
 // settings: the tree comes from the agent, and a filter or hook in the
 // user's settings must not run on it.
-func git(ctx context.Context, dir string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
+func gitEnv() []string {
+	return append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
+}
+
+// gitArgs names git's own folder and the working tree apart, so that
+// nothing in the tree is git's, and switches off what would start a
+// program: hooks and the file system monitor.
+func gitArgs(gitDir, tree string, args ...string) []string {
+	return append([]string{"--git-dir=" + gitDir, "--work-tree=" + tree,
+		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
+}
+
+func git(ctx context.Context, gitDir, tree string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", gitArgs(gitDir, tree, args...)...)
+	cmd.Dir = tree
+	cmd.Env = gitEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -253,9 +305,10 @@ func git(ctx context.Context, dir string, args ...string) error {
 	return nil
 }
 
-// checkout puts the exported commit head into repo. The folders Unity
-// makes (Library and the like) stay, so the next check is fast.
-func (r *Runner) checkout(ctx context.Context, repo, key, head string) error {
+// checkout puts the exported commit head into repo. git's own folder is
+// gitDir, outside what a check may write. The folders Unity makes (Library
+// and the like) stay, so the next check is fast.
+func (r *Runner) checkout(ctx context.Context, gitDir, repo, key, head string) error {
 	bundle := filepath.Join(r.HandoffDir, key+".bundle")
 	st, err := os.Lstat(bundle)
 	if err != nil {
@@ -264,21 +317,34 @@ func (r *Runner) checkout(ctx context.Context, repo, key, head string) error {
 	if !st.Mode().IsRegular() {
 		return errors.New("the bundle is not a regular file")
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+	if !isDir(repo) {
 		os.RemoveAll(repo)
-		if err := git(ctx, filepath.Dir(repo), "init", "--quiet", repo); err != nil {
+		if err := os.MkdirAll(repo, 0o700); err != nil {
 			return err
 		}
 	}
+	// git's folder is gitDir. One that a check made in the tree is not
+	// used, and not kept: git's own clean leaves it.
+	if err := os.RemoveAll(filepath.Join(repo, ".git")); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(gitDir, "HEAD")); err != nil {
+		os.RemoveAll(gitDir)
+		init := exec.CommandContext(ctx, "git", "init", "--quiet", "--bare", gitDir)
+		init.Env = gitEnv()
+		if out, err := init.CombinedOutput(); err != nil {
+			return fmt.Errorf("git init: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
 	// The base the bundle builds on comes from the mirror.
-	if err := git(ctx, repo, "fetch", "--quiet", "--no-tags", r.MirrorDir, "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+	if err := git(ctx, gitDir, repo, "fetch", "--quiet", "--no-tags", r.MirrorDir, "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return err
 	}
-	if err := git(ctx, repo, "-c", "protocol.file.allow=always", "fetch", "--quiet", "--no-tags", bundle, "+HEAD:refs/maestro/check"); err != nil {
+	if err := git(ctx, gitDir, repo, "-c", "protocol.file.allow=always", "fetch", "--quiet", "--no-tags", bundle, "+HEAD:refs/maestro/check"); err != nil {
 		return err
 	}
-	rp := exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/maestro/check^{commit}")
-	rp.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	rp := exec.CommandContext(ctx, "git", gitArgs(gitDir, repo, "rev-parse", "--verify", "--quiet", "refs/maestro/check^{commit}")...)
+	rp.Env = gitEnv()
 	out, err := rp.Output()
 	if err != nil {
 		return fmt.Errorf("git rev-parse: %v", err)
@@ -286,10 +352,10 @@ func (r *Runner) checkout(ctx context.Context, repo, key, head string) error {
 	if got := strings.TrimSpace(string(out)); got != head {
 		return fmt.Errorf("the bundle holds %s, not the exported %s", got, head)
 	}
-	if err := git(ctx, repo, "checkout", "--quiet", "--force", "--detach", head); err != nil {
+	if err := git(ctx, gitDir, repo, "checkout", "--quiet", "--force", "--detach", head); err != nil {
 		return err
 	}
-	return git(ctx, repo, "clean", "-ffdxq", "-e", "/Library/", "-e", "/Temp/", "-e", "/Logs/", "-e", "/UserSettings/", "-e", "/obj/")
+	return git(ctx, gitDir, repo, "clean", "-ffdxq", "-e", "/Library/", "-e", "/Temp/", "-e", "/Logs/", "-e", "/UserSettings/", "-e", "/obj/")
 }
 
 // shims lets the pack's scripts, written for the Linux Editor in the
@@ -298,9 +364,23 @@ func (r *Runner) checkout(ctx context.Context, repo, key, head string) error {
 // and the home directory has a sign that a licence is there (licence() in
 // env.sh looks for one). Its Library is the user's, where Unity Hub keeps
 // the licence the Editor uses.
-func shims(dir, editor, version, home string) (shim, fakeHome string, err error) {
-	shim = filepath.Join(dir, "shim")
+//
+// The shims are in service, which a check cannot write, and are made anew
+// each time. The home directory is in dir, because programs write there;
+// what the service itself writes in it is made anew too, so that a link a
+// check left cannot lead the write elsewhere.
+func shims(service, dir, editor, version, home string) (shim, fakeHome string, err error) {
+	shim = filepath.Join(service, "shim")
 	fakeHome = filepath.Join(dir, "home")
+	if err := os.RemoveAll(shim); err != nil {
+		return "", "", err
+	}
+	if !isDir(fakeHome) {
+		os.RemoveAll(fakeHome)
+	}
+	if err := os.RemoveAll(filepath.Join(fakeHome, ".config")); err != nil {
+		return "", "", err
+	}
 	files := map[string]string{
 		"unity/Editor/Unity": "#!/bin/sh\nexec \"" + editor + "\" \"$@\"\n",
 		"unity/version":      version + "\n",
@@ -349,8 +429,12 @@ exec "$@"
 // reads of the home folder, each given back only where the check and Unity
 // need it. read are folders outside those that the check has to read, such
 // as an Editor that Unity Hub installed below the home folder.
-func Profile(dir, home string, secret, read []string) (string, error) {
-	for _, p := range append(append([]string{dir, home}, secret...), read...) {
+//
+// own are folders of the check that it reads but may not change, even when
+// they lie below a secret folder: where the service keeps the shims, the
+// profile and git's own folder.
+func Profile(dir, home string, secret, read []string, own ...string) (string, error) {
+	for _, p := range append(append(append([]string{dir, home}, secret...), read...), own...) {
 		if !filepath.IsAbs(p) || strings.ContainsAny(p, "\"\\\n") {
 			return "", fmt.Errorf("the path %q cannot be put in a sandbox profile", p)
 		}
@@ -445,6 +529,11 @@ func Profile(dir, home string, secret, read []string) (string, error) {
 	}
 	w(";; The check's own folder, even when it lies below one of those.")
 	w("(allow file-read* (subpath %s))", q(real(dir)))
+	for _, o := range own {
+		w(";; What the service keeps for the check: read, never written.")
+		w("(allow file-read* (subpath %s))", q(real(o)))
+		w("(deny file-write* (subpath %s))", q(real(o)))
+	}
 	// A path is looked up from the root, so the folders above the check's
 	// own have to be passed through. Without this every full path in it is
 	// refused: the shell's `cd x/..` says "Not a directory", and Unity cannot
@@ -456,7 +545,7 @@ func Profile(dir, home string, secret, read []string) (string, error) {
 	w(";; The folders above it and above what is read can be passed through, not listed or read.")
 	w("(allow file-read-metadata")
 	seen := map[string]bool{}
-	for _, p := range append([]string{dir}, read...) {
+	for _, p := range append(append([]string{dir}, read...), own...) {
 		for d := filepath.Dir(real(p)); !seen[d]; d = filepath.Dir(d) {
 			seen[d] = true
 			w("    (literal %s)", q(d))

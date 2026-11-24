@@ -41,7 +41,7 @@ func TestSystemdPlan(t *testing.T) {
 	}
 	c := p.cfg
 	if c.Worker != "linux" || c.User != agentUser || c.WorkspaceRoot != "/var/lib/maestro/linux/workspaces" ||
-		c.ClaudeState != "/var/lib/maestro/linux/claude" || c.Mirror != in.mirrorDir || c.HandoffRoot != in.handoffDir ||
+		c.ClaudeState != "/var/lib/maestro/linux/claude" || c.Mirror != in.mirrorDir || c.HandoffRoot != "/var/lib/maestro/linux/handoff" || in.handoffDir != c.HandoffRoot ||
 		c.ProxySockets["agent"] != filepath.Join(in.cfg.Budget.StateDir, "proxy-sockets", "agent.sock") ||
 		c.MemoryMax != "6G" || c.CPUQuota != "300%" || c.BotName != "sym[bot]" || c.MaxTimeoutMS < minStepCeilingMS {
 		t.Errorf("config %+v", c)
@@ -64,7 +64,8 @@ func TestSystemdPlan(t *testing.T) {
 		"install -o root -g root -m 0755 \"" + p.launcherSrc + "\" /usr/local/libexec/maestro-launch",
 		"install -o root -g root -m 0644 \"/tmp/x/launch.json\" /etc/maestro/launch-linux.json",
 		"npm install --global --prefix /opt/maestro/claude-" + p.claude,
-		"install -d -o root -g root -m 0711 /var/lib/maestro/linux/workspaces",
+		"install -d -o root -g \"$(id -g ian)\" -m 0710 /var/lib/maestro/linux",
+		"install -d -o root -g root -m 0711 /var/lib/maestro/linux/workspaces /var/lib/maestro/linux/handoff",
 		"install -d -o maestro-agent -g maestro-agent -m 0700 /var/lib/maestro/linux/claude",
 		"visudo -cqf \"/tmp/x/sudoers\"",
 		"install -o root -g root -m 0440 \"/tmp/x/sudoers\" /etc/sudoers.d/maestro-linux",
@@ -92,5 +93,18 @@ func TestUnderHome(t *testing.T) {
 		if underHome(p) != want {
 			t.Errorf("%s", p)
 		}
+	}
+}
+
+func TestOpenToOthers(t *testing.T) {
+	d := t.TempDir()
+	for mode, want := range map[os.FileMode]bool{0o755: true, 0o711: true, 0o710: false, 0o700: false} {
+		os.Chmod(d, mode)
+		if got := openToOthers(d); got != want {
+			t.Errorf("%o: %v", mode, got)
+		}
+	}
+	if openToOthers(filepath.Join(d, "missing")) {
+		t.Error("a folder that is not there counts as open")
 	}
 }

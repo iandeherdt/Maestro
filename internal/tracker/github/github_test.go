@@ -802,3 +802,26 @@ func TestListLagAfterOwnWriteIsNotTrusted(t *testing.T) {
 		t.Fatalf("after the window: %v %v", list, err)
 	}
 }
+
+// The states `maestro unblock` and a design's rework write are states the
+// adapter accepts; the approval state stays refused.
+func TestSetStateAcceptsReworkAndTheDesignState(t *testing.T) {
+	h := newHub(t)
+	h.add(1, "ian", "ian", "status:Blocked", "run:linux")
+	cfg := testCfg(h.srv.URL)
+	cfg.Tracker.DesignState = "Design"
+	cfg.Tracker.ActiveStates = append(cfg.Tracker.ActiveStates, "Design")
+	a, err := New(cfg, Options{Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	is := issue.Issue{ID: "I_node1", Identifier: "GH-1"}
+	for _, state := range []string{"Rework", "Design"} {
+		if err := a.SetState(ctx, is, state); err != nil {
+			t.Errorf("SetState(%q) = %v", state, err)
+		}
+	}
+	if err := a.SetState(ctx, is, "Todo"); tracker.CategoryOf(err) != tracker.WriteRejected {
+		t.Errorf("the approval state was written: %v", err)
+	}
+}

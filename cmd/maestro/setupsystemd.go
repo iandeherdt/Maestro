@@ -51,6 +51,11 @@ type systemdPlan struct {
 // currentUser is user.Current; tests, which may run as root, replace it.
 var currentUser = user.Current
 
+// systemdHandoff is where the launcher leaves a workspace's bundle for the
+// service. It is root's folder: the launcher removes and creates folders in
+// it as root, which it must not do in a folder another user can change.
+func systemdHandoff(worker string) string { return filepath.Join(sandboxRoot, worker, "handoff") }
+
 func sudoersPath(worker string) string { return "/etc/sudoers.d/maestro-" + worker }
 
 // planSystemd works out the plan. It touches nothing.
@@ -72,7 +77,7 @@ func planSystemd(in *install) (*systemdPlan, error) {
 	cfg := launch.Config{
 		Worker: w, User: agentUser, ServiceUser: me.Username,
 		WorkspaceRoot: filepath.Join(sandboxRoot, w, "workspaces"),
-		HandoffRoot:   abs(in.handoffDir), Mirror: abs(in.mirrorDir),
+		HandoffRoot:   systemdHandoff(w), Mirror: abs(in.mirrorDir),
 		ClaudeState: filepath.Join(sandboxRoot, w, "claude"),
 		Skills:      abs(in.skills.SkillsDir()), Agents: abs(in.skills.AgentsDir()),
 		ProxySockets: map[string]string{},
@@ -140,15 +145,52 @@ func (p *systemdPlan) problems(ctx context.Context) []string {
 	if _, err := user.Lookup(agentUser); err != nil {
 		out = append(out, "The sandbox user "+agentUser+" does not exist.")
 	}
-	for _, d := range []string{p.cfg.WorkspaceRoot, filepath.Dir(p.cfg.ClaudeState)} {
+	for _, d := range []string{p.cfg.WorkspaceRoot, p.cfg.HandoffRoot, filepath.Dir(p.cfg.ClaudeState)} {
 		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
 			out = append(out, "The folder "+d+" does not exist.")
 		}
+	}
+	// Every step runs as the sandbox user, who owns the login and all the
+	// workspaces. A step is given its own workspace by a mount; it must
+	// not be able to walk to the others, or to the login, by their paths
+	// on this machine.
+	if d := filepath.Join(sandboxRoot, p.worker); openToOthers(d) {
+		out = append(out, "The folder "+d+" can be entered by every user, so a step could reach the agent's login and other workspaces.")
 	}
 	if !sudoAllows(ctx, systemdbox.Launcher, p.worker) || !sudoAllows(ctx, systemdbox.Launcher, p.worker, "login") {
 		out = append(out, "sudo does not let this user start the launcher without a password ("+sudoersPath(p.worker)+").")
 	}
 	return out
+}
+
+// openToOthers reports whether users outside the folder's owner and group
+// can enter or list it.
+func openToOthers(dir string) bool {
+	fi, err := os.Stat(dir)
+	return err == nil && fi.Mode().Perm()&0o007 != 0
+}
+
+// systemdCurrent refuses to start the service on a systemd sandbox that
+// root set up for another Maestro: the launcher's settings say where the
+// bundles are left, and with old ones the service would look elsewhere.
+func systemdCurrent(in *install) error {
+	if in.cfg.Sandbox.Backend != "systemd" {
+		return nil
+	}
+	p, err := planSystemd(in)
+	if err != nil {
+		return err
+	}
+	have, err := os.ReadFile(launch.ConfigPath(p.worker))
+	switch {
+	case err != nil || !bytes.Equal(have, p.config):
+		return explain("the Linux sandbox was set up for another version of Maestro or other settings (%s is missing or out of date).\n"+
+			"Set it up again with: %s", launch.ConfigPath(p.worker), mention("maestro setup"))
+	case openToOthers(filepath.Join(sandboxRoot, p.worker)):
+		return explain("the folder %s can be entered by every user, so a step could reach the agent's login and other workspaces.\n"+
+			"Close it with: %s", filepath.Join(sandboxRoot, p.worker), mention("maestro setup"))
+	}
+	return nil
 }
 
 func sameFile(a, b string) bool {
@@ -209,8 +251,11 @@ func (p *systemdPlan) script(configFile, sudoersFile string) string {
 		"install -o root -g root -m 0755 " + q(p.launcherSrc) + " " + systemdbox.Launcher,
 		"install -o root -g root -m 0644 " + q(configFile) + " " + launch.ConfigPath(w),
 		"# The workspaces and the agent's Claude login.",
-		"install -d -o root -g root -m 0755 " + sandboxRoot + " " + filepath.Join(sandboxRoot, w),
-		"install -d -o root -g root -m 0711 " + p.cfg.WorkspaceRoot,
+		"# Only root and the service's user can enter the worker's folder. The sandbox user",
+		"# cannot: a step gets its workspace by a mount, and reaches nothing else there.",
+		"install -d -o root -g root -m 0755 " + sandboxRoot,
+		"install -d -o root -g \"$(id -g " + p.cfg.ServiceUser + ")\" -m 0710 " + filepath.Join(sandboxRoot, w),
+		"install -d -o root -g root -m 0711 " + p.cfg.WorkspaceRoot + " " + p.cfg.HandoffRoot,
 		"install -d -o " + agentUser + " -g " + agentUser + " -m 0700 " + p.cfg.ClaudeState,
 		"# The one sudo rule: this user may start the launcher, nothing else.",
 		"visudo -cqf " + q(sudoersFile),

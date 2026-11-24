@@ -227,8 +227,8 @@ Example:
 		name: "unblock", group: "Watching and steering",
 		usage:   "maestro unblock ISSUE",
 		summary: "give a blocked ticket a fresh start",
-		body: `Clears a blocked ticket's failure count and moves it back to the state it can
-be picked up in, so the next run starts afresh. Fix the reason it was blocked
+		body: `Clears a blocked ticket's failure count and moves it to Rework, where it is
+picked up again, so the next run starts afresh. Fix the reason it was blocked
 first; ` + "`maestro status`" + ` shows it. ISSUE is the ticket's identifier, such as
 GH-12 or ENG-7; for GitHub the number alone is enough.
 
