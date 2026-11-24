@@ -240,3 +240,22 @@ func TestSelfTestInRealContainers(t *testing.T) {
 		t.Errorf("a self-test volume was left: %s", out)
 	}
 }
+
+func TestProbeReadsTheLimitsOfItsOwnCgroup(t *testing.T) {
+	// Under systemd there is no cgroup namespace: the limits are in the
+	// unit's own cgroup, and the root has none.
+	unit := "system.slice/maestro-linux-selftest.service"
+	root := fakeMachine(t, goodStatus, "Iface\tDestination\tGateway\n", map[string]string{
+		"proc/self/cgroup":                      "0::/" + unit + "\n",
+		"sys/fs/cgroup/" + unit + "/pids.max":   "256\n",
+		"sys/fs/cgroup/" + unit + "/memory.max": "536870912\n",
+		"sys/fs/cgroup/cgroup.controllers":      "cpu memory pids\n",
+	})
+	p := prober{root: root, uid: 10001, setUID: true, lookup: noLookup, dial: noDial}
+	m := byName(p.run("none", canaryName, "example.com", 256, 512<<20))
+	for _, name := range []string{"the process limit is in force", "the memory limit is in force"} {
+		if c, ok := m[name]; !ok || !c.OK {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+}

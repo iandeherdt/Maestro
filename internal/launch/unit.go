@@ -207,8 +207,8 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 // What each one adds is covered there in another way, except
 // RestrictSUIDSGID, LockPersonality and OOMPolicy:
 //   - ProtectKernelLogs: the unit has no CAP_SYSLOG, PrivateDevices hides
-//     /dev/kmsg, /proc/kmsg is made inaccessible and syslog(2) is filtered
-//     (see compat);
+//     /dev/kmsg, /proc/kmsg is root's alone and the unit has no
+//     capability to pass that, and syslog(2) is filtered (see compat);
 //   - ProtectClock and ProtectHostname: the unit has no capabilities to
 //     set the clock or the host name;
 //   - RestrictSUIDSGID: NoNewPrivileges keeps a set-user-ID file from
@@ -233,8 +233,9 @@ var since = map[string]int{
 const typeExecSince = 240
 
 // compat is what is added instead on a systemd that lacks
-// ProtectKernelLogs.
-var compat = []string{"SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg"}
+// ProtectKernelLogs. Not InaccessiblePaths=/proc/kmsg: on systemd 239
+// (RHEL 8) the unit then starts without its BindPaths= (the workspace).
+var compat = []string{"SystemCallFilter=~syslog"}
 
 // supported reports whether systemd version v knows the property kv. A
 // version of 0 is unknown and counts as new.
