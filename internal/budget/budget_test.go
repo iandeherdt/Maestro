@@ -81,3 +81,28 @@ func TestOldDaysArePruned(t *testing.T) {
 		t.Fatalf("days kept = %d", n)
 	}
 }
+
+func TestTicketTokensAndLastFailurePersistAndClear(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.AddTicketTokens("a", 500)
+	s.AddTicketTokens("a", 250)
+	s.SetLastFailure("a", "sig")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.TicketTokens("a") != 750 || s.LastFailure("a") != "sig" {
+		t.Fatalf("after reopen: tokens %d, last failure %q", s.TicketTokens("a"), s.LastFailure("a"))
+	}
+	s.ClearIssue("a")
+	if s.TicketTokens("a") != 0 || s.LastFailure("a") != "" {
+		t.Fatal("ClearIssue kept the tokens or the last failure")
+	}
+}

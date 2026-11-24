@@ -506,6 +506,13 @@ maestro service uninstall   # back to running it by hand
 It shows the file it will write and asks before it does. The background service runs as you, and
 the agent still works in Docker, so Docker has to be running.
 
+Two limits stop one ticket from eating the day's budget. A ticket whose attempt fails exactly the
+way the attempt before it failed (the same check error, say) is blocked at once, since a third
+attempt would most likely fail again. And a ticket that uses more than 10 million tokens in one
+attempt, or 30 million over all its attempts, is stopped and blocked. Both limits are far above a
+normal ticket; `maestro settings set budget.max_tokens_per_attempt` and
+`budget.max_tokens_per_ticket` change them, and `none` switches one off.
+
 A ticket that failed `budget.max_failure_attempts` times in a row is moved to Blocked, and a new
 comment at the bottom of the ticket gives the last error and, under it, why: the end of the agent's report when the agent gave up, or the end
 of the check's output when the check kept failing. To give it another chance with a fresh count, either drag its card back to
@@ -1020,6 +1027,9 @@ changed ones:
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
 | `budget.max_failure_attempts` | 3 | Failed attempts before a ticket is blocked |
 | `budget.max_runs_per_day` | 20 | Daily limit on agent runs |
+| `budget.max_tokens_per_attempt` | 10000000 | Tokens one attempt may use before it is stopped and the ticket blocked; `none` for no limit |
+| `budget.max_tokens_per_ticket` | 30000000 | Tokens all attempts on one ticket may use together; `none` for no limit |
+| `budget.block_repeated_failure` | `true` | Block a ticket at once when an attempt fails the same way as the one before |
 | `policy.deny_paths` | built-in list | Extra paths the agent may never change |
 | `policy.flag_paths` | none | Paths whose changes are pointed out in the pull request |
 | `unity.editor` | none | On a Mac with Apple silicon, the Unity Editor that runs Unity's checks, see [Unity](#unity) |

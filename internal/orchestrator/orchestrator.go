@@ -10,6 +10,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -85,6 +87,9 @@ type runEntry struct {
 	feed []FeedItem
 	// label is the working label the idea carries while this run lasts.
 	label string
+	// capped is set once the attempt went over a token limit and is being
+	// stopped.
+	capped bool
 }
 
 // Orchestrator holds the runtime state of SPEC 4.1.10.
@@ -785,6 +790,12 @@ func (o *Orchestrator) onEvent(id string, gen uint64, ev Event) {
 	}
 	if ev.Usage != nil {
 		e.usage = *ev.Usage
+		if !e.capped {
+			if over := o.overTokens(e); over != "" {
+				e.capped = true
+				o.post(func(ctx context.Context) { o.stopOverTokens(ctx, id, gen, over) })
+			}
+		}
 	}
 	if ev.TurnStart {
 		// A run counts against the daily limit once the agent starts: an
@@ -806,7 +817,43 @@ func (o *Orchestrator) account(e *runEntry) {
 	o.totals.Usage.CacheWrite += e.usage.CacheWrite
 	o.totals.SecondsRunning += secs
 	o.d.Budget.AddUsage(o.now(), e.usage.Total(), int64(secs))
+	o.d.Budget.AddTicketTokens(e.issue.ID, e.usage.Total())
 	o.persist()
+}
+
+// overTokens says which token limit a running attempt is over, or "".
+func (o *Orchestrator) overTokens(e *runEntry) string {
+	lim, used := o.cfg.Budget, e.usage.Total()
+	if lim.MaxTokensPerAttempt != nil && used > *lim.MaxTokensPerAttempt {
+		return fmt.Sprintf("This attempt used %d tokens, more than budget.max_tokens_per_attempt (%d).",
+			used, *lim.MaxTokensPerAttempt)
+	}
+	return o.overTicketTokens(e.issue.ID, used)
+}
+
+// overTicketTokens says whether the issue's attempts together, with
+// running tokens of an attempt not yet accounted, are over
+// budget.max_tokens_per_ticket.
+func (o *Orchestrator) overTicketTokens(id string, running int64) string {
+	lim := o.cfg.Budget.MaxTokensPerTicket
+	total := o.d.Budget.TicketTokens(id) + running
+	if lim == nil || total <= *lim {
+		return ""
+	}
+	return fmt.Sprintf("The attempts on this ticket used %d tokens together, more than budget.max_tokens_per_ticket (%d).",
+		total, *lim)
+}
+
+// stopOverTokens stops an attempt that went over a token limit and blocks
+// its ticket: another attempt would spend as much again.
+func (o *Orchestrator) stopOverTokens(ctx context.Context, id string, gen uint64, detail string) {
+	e := o.running[id]
+	if e == nil || e.gen != gen {
+		return
+	}
+	o.d.Log.Warn("token limit reached, stopping the attempt", "issue", e.issue.Identifier, "detail", detail)
+	o.terminate(ctx, id, false, "token limit")
+	o.block(ctx, e.issue, "token_limit", detail, 0)
 }
 
 // onWorkerExit applies an attempt's outcome (SPEC 19.6). A report from an
@@ -833,6 +880,10 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 			out.Publish.PRNumber), "")
 	case Normal:
 		o.completed[id] = true
+		if over := o.overTicketTokens(id, 0); over != "" {
+			o.block(ctx, is, "token_limit", over, 0)
+			return
+		}
 		o.schedule(&RetryEntry{IssueID: id, Identifier: is.Identifier, Attempt: 1, Kind: KindContinuation})
 	case Quota:
 		until := out.QuotaResetAt
@@ -864,11 +915,23 @@ func (o *Orchestrator) failed(ctx context.Context, e *runEntry, kind, category, 
 
 func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt int, kind, category, message string, feedback []issue.Feedback) {
 	n := o.d.Budget.IncFailure(is.ID)
+	detail := blockDetail(message, feedback)
+	sig := failureSignature(category, detail)
+	repeated := o.cfg.Budget.BlockRepeatedFailure && sig != "" && sig == o.d.Budget.LastFailure(is.ID)
+	o.d.Budget.SetLastFailure(is.ID, sig)
 	o.persist()
 	// The category alone does not tell a person what to fix.
 	o.d.Log.Warn("attempt failed", "issue", is.Identifier, "attempt", attempt, "category", category, "detail", message)
-	if n >= o.cfg.Budget.MaxFailureAttempts {
-		o.block(ctx, is, category, blockDetail(message, feedback), 0)
+	switch {
+	case n >= o.cfg.Budget.MaxFailureAttempts:
+		o.block(ctx, is, category, detail, 0)
+		return
+	case repeated:
+		o.block(ctx, is, repeatedPrefix+category, detail, 0)
+		return
+	}
+	if over := o.overTicketTokens(is.ID, 0); over != "" {
+		o.block(ctx, is, "token_limit", over+"\n\nLast error: "+detail, 0)
 		return
 	}
 	o.schedule(&RetryEntry{IssueID: is.ID, Identifier: is.Identifier, Attempt: attempt + 1,
@@ -1340,7 +1403,16 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 // and saying "repeated failures" for them sends a person looking for
 // failures that did not happen.
 func (o *Orchestrator) blockLead(reason string) string {
+	if c, ok := strings.CutPrefix(reason, repeatedPrefix); ok {
+		return "Blocked: two attempts in a row failed the same way (`" + safeCategory(c) + "`), " +
+			"so another attempt would most likely fail again. The error is below. " +
+			"Set `budget.block_repeated_failure: false` in the settings file to keep retrying instead."
+	}
 	switch reason {
+	case "token_limit":
+		return "Blocked: the ticket reached a token limit (`token_limit`), so the attempt was stopped. " +
+			"The numbers are below. A ticket this large is usually better split into smaller ones; " +
+			"`maestro settings set budget.max_tokens_per_attempt` or `budget.max_tokens_per_ticket` raises the limits."
 	case "checks_timeout":
 		return fmt.Sprintf("Blocked: the checks on the pull request did not finish within %d minutes "+
 			"(`checks_timeout`; `maestro settings set publish.checks_timeout_ms` changes the limit). The list below says which checks it waited for. "+
@@ -1360,6 +1432,35 @@ func (o *Orchestrator) blockLead(reason string) string {
 		return "Blocked: the pull request was closed before its checks passed (`pull_request_closed`)."
 	}
 	return "Blocked after repeated failures. Last error: `" + safeCategory(reason) + "`."
+}
+
+// repeatedPrefix marks a block reason that is a second failure the same
+// way; the category of the failure follows it.
+const repeatedPrefix = "repeated:"
+
+// failureSignature is what two failures must share to count as the same:
+// the category and the error text, with numbers taken out so that a
+// duration, a time or a count does not make them differ. A failure without
+// text has no signature, since nothing shows that it was the same.
+func failureSignature(category, detail string) string {
+	if strings.TrimSpace(detail) == "" {
+		return ""
+	}
+	var b strings.Builder
+	digit := false
+	for _, r := range strings.Join(strings.Fields(detail), " ") {
+		if r >= '0' && r <= '9' {
+			if !digit {
+				b.WriteByte('#')
+			}
+			digit = true
+			continue
+		}
+		digit = false
+		b.WriteRune(r)
+	}
+	sum := sha256.Sum256([]byte(category + "\x00" + b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // blockDetail is what the blocked comment shows under the category, so a
