@@ -1313,8 +1313,7 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 	}
 	o.d.Budget.MarkBlocked(is.ID, o.now())
 	o.persist()
-	text := "Blocked after repeated failures. Last error: `" + safeCategory(reason) +
-		"`. Move the card back to an active state to retry with a fresh budget."
+	text := o.blockLead(reason) + " Move the card back to an active state to retry with a fresh budget."
 	o.comment(ctx, is, text, detail)
 	// The status comment is edited in place, so it stays where it was
 	// first posted and the edit notifies no one. The reason also goes in a
@@ -1331,6 +1330,27 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 		}
 	}
 	o.release(is.ID)
+}
+
+// blockLead says why a ticket was blocked. Most reasons are the last of
+// several failed attempts; the ones the pull request watch gives are not,
+// and saying "repeated failures" for them sends a person looking for
+// failures that did not happen.
+func (o *Orchestrator) blockLead(reason string) string {
+	switch reason {
+	case "checks_timeout":
+		return fmt.Sprintf("Blocked: the checks on the pull request did not finish within %d minutes "+
+			"(`checks_timeout`, set by `publish.checks_timeout_ms`). The list below says which checks it waited for. "+
+			"A check that never started usually means the CI workflow did not run for this branch, "+
+			"or a required check's name does not match the job's name.",
+			o.cfg.Publish.ChecksTimeoutMS/60000)
+	case "foreign_push":
+		return "Blocked: someone else pushed to the pull request's branch (`foreign_push`), " +
+			"so what the service checked is not what is there now."
+	case "pull_request_closed":
+		return "Blocked: the pull request was closed before its checks passed (`pull_request_closed`)."
+	}
+	return "Blocked after repeated failures. Last error: `" + safeCategory(reason) + "`."
 }
 
 // blockDetail is what the blocked comment shows under the category, so a

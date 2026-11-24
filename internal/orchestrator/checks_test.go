@@ -141,7 +141,8 @@ func TestForeignPushAndClosedPullRequestBlock(t *testing.T) {
 }
 
 func TestChecksDeadline(t *testing.T) {
-	e, _ := published(t)
+	e, c := published(t)
+	c.status = CheckStatus{State: ChecksPending, Detail: "1 of 2 check(s) not finished:\nunity-build: not started"}
 	e.clock.advance(29 * time.Minute)
 	e.tick()
 	if lastState(e) != "In Progress" {
@@ -152,8 +153,18 @@ func TestChecksDeadline(t *testing.T) {
 	if lastState(e) != "Blocked" || len(e.o.awaiting) != 0 {
 		t.Fatalf("state %s", lastState(e))
 	}
+	// The comment says the checks did not finish, and which; not that
+	// attempts failed again and again.
+	var said strings.Builder
+	for _, w := range e.tr.Writes() {
+		said.WriteString(w.Value + "\n")
+	}
+	if !strings.Contains(said.String(), "did not finish within") || !strings.Contains(said.String(), "unity-build: not started") ||
+		strings.Contains(said.String(), "repeated failures") {
+		t.Errorf("the blocked comment:\n%s", said.String())
+	}
 	// An API that keeps failing must not hold the ticket forever either.
-	e, c := published(t)
+	e, c = published(t)
 	c.err = errors.New("api down")
 	e.tick()
 	if lastState(e) != "In Progress" || len(e.o.awaiting) != 1 {

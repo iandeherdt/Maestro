@@ -318,7 +318,7 @@ Then watch the card move:
 | In Progress | An agent is working on it |
 | Human Review | A pull request is open and its checks passed (or you told setup there are none). Your turn. |
 | Rework | You asked for changes. The service moves the card here by itself when you comment on the pull request, then on to In Progress. You can also write a comment on the issue and move the card here yourself. The agent continues on the same branch and is given your comments. See [Asking for changes](#asking-for-changes). |
-| Blocked | The service gave up after repeated failures. The status comment on the issue says why. |
+| Blocked | The service stopped: after repeated failures, or when the pull request's checks did not finish in time. A comment at the bottom of the ticket says why. |
 | Done | The pull request was merged. |
 
 ### Asking for changes

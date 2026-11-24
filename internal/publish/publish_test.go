@@ -562,6 +562,21 @@ func TestCheckStates(t *testing.T) {
 	}
 }
 
+func TestPendingChecksAreNamed(t *testing.T) {
+	c, p := newCI(t)
+	c.runs = []map[string]any{run("test", "completed", "success"), run("build", "in_progress", "")}
+	p.Config().Publish.RequiredChecks = []string{"build", "deploy-preview", "test"}
+	st, err := p.Check(ctx, record)
+	if err != nil || st.Detail != "2 of 3 check(s) not finished:\nbuild: still running\ndeploy-preview: not started" {
+		t.Errorf("detail %q, error %v", st.Detail, err)
+	}
+	c.runs = nil
+	p.Config().Publish.RequiredChecks = nil
+	if st, _ := p.Check(ctx, record); st.Detail != "no check has started on the pull request" {
+		t.Errorf("nothing reported: %q", st.Detail)
+	}
+}
+
 func TestCheckWithoutChecksPassesButStillWatchesThePullRequest(t *testing.T) {
 	c, p := newCI(t)
 	p.Config().Publish.NoChecks = true

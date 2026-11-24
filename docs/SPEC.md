@@ -2034,7 +2034,9 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
 6. Any required check failed: pass each failed check's name and report to the agent as feedback
    with source `ci`, and schedule a `gate` retry with category `checks_failed`.
 7. Deadline passed, including when the checks could not be read until then: set the issue to the
-   blocked state with `checks_timeout`.
+   blocked state with `checks_timeout`. The blocked comment says that the checks did not finish
+   in time, not that attempts failed, and lists the checks still waited for, each `not started`
+   or `still running`.
 8. Still pending with not a single check reported for the commit, 10 minutes after publishing:
    update the status comment once to say so, with the deadline and the `required_checks: none`
    setting for a repository without CI. Nothing else changes; no check is still not a pass.
