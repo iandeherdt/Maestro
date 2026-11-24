@@ -522,8 +522,8 @@ func TestUnitOnAnOlderSystemd(t *testing.T) {
 		serviceType string
 	}{
 		{239, []string{"ProtectKernelTunables=yes", "SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg", "NoNewPrivileges=yes"},
-			[]string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill"}, "simple"},
-		{252, []string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill"},
+			[]string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill", "LockPersonality=yes"}, "simple"},
+		{252, []string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill", "LockPersonality=yes"},
 			[]string{"SystemCallFilter=~syslog"}, "exec"},
 		{0, []string{"ProtectKernelLogs=yes", "OOMPolicy=kill"}, nil, "exec"},
 	} {
