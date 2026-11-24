@@ -110,7 +110,7 @@ func TestAgentStepUnit(t *testing.T) {
 	}
 	for _, want := range []string{
 		"User=maestro-agent", "NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict", "ProtectHome=tmpfs",
-		"PrivateNetwork=yes", "IPAddressDeny=any", "RestrictNamespaces=yes", "UMask=0077", "KillMode=control-group",
+		"SystemCallFilter=@system-service", "SystemCallErrorNumber=ENOSYS", "PrivateNetwork=yes", "IPAddressDeny=any", "RestrictNamespaces=yes", "UMask=0077", "KillMode=control-group",
 		"MemoryMax=4G", "CPUQuota=200%", "TasksMax=512", "RuntimeMaxSec=2",
 		"BindPaths=" + l.Cfg.workspace("GH-12") + ":/workspace",
 		"BindPaths=" + l.Cfg.ClaudeState + ":/claude",
@@ -521,7 +521,7 @@ func TestUnitOnAnOlderSystemd(t *testing.T) {
 		has, hasNot []string
 		serviceType string
 	}{
-		{239, []string{"ProtectKernelTunables=yes", "SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg", "NoNewPrivileges=yes"},
+		{239, []string{"ProtectKernelTunables=yes", "SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg", "NoNewPrivileges=yes", "SystemCallErrorNumber=ENOSYS"},
 			[]string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill", "LockPersonality=yes"}, "simple"},
 		{252, []string{"ProtectKernelLogs=yes", "ProtectClock=yes", "ProtectHostname=yes", "RestrictSUIDSGID=yes", "OOMPolicy=kill", "LockPersonality=yes"},
 			[]string{"SystemCallFilter=~syslog"}, "exec"},

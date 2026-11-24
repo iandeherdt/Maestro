@@ -126,6 +126,13 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 		"RestrictSUIDSGID=yes", "LockPersonality=yes", "RestrictRealtime=yes",
 		"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
 		"SystemCallFilter=@system-service", "SystemCallArchitectures=native",
+		// A call outside the filter fails with ENOSYS instead of killing the
+		// step. The call is refused either way; ENOSYS is what a program
+		// takes as "this kernel has no such call" and falls back from. An
+		// older systemd's @system-service lacks newer calls such as rseq,
+		// clone3 and close_range, which glibc and Node.js try first: with
+		// the default the step was killed with SIGSYS (systemd 239).
+		"SystemCallErrorNumber=ENOSYS",
 		"UMask=0077", "KillMode=control-group", "OOMPolicy=kill",
 		"MemorySwapMax=0",
 	)
