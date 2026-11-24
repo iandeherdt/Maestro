@@ -73,6 +73,7 @@ type Adapter struct {
 	required     []string
 	firstActive  string
 	terminal     string
+	done         string            // normalized done state; writing it rechecks blockers
 	handoff      string            // normalized
 	ownedStates  map[string]string // normalized -> configured name
 	authors      map[string]bool
@@ -84,6 +85,7 @@ type Adapter struct {
 	numbers map[string]int       // node id -> issue number
 	cache   map[int]*cachedIssue // issue number -> derived facts
 	written map[int]time.Time    // issue number -> last state write
+	waiting map[int]string       // issue number -> open blockers last logged
 }
 
 type cachedIssue struct {
@@ -221,11 +223,13 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 		required:    cfg.Tracker.RequiredLabels,
 		firstActive: norm(cfg.Tracker.ActiveStates[0]),
 		terminal:    cfg.Tracker.TerminalStates[0],
+		done:        norm(cfg.Tracker.DoneState),
 		handoff:     norm(cfg.Tracker.HandoffState),
 		authors:     loginSet(cfg.Tracker.AllowedAuthors),
 		commenters:  loginSet(cfg.Tracker.AllowedCommenters),
 		ownedStates: map[string]string{},
 		numbers:     map[string]int{}, cache: map[int]*cachedIssue{}, written: map[int]time.Time{},
+		waiting: map[int]string{},
 	}
 	// The states the orchestrator itself writes (SPEC 7.3).
 	for _, s := range []string{cfg.Tracker.InProgressState, cfg.Tracker.HandoffState, cfg.Tracker.BlockedState,
@@ -532,13 +536,50 @@ func (a *Adapter) normalize(ctx context.Context, gi ghIssue, on *card) (issue.Is
 	is.BlockedBy = blockers
 	is.Dispatchable = approved
 	if norm(is.State) == a.firstActive {
+		var open []string
 		for _, b := range blockers {
 			if b.State != "closed" {
 				is.Dispatchable = false
+				open = append(open, b.Identifier)
 			}
 		}
+		a.noteWaiting(gi.Number, is.Identifier, open)
 	}
 	return is, nil
+}
+
+// noteWaiting logs once which open issues a ticket waits for, so that a
+// ticket that is not picked up says why, and once when it no longer waits.
+func (a *Adapter) noteWaiting(n int, id string, open []string) {
+	now := strings.Join(open, ", ")
+	a.mu.Lock()
+	was := a.waiting[n]
+	if now == "" {
+		delete(a.waiting, n)
+	} else {
+		a.waiting[n] = now
+	}
+	a.mu.Unlock()
+	switch {
+	case now == was:
+	case now == "":
+		a.log.Info("ticket no longer waits for another issue", "issue", id)
+	default:
+		a.log.Info("ticket waits for an open issue before it is picked up", "issue", id, "waits_for", now)
+	}
+}
+
+// recheckBlockers forgets every cached blocker list. It is called when the
+// service moves a ticket to done: the tickets that wait for it are then
+// checked again on the next poll instead of after blockerTTL.
+func (a *Adapter) recheckBlockers() {
+	a.mu.Lock()
+	for n, c := range a.cache {
+		fresh := *c // a copy: derived reads the old entry without the lock
+		fresh.blockersAt = time.Time{}
+		a.cache[n] = &fresh
+	}
+	a.mu.Unlock()
 }
 
 // derived returns the approval provenance and the blockers of an issue. The
@@ -687,6 +728,9 @@ func (a *Adapter) SetState(ctx context.Context, is issue.Issue, state string) er
 	a.mu.Lock()
 	a.written[n] = a.now() // recorded first: a write that fails half way still changed labels
 	a.mu.Unlock()
+	if a.done != "" && norm(state) == a.done {
+		defer a.recheckBlockers()
+	}
 	if a.board != nil {
 		return a.moveCard(ctx, is, on, state)
 	}
