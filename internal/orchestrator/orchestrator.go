@@ -865,7 +865,7 @@ func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt in
 	// The category alone does not tell a person what to fix.
 	o.d.Log.Warn("attempt failed", "issue", is.Identifier, "attempt", attempt, "category", category, "detail", message)
 	if n >= o.cfg.Budget.MaxFailureAttempts {
-		o.block(ctx, is, category, message, 0)
+		o.block(ctx, is, category, blockDetail(message, feedback), 0)
 		return
 	}
 	o.schedule(&RetryEntry{IssueID: is.ID, Identifier: is.Identifier, Attempt: attempt + 1,
@@ -1295,6 +1295,30 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 	o.comment(ctx, is, "Blocked after repeated failures. Last error: `"+safeCategory(reason)+
 		"`. Move the card back to an active state to retry with a fresh budget.", detail)
 	o.release(is.ID)
+}
+
+// blockDetail is what the blocked comment shows under the category, so a
+// person can see what to fix without the service's log. A rejection by a
+// gate carries its reason in the feedback (the end of the verify output, a
+// failed check), not in the message. A long text keeps its end: an agent's
+// report ends with the reason it stopped, and a check's output with the
+// error.
+func blockDetail(message string, feedback []issue.Feedback) string {
+	text := strings.TrimSpace(message)
+	if text == "" {
+		parts := make([]string, 0, len(feedback))
+		for _, f := range feedback {
+			if b := strings.TrimSpace(f.Body); b != "" {
+				parts = append(parts, b)
+			}
+		}
+		text = strings.Join(parts, "\n\n")
+	}
+	r := []rune(text)
+	if len(r) > tracker.MaxUntrustedChars-1 {
+		text = "…" + string(r[len(r)-(tracker.MaxUntrustedChars-1):])
+	}
+	return text
 }
 
 // safeCategory keeps only the characters of an error category, so that a

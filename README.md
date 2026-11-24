@@ -499,8 +499,10 @@ maestro service uninstall   # back to running it by hand
 It shows the file it will write and asks before it does. The background service runs as you, and
 the agent still works in Docker, so Docker has to be running.
 
-A ticket that failed `budget.max_failure_attempts` times in a row is moved to Blocked, with the
-reason in a comment. To give it another chance with a fresh count, either drag its card back to
+A ticket that failed `budget.max_failure_attempts` times in a row is moved to Blocked. The status
+comment on the ticket (the service edits that one comment rather than adding new ones) then gives
+the last error and, under it, why: the end of the agent's report when the agent gave up, or the end
+of the check's output when the check kept failing. To give it another chance with a fresh count, either drag its card back to
 Todo (or put `status:todo` back on it), or:
 
 ```sh
