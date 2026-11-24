@@ -1189,7 +1189,16 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, is issue.Issue, rec 
 	attempt := o.awaitAttempt[is.ID]
 	o.dropAwaiting(is.ID)
 	o.comment(ctx, is, fmt.Sprintf("Pull request #%d conflicts with its base branch. An agent resolves the conflicts.", rec.PRNumber), "")
-	o.failIssue(ctx, is, attempt, KindGate, "merge_conflict", "", []issue.Feedback{{Source: "ci", Body: conflictFeedback}})
+	// The commit is named so that a conflict on a later commit is not taken
+	// for the same failure twice (budget.block_repeated_failure): the agent
+	// resolved the first one, and other work was merged again since.
+	head := rec.HeadSHA
+	if len(head) > 12 {
+		head = head[:12]
+	}
+	o.failIssue(ctx, is, attempt, KindGate, "merge_conflict",
+		fmt.Sprintf("Pull request #%d conflicts with its base branch at commit %s.", rec.PRNumber, head),
+		[]issue.Feedback{{Source: "ci", Body: conflictFeedback}})
 }
 
 // noChecksAfter is how long after publishing a pull request with no check

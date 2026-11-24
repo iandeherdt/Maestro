@@ -334,3 +334,32 @@ func TestAMergeBringsAWaitingPullRequestUpToDate(t *testing.T) {
 		t.Fatal("update_branches is off, and an update was noted")
 	}
 }
+
+// A second conflict after the agent resolved the first is a new failure,
+// not the same one twice. The same commit conflicting again is.
+func TestASecondConflictIsNotARepeatedFailure(t *testing.T) {
+	conflictAt := func(e *env, c *fakeChecks, head string) {
+		e.exit(Outcome{Kind: Published, Publish: &PublishRecord{IssueID: "id-1", Identifier: "GH-1", PRNumber: 7,
+			HeadSHA: head, ChecksDeadline: e.clock.Now().Add(30 * time.Minute)}})
+		c.status = CheckStatus{State: ChecksConflict}
+		e.clock.advance(61 * time.Second)
+		e.tick()
+	}
+	e, c := published(t)
+	e.cfg.Budget.BlockRepeatedFailure = true
+	e.cfg.Budget.MaxFailureAttempts = 10
+	c.status = CheckStatus{State: ChecksConflict}
+	e.tick()
+	e.after(time.Second)
+	e.wantStarts(2)
+	conflictAt(e, c, "bcdefabcdefabcdefabcdefabcdefabcdefabcdef")
+	if lastState(e) == "Blocked" {
+		t.Fatalf("a conflict on a new commit blocked the ticket: %s", comments(e))
+	}
+	e.after(time.Minute)
+	e.wantStarts(3)
+	conflictAt(e, c, "bcdefabcdefabcdefabcdefabcdefabcdefabcdef")
+	if lastState(e) != "Blocked" {
+		t.Fatalf("the same commit conflicting twice did not block: %s", lastState(e))
+	}
+}
