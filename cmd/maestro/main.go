@@ -86,6 +86,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runUnity(args[1:], os.Stdin, stdout, stderr)
 		case "linear":
 			return runLinear(args[1:], os.Stdin, stdout, stderr)
+		case "gitlab":
+			return runGitLab(args[1:], os.Stdin, stdout, stderr)
+		case "gitea":
+			return runGitea(args[1:], os.Stdin, stdout, stderr)
 		case "mcp":
 			return runMCP(args[1:], os.Stdin, stdout, stderr)
 		case "assistant":
@@ -250,11 +254,23 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	port := fs.Int("port", setup.DefaultPort, "loopback port used while creating the GitHub App")
 	board := fs.String("board", "", "where the tickets are kept: github or linear (asked when not given)")
 	sandboxKind := fs.String("sandbox", "", "where the steps run: container (Docker or Podman, the default) or systemd (Linux)")
+	hostKind := fs.String("host", "", "where the code is: github (the default), gitlab, or gitea (also for Forgejo)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return 2
 	}
 	if *board != "" && *board != setup.TrackerGitHub && *board != setup.TrackerLinear {
 		fmt.Fprintln(stderr, "--board is github or linear")
+		return 2
+	}
+	if *hostKind == "forgejo" {
+		*hostKind = setup.HostGitea
+	}
+	if *hostKind != "" && *hostKind != setup.HostGitHub && *hostKind != setup.HostGitLab && *hostKind != setup.HostGitea {
+		fmt.Fprintln(stderr, "--host is github, gitlab or gitea (also for Forgejo)")
+		return 2
+	}
+	if *hostKind != "" && *hostKind != setup.HostGitHub && *board == setup.TrackerGitHub {
+		fmt.Fprintln(stderr, "with the code off GitHub, the tickets are kept in Linear: --board linear")
 		return 2
 	}
 	if *dir == "" {
@@ -284,6 +300,16 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	if *hostKind != "" {
+		if err := setup.SwitchHost(st, *hostKind); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	if *board == setup.TrackerGitHub && st.OffGitHub() {
+		fmt.Fprintln(stderr, "the code is on "+st.HostLabel()+", so the tickets are kept in Linear. For GitHub's board: --host github")
+		return 2
+	}
 	if *board != "" {
 		kept, err := setup.SwitchTracker(st, *board)
 		if err != nil {
@@ -306,6 +332,8 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Sprintf("State and the App key are kept in %s", abs))
 	steps := []setup.Step{
 		&setup.Machine{Dir: abs},
+		&setup.GitLabProject{AskToken: func(ui *setup.UI, prompt string) (string, error) { return askSecret(ui.In, stdin, ui.Out, prompt) }},
+		&setup.GiteaRepo{AskToken: func(ui *setup.UI, prompt string) (string, error) { return askSecret(ui.In, stdin, ui.Out, prompt) }},
 		&setup.CreateApp{Port: *port},
 		&setup.InstallApp{},
 		&setup.Tickets{Linear: setup.LinearBoard{Endpoint: linearEndpoint,
@@ -352,7 +380,11 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case st.OnBoard():
 		tickets, pickup = "the board", "cards in the Todo column whose Worker is "+st.Worker
 	}
-	ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
+	if st.OffGitHub() {
+		ui.Headline(true, fmt.Sprintf("Setup is finished: the token for %s on %s, %s and the settings file.", st.Repo, st.HostLabel(), tickets))
+	} else {
+		ui.Headline(true, fmt.Sprintf("Setup is finished: the GitHub App, its installation on %s, %s and the settings file.", st.Repo, tickets))
+	}
 	if st.Sandbox == setup.SandboxSystemd {
 		ui.Say("Two commands are left. Run them in this order:")
 		ui.Commands([][2]string{
@@ -370,10 +402,17 @@ func runSetup(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if st.UsesLinear() {
 		ui.Say("")
 		ui.Say("Working with Linear, once the service runs:")
+		where, change := "the pull request opens on GitHub", "pull request"
+		switch {
+		case st.UsesGitLab():
+			where, change = "the merge request opens on GitLab", "merge request"
+		case st.UsesGitea():
+			where = "the pull request opens on " + st.HostURL
+		}
 		ui.Commands([][2]string{
-			{"a ticket", "add the label run:" + st.Worker + " and move it to Todo; the pull request opens on GitHub"},
+			{"a ticket", "add the label run:" + st.Worker + " and move it to Todo; " + where},
 			{"something bigger", "add the label and move it to Idea; answer the questions, then move it to Planned"},
-			{"your review", "comment on the pull request; the ticket goes to Rework and the agent continues"},
+			{"your review", "comment on the " + change + "; the ticket goes to Rework and the agent continues"},
 		})
 		ui.Say("Only your own moves count as approval (%s). `%s` checks the team at any time.", st.LinearAuthor, mention("maestro doctor"))
 	}

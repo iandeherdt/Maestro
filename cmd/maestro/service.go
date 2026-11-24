@@ -30,7 +30,6 @@ import (
 	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/gate"
-	"github.com/iandeherdt/Maestro/internal/ghapp"
 	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"github.com/iandeherdt/Maestro/internal/httpapi"
 	"github.com/iandeherdt/Maestro/internal/issue"
@@ -140,7 +139,20 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	if err != nil {
 		return nil, err
 	}
-	if st.AppID == "" || st.AppKeyFile == "" || st.InstallationID == "" || st.AppSlug == "" {
+	if in.cfg.Workspace.Host != st.HostName() {
+		return nil, explain("setup was done for the code on %s, but %s says `workspace.host: %s`. Run `maestro setup --host %s`.",
+			st.HostName(), in.path, in.cfg.Workspace.Host, in.cfg.Workspace.Host)
+	}
+	switch {
+	case st.UsesGitLab():
+		if st.GitLabBot == "" || st.GitLabProject <= 0 {
+			return nil, explain("the GitLab project is not set up in %s. Run `maestro setup --host gitlab` first.", dir)
+		}
+	case st.UsesGitea():
+		if st.GiteaBot == "" || st.HostURL == "" {
+			return nil, explain("the Gitea repository is not set up in %s. Run `maestro setup --host gitea` first.", dir)
+		}
+	case st.AppID == "" || st.AppKeyFile == "" || st.InstallationID == "" || st.AppSlug == "":
 		return nil, explain("the GitHub App is not set up in %s. Run `maestro setup` first.", dir)
 	}
 	if !strings.EqualFold(st.Repo, in.cfg.Workspace.Repo) {
@@ -155,6 +167,12 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 	in.auditDir = filepath.Join(stateDir, "audit")
 	in.handoffDir = filepath.Join(in.cfg.Workspace.Root, ".handoff")
 	bot := st.AppSlug + "[bot]"
+	switch {
+	case st.UsesGitLab():
+		bot = st.GitLabBot
+	case st.UsesGitea():
+		bot = st.GiteaBot
+	}
 	in.dir = dir
 	in.skills = skills.Store{Dir: filepath.Join(dir, "agent-files")}
 	if err := in.skills.Ensure(); err != nil {
@@ -182,7 +200,7 @@ func open(dir, explicit string, log *slog.Logger) (*install, error) {
 		Worker: in.cfg.Worker.Name, Image: in.cfg.Sandbox.Image,
 		MirrorDir: in.mirrorDir, HandoffDir: in.handoffDir,
 		Memory: strings.ToLower(in.cfg.Sandbox.MemoryMax), CPUs: cpus(in.cfg.Sandbox.CPUQuota), PIDs: in.cfg.Sandbox.TasksMax,
-		BotName: bot, BotEmail: bot + "@users.noreply.github.com",
+		BotName: bot, BotEmail: in.botEmail(),
 	}
 	// The checks get the Unity licence when the unity pack is on and there
 	// is one (`maestro unity activate`). The agent's own step never does.
@@ -608,37 +626,14 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if _, err := exec.LookPath("git"); err != nil {
 		return explain("the `git` command was not found on this machine. Install git and try again.")
 	}
-	app, err := ghapp.New(ghapp.Config{AppID: in.state.AppID, InstallationID: in.state.InstallationID,
-		KeyFile: in.state.AppKeyFile, APIURL: gh.api})
+	cs, err := in.codeSide(ctx, gh, log)
 	if err != nil {
 		return err
 	}
-	_, name, _ := strings.Cut(cfg.Workspace.Repo, "/")
-	// One token for the tickets, one for the code, each limited to this
-	// repository and to what it is used for.
-	ticketRights := map[string]string{"issues": "write"}
-	onBoard := cfg.Tracker.Provider["state_source"] == "project"
-	if onBoard {
-		// Moving a card needs the organization's Projects permission.
-		ticketRights["organization_projects"] = "write"
-	}
-	tickets, err := app.Source(ghapp.Scope{Repositories: []string{name}, Permissions: ticketRights})
-	if err != nil {
-		return err
-	}
-	code, err := app.Source(ghapp.Scope{Repositories: []string{name}, Permissions: map[string]string{
-		"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"}})
-	if err != nil {
-		return err
-	}
-	token, err := code.Token(ctx)
-	if err != nil {
-		return explain("GitHub did not give the App a token for %s: %v\nRun `maestro setup` to check the App and its installation.",
-			cfg.Workspace.Repo, err)
-	}
+	code, tickets, onBoard := cs.code, cs.tickets, cs.onBoard
 	base := cfg.Workspace.BaseBranch
 	if base == "" {
-		if base, err = defaultBranch(ctx, gh.api, cfg.Workspace.Repo, token); err != nil {
+		if base, err = cs.defaultBranch(ctx); err != nil {
 			return err
 		}
 	}
@@ -677,7 +672,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 
 	mir := &mirror.Mirror{Dir: in.mirrorDir, OwnerUID: -1, MaxBundleBytes: cfg.Publish.MaxBundleBytes, AllowFileRemote: gh.fileRemote}
-	remote := gh.git + "/" + cfg.Workspace.Repo + ".git"
+	remote := cs.remote
 	syncMirror := func(ctx context.Context) error {
 		t, err := code.Token(ctx)
 		if err != nil {
@@ -690,7 +685,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	if !mir.HasBranch(ctx, base) {
 		return explain("%s has no branch %q yet. An empty repository gives the agent nothing to start from.\n"+
-			"Add a first commit on github.com (the \"Add a README\" button does it), then run `maestro run` again.",
+			"Add a first commit there (a README is enough), then run `maestro run` again.",
 			cfg.Workspace.Repo, base)
 	}
 
@@ -737,13 +732,16 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		HeldSecrets: func() []string {
 			// The Unity licence reaches code the agent wrote, in the checks:
 			// it may not leave in a commit.
-			held := append([]string{tickets.Current(), code.Current()}, unityStore(in.dir).Secrets()...)
+			held := append([]string{code.Current()}, unityStore(in.dir).Secrets()...)
+			if tickets != nil {
+				held = append(held, tickets.Current())
+			}
 			if linearKey != "" {
 				held = append(held, linearKey)
 			}
 			return held
 		},
-		BotName: in.bot, BotEmail: in.bot + "@users.noreply.github.com", BotLogin: in.bot,
+		BotName: in.bot, BotEmail: in.botEmail(), BotLogin: in.bot,
 		APIURL: gh.api, GitURL: gh.git,
 	}
 	spaces := workspace.New(cur.config(), in.box, log)
@@ -843,16 +841,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		}
 		fmt.Fprintf(stdout, "The agents have these extra skills and agent files: %s (maestro skills)\n", strings.Join(names, ", "))
 	}
-	// GitHub lets the App's key do more than the service ever does.
-	if t, err := code.Token(ctx); err == nil {
-		switch guarded, err := baseGuarded(ctx, gh.api, cfg.Workspace.Repo, base, t); {
-		case err != nil:
-			log.Warn("whether GitHub requires a pull request for the base branch could not be read", "branch", base, "error", err)
-		case !guarded:
-			log.Warn("GitHub does not require a pull request for the base branch; the service's key could push to it", "branch", base)
-			fmt.Fprint(stdout, unguardedNote(gh.git, cfg.Workspace.Repo, base))
-		}
-	}
+	cs.guard(ctx, base, stdout)
 	fmt.Fprintf(stdout, "From another terminal: %s, %s, %s.\n", mention("maestro status"), mention("maestro pause"), mention("maestro resume"))
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")

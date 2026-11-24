@@ -3,10 +3,8 @@ package publish
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -72,7 +70,7 @@ func capped(s string) string {
 // thread reads the conversation, the comments on lines and the review
 // summaries of a pull request. It reports false when one of the lists was
 // too long to read whole.
-func (p *Publisher) thread(ctx context.Context, a *api, prefix string, number int, reviews []listedReview) (thread, bool, error) {
+func (p *Publisher) thread(ctx context.Context, h host, number int, reviews []prReview) (thread, bool, error) {
 	var t thread
 	cfg := p.Config()
 	add := func(login, when, body, path string, line int) {
@@ -83,65 +81,25 @@ func (p *Publisher) thread(ctx context.Context, a *api, prefix string, number in
 		}
 		t.notes = append(t.notes, note{at, issue.Feedback{Source: "review", Author: login, Body: body, Path: path, Line: line}})
 	}
-	n := strconv.Itoa(number)
-
-	type user struct {
-		Login string `json:"login"`
-	}
-	talk, complete, err := listAll[struct {
-		Body      string `json:"body"`
-		CreatedAt string `json:"created_at"`
-		User      user   `json:"user"`
-	}](ctx, a, prefix+"/issues/"+n+"/comments")
+	list, complete, err := h.comments(ctx, number, reviews)
 	if err != nil || !complete {
 		return t, false, err
 	}
-	for _, c := range talk {
+	for _, c := range list {
 		// Only the service's own comments can carry a mark.
-		if strings.EqualFold(c.User.Login, p.BotLogin) {
-			if m := markRE.FindStringSubmatch(c.Body); m != nil {
+		if strings.EqualFold(c.Login, p.BotLogin) {
+			if m := markRE.FindStringSubmatch(c.Body); m != nil && c.Path == "" {
 				if at, err := time.Parse(time.RFC3339, m[1]); err == nil {
 					t.marks = append(t.marks, at)
 				}
 			}
 			continue
 		}
-		add(c.User.Login, c.CreatedAt, c.Body, "", 0)
-	}
-
-	inline, complete, err := listAll[struct {
-		Body         string `json:"body"`
-		CreatedAt    string `json:"created_at"`
-		Path         string `json:"path"`
-		Line         int    `json:"line"`
-		OriginalLine int    `json:"original_line"`
-		ReviewID     int64  `json:"pull_request_review_id"`
-		User         user   `json:"user"`
-	}](ctx, a, prefix+"/pulls/"+n+"/comments")
-	if err != nil || !complete {
-		return t, false, err
-	}
-	// A comment on a line is written while a review is still a draft, and
-	// nobody sees it until the review is submitted. It counts from then:
-	// otherwise a mark set in between would hide it for good.
-	submitted := map[int64]string{}
-	for _, r := range reviews {
-		submitted[r.ID] = r.SubmittedAt
-	}
-	for _, c := range inline {
-		line := c.Line
-		if line == 0 {
-			line = c.OriginalLine
-		}
-		when := c.CreatedAt
-		if s := submitted[c.ReviewID]; c.ReviewID != 0 && s > when {
-			when = s // both are UTC in the same format, so they compare as text
-		}
-		add(c.User.Login, when, c.Body, c.Path, line)
+		add(c.Login, c.At, c.Body, c.Path, c.Line)
 	}
 	for _, r := range reviews {
-		if r.State != "PENDING" {
-			add(r.User.Login, r.SubmittedAt, r.Body, "", 0)
+		if !r.Pending {
+			add(r.Login, r.At, r.Body, "", 0)
 		}
 	}
 
@@ -152,27 +110,27 @@ func (p *Publisher) thread(ctx context.Context, a *api, prefix string, number in
 
 // mark writes on the pull request that everything up to through was taken
 // up.
-func (p *Publisher) markTaken(ctx context.Context, a *api, prefix string, number, count int, through time.Time) error {
+func (p *Publisher) markTaken(ctx context.Context, h host, number, count int, through time.Time) error {
 	what := "the new comment"
 	if count > 1 {
 		what = fmt.Sprintf("the %d new comments", count)
 	}
 	body := fmt.Sprintf("Picking up %s on this pull request. The ticket is back in work, and the changes will arrive here as a new commit.\n\n"+
 		"<!-- maestro:feedback-through %s -->", what, through.UTC().Format(time.RFC3339))
-	return a.do(ctx, http.MethodPost, prefix+"/issues/"+strconv.Itoa(number)+"/comments", nil, map[string]string{"body": body}, nil)
+	return h.comment(ctx, number, body)
 }
 
 // Acknowledge records on the pull request that the comments up to
 // st.FeedbackThrough were taken up.
 func (p *Publisher) Acknowledge(ctx context.Context, is issue.Issue, st orchestrator.ReviewStatus) error {
-	a, prefix, err := p.repoAPI()
+	h, err := p.host()
 	if err != nil {
 		return err
 	}
 	if st.PRNumber <= 0 || st.FeedbackThrough.IsZero() {
 		return nil
 	}
-	return p.markTaken(ctx, a, prefix, st.PRNumber, st.FeedbackCount, st.FeedbackThrough)
+	return p.markTaken(ctx, h, st.PRNumber, st.FeedbackCount, st.FeedbackThrough)
 }
 
 // Feedback returns what the owner wrote on the ticket's open pull request
@@ -187,28 +145,28 @@ func (p *Publisher) Feedback(ctx context.Context, is issue.Issue) ([]issue.Feedb
 	if !p.commentsOn(p.Config()) {
 		return nil, nil
 	}
-	a, prefix, err := p.repoAPI()
+	h, err := p.host()
 	if err != nil {
 		return nil, err
 	}
-	pr, err := p.pull(ctx, a, prefix, is)
-	if err != nil || pr == nil || pr.MergedAt != "" || pr.State != "open" {
+	pr, err := p.pull(ctx, h, is)
+	if err != nil || pr == nil || pr.State != changeOpen {
 		return nil, err
 	}
-	reviews, complete, err := listAll[listedReview](ctx, a, prefix+"/pulls/"+strconv.Itoa(pr.Number)+"/reviews")
+	reviews, complete, err := h.reviews(ctx, pr.Number)
 	if err != nil || !complete {
 		return nil, err
 	}
-	t, complete, err := p.thread(ctx, a, prefix, pr.Number, reviews)
+	t, complete, err := p.thread(ctx, h, pr.Number, reviews)
 	if err != nil || !complete {
 		return nil, err
 	}
 	from := t.mark(1)
-	if len(t.marks) > 0 && p.committedAfter(ctx, a, prefix, pr.Head.SHA, t.mark(0)) {
+	if len(t.marks) > 0 && p.committedAfter(ctx, h, pr.HeadSHA, t.mark(0)) {
 		from = t.mark(0)
 	}
 	if fresh := t.after(t.mark(0)); len(fresh) > 0 {
-		if err := p.markTaken(ctx, a, prefix, pr.Number, len(fresh), fresh[len(fresh)-1].at); err != nil {
+		if err := p.markTaken(ctx, h, pr.Number, len(fresh), fresh[len(fresh)-1].at); err != nil {
 			return nil, err
 		}
 	}
@@ -226,20 +184,10 @@ func (p *Publisher) Feedback(ctx context.Context, is issue.Issue) ([]issue.Feedb
 // committedAfter reports whether the commit was made after at. When that
 // cannot be read the answer is no, which shows the agent a comment twice
 // rather than not at all.
-func (p *Publisher) committedAfter(ctx context.Context, a *api, prefix, sha string, at time.Time) bool {
+func (p *Publisher) committedAfter(ctx context.Context, h host, sha string, at time.Time) bool {
 	if !shaRE.MatchString(sha) {
 		return false
 	}
-	var c struct {
-		Commit struct {
-			Committer struct {
-				Date string `json:"date"`
-			} `json:"committer"`
-		} `json:"commit"`
-	}
-	if err := a.do(ctx, http.MethodGet, prefix+"/commits/"+sha, nil, nil, &c); err != nil {
-		return false
-	}
-	when, err := time.Parse(time.RFC3339, c.Commit.Committer.Date)
+	when, err := h.commitTime(ctx, sha)
 	return err == nil && when.After(at)
 }

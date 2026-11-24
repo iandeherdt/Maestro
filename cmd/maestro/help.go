@@ -39,7 +39,7 @@ const commonFlags = `Flags most commands take:
 var helpPages = []helpPage{
 	{
 		name: "setup", group: "Getting started",
-		usage:   "maestro setup [--board github|linear] [--sandbox container|systemd] [--dir DIR] [--port N]",
+		usage:   "maestro setup [--host github|gitlab|gitea] [--board github|linear] [--sandbox container|systemd] [--dir DIR] [--port N]",
 		summary: "guided installation, safe to run again",
 		body: `Walks through everything the service needs, one step at a time. Every step
 first checks whether it is already done, says what it will do, and waits for
@@ -49,9 +49,14 @@ also the way to change a choice made earlier.
 The steps:
   1. Check this machine: git, and Docker or Podman (or, with --sandbox
      systemd, systemd 239 or later, cgroup v2, sudo, Node 18 and npm).
-  2. Set up where tickets are approved: a GitHub board or Linear.
-  3. Create the service's GitHub App, on github.com, with one button.
-  4. Give the App access to the repository.
+  2. With --host gitlab: connect the GitLab project with a project access
+     token of its own (role Developer). With --host gitea: connect the
+     repository on Gitea or Forgejo with the token of an account of its own
+     (Write, not administrator).
+  3. Otherwise: create the service's GitHub App, on github.com, with one
+     button, and give it access to the repository.
+  4. Set up where tickets are approved: a GitHub board or Linear. With the
+     code on GitLab or Gitea, the tickets are in Linear.
   5. Create the labels, and the board or the Linear team.
   6. Write the workflow file, the settings the service runs with.
   7. With --sandbox systemd: install the Linux sandbox. The root script is
@@ -59,6 +64,9 @@ The steps:
   8. For a Unity project: set up Unity's checks.
 
 Flags:
+  --host github|gitlab|gitea
+        where the code is: GitHub (the default), GitLab (gitlab.com or your
+        own), or your own Gitea or Forgejo (gitea is for both)
   --board github|linear
         where the tickets are kept (asked when not given)
   --sandbox container|systemd
@@ -72,6 +80,8 @@ Flags:
 Examples:
   maestro setup
   maestro setup --board linear
+  maestro setup --host gitlab
+  maestro setup --host gitea
   maestro setup --sandbox systemd`,
 		see: []string{"image", "login", "doctor", "run"},
 	},
@@ -118,7 +128,7 @@ missing or expired. It works while the service is running.`,
 	{
 		name: "doctor", group: "Getting started",
 		usage:   "maestro doctor",
-		summary: "check this machine, the sandbox, GitHub and the board",
+		summary: "check this machine, the sandbox, the code host and the board",
 		body: `Checks everything the service depends on and says, for each problem, what to
 do about it. It changes nothing. It looks at:
   - this machine: git, Docker or Podman and its network backend, cgroups,
@@ -126,7 +136,9 @@ do about it. It changes nothing. It looks at:
   - the sandbox: the image, the Claude Code login, and a self-test that tries
     to get out of the sandbox for each network profile;
   - GitHub: the App, its rights on the repository and the base branch's
-    protection;
+    protection; or GitLab: the token, its role, when it expires and the
+    base branch's protection; or Gitea: the token, its account's rights and
+    the base branch's protection;
   - the board, the workflow file, and the background service.
 
 It exits with status 1 when a problem stops the service, and 0 otherwise,
@@ -274,6 +286,20 @@ each enforced by a tool in the service's verify step and in CI.
 		summary: "the Linear API key, when the board is Linear",
 		body:    strings.TrimPrefix(linearUsage, "usage:\n"),
 		see:     []string{"setup"},
+	},
+	{
+		name: "gitlab", group: "Projects, skills and rule packs",
+		usage:   "maestro gitlab\nmaestro gitlab token\nmaestro gitlab remove",
+		summary: "the GitLab token, when the code is on GitLab",
+		body:    strings.TrimPrefix(gitlabUsage, "usage:\n"),
+		see:     []string{"setup", "doctor"},
+	},
+	{
+		name: "gitea", group: "Projects, skills and rule packs",
+		usage:   "maestro gitea\nmaestro gitea token\nmaestro gitea remove",
+		summary: "the Gitea token, when the code is on Gitea or Forgejo",
+		body:    strings.TrimPrefix(giteaUsage, "usage:\n"),
+		see:     []string{"setup", "doctor"},
 	},
 	{
 		name: "update", group: "Keeping it up to date",

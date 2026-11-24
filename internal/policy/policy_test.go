@@ -73,6 +73,7 @@ func TestProtectedPathsAreDenied(t *testing.T) {
 		".github/workflows/ci.yml", ".GitHub/workflows/ci.yml", "sub/.github/x.yml", ".gitlab-ci.yml",
 		".gitmodules", ".gitattributes", "a/b/.gitattributes", ".git/config", "a/.git/hooks/pre-commit",
 		".circleci/config.yml", ".buildkite/pipeline.yml", "azure-pipelines.yml", "Jenkinsfile",
+		".gitea/workflows/ci.yml", ".forgejo/workflows/ci.yml", ".woodpecker/test.yml", ".woodpecker.yml", ".drone.yml",
 		".claude/settings.json", "pkg/.claude/settings.local.json", ".mcp.json", "pkg/.mcp.json",
 		"CODEOWNERS", "docs/CODEOWNERS", "WORKFLOW.md", "workflow.md", ".env", "svc/.env", "svc/.env.production",
 		"secrets/prod.yaml",

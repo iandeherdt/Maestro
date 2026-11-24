@@ -37,7 +37,7 @@ Your situation and limits:
 - Work only inside the current directory, which is a clone of the repository on a branch created for this task.
 - Commit your work to the current branch. Uncommitted changes are lost.
 - You cannot push, open pull requests or update the ticket, and you do not need to. The service does that after checking your commits.
-- Do not modify CI and automation configuration (for example .github/, .gitlab-ci.yml, .circleci/, Jenkinsfile), agent configuration (.claude/, .mcp.json), WORKFLOW.md, CODEOWNERS, .git* files other than .gitignore, or .env files. Do not add submodules, symbolic links or binary files. Commits that do are rejected as a whole.
+- Do not modify CI and automation configuration (for example .github/, .gitlab-ci.yml, .gitea/, .forgejo/, .circleci/, Jenkinsfile), agent configuration (.claude/, .mcp.json), WORKFLOW.md, CODEOWNERS, .git* files other than .gitignore, or .env files. Do not add submodules, symbolic links or binary files. Commits that do are rejected as a whole.
 - The service runs the repository's verification command on your commits. Work that fails it is not published.
 - End your final message with one line: "MAESTRO_STATUS: done", "MAESTRO_STATUS: continue" or "MAESTRO_STATUS: blocked", followed by one line giving the reason.`
 

@@ -1,15 +1,7 @@
 package publish
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -17,129 +9,9 @@ import (
 )
 
 const (
-	apiVersion    = "2022-11-28"
-	maxResponse   = 4 << 20
 	maxTitleRunes = 120
 	footer        = "Opened by Maestro. A person reviews and merges; the service never does."
 )
-
-// api is a minimal GitHub REST client for pull requests. The token goes
-// only to the configured origin and redirects are not followed.
-type api struct {
-	base  *url.URL
-	hc    *http.Client
-	token func(context.Context) (string, error)
-}
-
-type apiError struct {
-	Method, Path string
-	Status       int
-}
-
-func (e *apiError) Error() string {
-	return fmt.Sprintf("%s %s: status %d", e.Method, e.Path, e.Status)
-}
-
-func (a *api) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
-	u := *a.base
-	u.Path = strings.TrimSuffix(u.Path, "/") + path
-	u.RawQuery = query.Encode()
-	var rd io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		rd = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), rd)
-	if err != nil {
-		return err
-	}
-	tok, err := a.token(ctx)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", apiVersion)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := a.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// The response text is not passed on: it can quote request content.
-		return &apiError{Method: method, Path: path, Status: resp.StatusCode}
-	}
-	if out != nil {
-		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("%s %s: the response could not be read", method, path)
-		}
-	}
-	return nil
-}
-
-type pull struct {
-	Number int `json:"number"`
-	Head   struct {
-		Ref string `json:"ref"`
-	} `json:"head"`
-	Base struct {
-		Ref string `json:"ref"`
-	} `json:"base"`
-}
-
-// upsert creates the pull request for a branch or updates the open one.
-func (a *api) upsert(ctx context.Context, owner, repo, branch, base, title, body string, draft bool) (int, error) {
-	prefix := "/repos/" + owner + "/" + repo
-	if base == "" {
-		var r struct {
-			DefaultBranch string `json:"default_branch"`
-		}
-		if err := a.do(ctx, http.MethodGet, prefix, nil, nil, &r); err != nil {
-			return 0, err
-		}
-		if r.DefaultBranch == "" {
-			return 0, errors.New("the repository reports no default branch")
-		}
-		base = r.DefaultBranch
-	}
-	if base == branch {
-		return 0, errors.New("the head branch is the base branch")
-	}
-	var open []pull
-	q := url.Values{"head": {owner + ":" + branch}, "state": {"open"}, "per_page": {"10"}}
-	if err := a.do(ctx, http.MethodGet, prefix+"/pulls", q, nil, &open); err != nil {
-		return 0, err
-	}
-	for _, p := range open {
-		// The filter is by user and branch; confirm rather than assume.
-		if p.Head.Ref != branch || p.Number <= 0 {
-			continue
-		}
-		if p.Base.Ref != base {
-			return 0, fmt.Errorf("an open pull request for this branch targets %q instead of the base branch", clean(p.Base.Ref, 100))
-		}
-		err := a.do(ctx, http.MethodPatch, prefix+"/pulls/"+strconv.Itoa(p.Number), nil,
-			map[string]any{"title": title, "body": body}, nil)
-		return p.Number, err
-	}
-	var created pull
-	err := a.do(ctx, http.MethodPost, prefix+"/pulls", nil,
-		map[string]any{"title": title, "head": branch, "base": base, "body": body, "draft": draft}, &created)
-	if err != nil {
-		return 0, err
-	}
-	if created.Number <= 0 {
-		return 0, errors.New("the created pull request has no number")
-	}
-	return created.Number, nil
-}
 
 // clean removes control and invisible characters and caps the length.
 func clean(s string, max int) string {

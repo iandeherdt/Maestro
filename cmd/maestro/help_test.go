@@ -9,7 +9,7 @@ import (
 // Every command a person types has a help page.
 var typedCommands = []string{"setup", "new", "check", "image", "login", "run", "status", "dashboard",
 	"pause", "resume", "unblock", "doctor", "service", "conventions", "skills", "unity", "linear",
-	"assistant", "projects", "update", "version", "help"}
+	"assistant", "projects", "gitlab", "gitea", "update", "version", "help"}
 
 func TestEveryCommandHasAPage(t *testing.T) {
 	for _, name := range typedCommands {
@@ -59,7 +59,7 @@ func TestHelpPage(t *testing.T) {
 		if code := run(args, &out, &errOut); code != 0 {
 			t.Fatalf("%v: status %d: %s", args, code, errOut.String())
 		}
-		for _, want := range []string{"maestro setup:", "--board", "--sandbox", "--port", "--project NAME", "See also:"} {
+		for _, want := range []string{"maestro setup:", "--host", "--board", "--sandbox", "--port", "--project NAME", "See also:"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%v: the page lacks %q", args, want)
 			}

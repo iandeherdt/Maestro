@@ -119,9 +119,10 @@ func protected(path string) bool {
 		return true
 	}
 	switch segs[0] {
-	case ".circleci", ".buildkite":
+	case ".circleci", ".buildkite", ".forgejo", ".woodpecker":
+		// .gitea/ is covered by .git above.
 		return len(segs) > 1
-	case "azure-pipelines.yml", "jenkinsfile":
+	case "azure-pipelines.yml", "jenkinsfile", ".woodpecker.yml", ".woodpecker.yaml", ".drone.yml":
 		return len(segs) == 1
 	}
 	return false

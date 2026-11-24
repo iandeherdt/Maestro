@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/iandeherdt/Maestro/internal/conventions"
+	"github.com/iandeherdt/Maestro/internal/gitea"
+	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
@@ -73,8 +75,13 @@ type Tracker struct {
 type Polling struct{ IntervalMS int64 }
 
 type Workspace struct {
-	Root       string
-	Repo       string
+	Root string
+	Repo string
+	// Host is where the repository is: github, gitlab or gitea (also for
+	// Forgejo). HostURL is a self-managed instance; empty
+	// means the host's public site.
+	Host       string
+	HostURL    string
 	BaseBranch string // empty means the repository's default branch
 	CloneDepth int64
 }
@@ -608,16 +615,49 @@ func (b *builder) workspace(s *section) {
 	w := &b.cfg.Workspace
 	w.Root = b.path("workspace.root", s.str("root", ""))
 	w.Repo = s.str("repo", "")
+	w.Host = strings.ToLower(s.str("host", "github"))
+	if w.Host == "forgejo" {
+		// Forgejo keeps Gitea's API.
+		w.Host = "gitea"
+	}
+	w.HostURL = s.str("host_url", "")
 	w.BaseBranch = s.str("base_branch", "")
 	w.CloneDepth = b.nonNegative("workspace.clone_depth", s.integer("clone_depth", 0))
 	b.lenient(s)
-	if w.Repo == "" {
+	switch {
+	case w.Repo == "":
 		b.fail("workspace.repo", "is required")
-	} else if !repoRE.MatchString(w.Repo) {
+	case w.Host == "gitlab":
+		if !gitlab.ValidPath(w.Repo) {
+			b.fail("workspace.repo", "must be the project's path on GitLab, such as group/name or group/sub/name")
+		}
+	case w.Host == "gitea" && !gitea.ValidRepo(w.Repo):
+		b.fail("workspace.repo", "must have the form owner/name")
+	case w.Host != "gitea" && !repoRE.MatchString(w.Repo):
 		b.fail("workspace.repo", "must have the form owner/name")
 	}
 	if w.BaseBranch != "" && !validBranch(w.BaseBranch) {
 		b.fail("workspace.base_branch", "is not a valid branch name")
+	}
+	switch w.Host {
+	case "github":
+		if w.HostURL != "" {
+			b.fail("workspace.host_url", "is for a self-managed GitLab or Gitea; GitHub is always github.com")
+		}
+	case "gitlab":
+		web, err := gitlab.CheckWeb(w.HostURL)
+		if err != nil {
+			b.fail("workspace.host_url", "%v", err)
+		}
+		w.HostURL = web
+	case "gitea":
+		web, err := gitea.CheckWeb(w.HostURL)
+		if err != nil {
+			b.fail("workspace.host_url", "%v", err)
+		}
+		w.HostURL = web
+	default:
+		b.fail("workspace.host", "must be github, gitlab or gitea (gitea also for Forgejo)")
 	}
 }
 
@@ -1032,6 +1072,9 @@ func (b *builder) crossChecks(workflowPath string) {
 	}
 
 	// The branch prefix must not be able to match the base branch.
+	if c.Workspace.Host != "github" && c.Tracker.Kind == "github" {
+		b.fail("tracker.kind", "github keeps the tickets in the GitHub repository; with the code on %s, use linear", c.Workspace.Host)
+	}
 	if c.Workspace.BaseBranch != "" && c.Publish.BranchPrefix != "" &&
 		strings.HasPrefix(c.Workspace.BaseBranch+"/", c.Publish.BranchPrefix) {
 		b.fail("publish.branch_prefix", "must not match the base branch %q", c.Workspace.BaseBranch)
