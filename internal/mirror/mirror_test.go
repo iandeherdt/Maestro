@@ -800,12 +800,15 @@ func TestAMergeOfTheBaseIsImportedAndScanned(t *testing.T) {
 	l.run(work, "fetch", "-q", seed, "main")
 	cmd := exec.Command("git", "merge", "-q", "--no-edit", "FETCH_HEAD")
 	cmd.Dir = work
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "HOME="+l.root,
+		"GIT_AUTHOR_NAME=agent", "GIT_AUTHOR_EMAIL=agent@example.com",
+		"GIT_COMMITTER_NAME=agent", "GIT_COMMITTER_EMAIL=agent@example.com")
 	if err := cmd.Run(); err == nil {
 		t.Fatal("the merge was expected to conflict")
 	}
 	l.write("notes.txt", "one\ntwo by both\nTOKEN-typed-in-the-merge\n")
 	l.run(work, "add", "-A")
-	l.run(work, "commit", "-q", "--no-edit")
+	l.run(work, "commit", "-q", "-m", "Merge main into the work")
 	l.write("notes.txt", "one\ntwo by both\n")
 	head := l.commit("take the token out again")
 
