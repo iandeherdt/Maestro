@@ -41,8 +41,10 @@ func runUpdate(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	want := fs.String("version", "", "a release tag such as v0.5.19 (default: the latest)")
 	noRestart := fs.Bool("no-restart", false, "replace the binary, but leave the background service running the old one")
+	now := fs.Bool("now", false, "restart at once, cutting off a running turn, instead of after the running agents finish")
+	wait := fs.Duration("wait", 2*time.Hour, "how long to wait for the running agents before the restart")
 	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
-		fmt.Fprintln(stderr, "usage: maestro update [--version vX.Y.Z] [--no-restart]")
+		fmt.Fprintln(stderr, "usage: maestro update [--version vX.Y.Z] [--no-restart | --now | --wait DURATION]")
 		return 2
 	}
 	if *want != "" && !tagRE.MatchString(*want) {
@@ -96,17 +98,33 @@ func runUpdate(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return report(stderr, err)
 	}
+	// The new binary is in place, so a graceful restart can take its time:
+	// the services finish what their agents are doing first.
+	var paused []string
+	if !*now {
+		if paused, err = drain(ctx, serviceStateDirs(), *wait, stdout); err != nil {
+			report(stderr, err)
+			fmt.Fprintf(stderr, "The new version is installed; it runs from the next restart: %s\n", mention("maestro restart"))
+			return 1
+		}
+	}
+	pids := servicePIDs(paused)
 	restarted, err := background.Restart(ctx, runtime.GOOS, home, os.Getuid(), self, nil)
 	for _, l := range restarted {
 		fmt.Fprintf(stdout, "Restarted the background service %s.\n", l)
 	}
 	if err != nil {
+		resumeAll(paused, stdout)
 		return report(stderr, err)
 	}
-	if len(restarted) == 0 {
+	switch {
+	case len(restarted) == 0:
+		resumeAll(paused, stdout)
 		fmt.Fprintln(stdout, "No background service runs this binary. A `maestro run` in a terminal needs a restart by hand.")
-	} else {
-		fmt.Fprintln(stdout, "An agent turn that was running was stopped with it. `maestro status` shows what the service does now.")
+	case *now:
+		fmt.Fprintln(stdout, "An agent turn that was running was cut off; the ticket is tried again. `maestro status` shows what the service does now.")
+	default:
+		resumeAfterRestart(ctx, paused, pids, stdout)
 	}
 	return 0
 }

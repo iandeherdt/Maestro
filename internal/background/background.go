@@ -209,6 +209,24 @@ func (u *Unit) Content() (string, error) {
 
 func (u *Unit) domain() string { return "gui/" + strconv.Itoa(u.UID) }
 
+// Restart stops the running service at once and starts it again, with
+// the same file. A turn that is running is cut off.
+func (u *Unit) Restart(ctx context.Context) error {
+	var argv []string
+	switch u.GOOS {
+	case "darwin":
+		argv = []string{"launchctl", "kickstart", "-k", u.domain() + "/" + u.Label()}
+	case "linux":
+		argv = []string{"systemctl", "--user", "restart", u.Label() + ".service"}
+	default:
+		return fmt.Errorf("restarting the background service is not supported on %s", u.GOOS)
+	}
+	if out, err := u.run(ctx, argv[0], argv[1:]...); err != nil {
+		return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Installed reports whether the unit's file exists, under this name or
 // the old one.
 func (u *Unit) Installed() bool {
