@@ -112,8 +112,8 @@ func TestTheUnityPacksScriptsRunWithTheEditorOfThisMachine(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", res.ExitStatus, res.Output)
 	}
 	calls, _ := os.ReadFile(filepath.Join(filepath.Dir(editor), "calls"))
-	repo := filepath.Join(tmp, "checks", "GH-1", "repo")
-	for _, want := range []string{repo + "|" + filepath.Join(tmp, "checks", "GH-1", "home") + "|", "-batchmode -nographics -projectPath " + repo + " -runTests -testPlatform EditMode",
+	repo := filepath.Join(tmp, "checks", "GH-1", "work", "repo")
+	for _, want := range []string{repo + "|" + filepath.Join(tmp, "checks", "GH-1", "work", "home") + "|", "-batchmode -nographics -projectPath " + repo + " -runTests -testPlatform EditMode",
 		"-testPlatform PlayMode"} {
 		if !strings.Contains(string(calls), want) {
 			t.Errorf("the Editor was not started with %q:\n%s", want, calls)
@@ -257,5 +257,102 @@ func TestProfile(t *testing.T) {
 	}
 	if _, err := Profile("rel", "/Users/i", nil, nil); err == nil {
 		t.Error("a relative path was accepted")
+	}
+}
+
+// What a check leaves in its folder must not act when the service comes
+// back: git's own folder, the shims and the profile are outside what the
+// check may write, and a git folder or a link the check makes is not used.
+func TestACheckCannotPlantWhatTheServiceRunsLater(t *testing.T) {
+	tmp, _ := filepath.EvalSymlinks(t.TempDir())
+	src, mirror, handoff := filepath.Join(tmp, "src"), filepath.Join(tmp, "mirror"), filepath.Join(tmp, "handoff")
+	home := filepath.Join(tmp, "home")
+	editor := filepath.Join(tmp, "Hub", "Editor", "6000.5.8f1", "Unity.app", "Contents", "MacOS", "Unity")
+	write(t, tmp, map[string]string{
+		"src/README.md": "game\n",
+		"home/Library/Unity/licenses/UnityEntitlementLicense.xml": "<licence/>",
+	})
+	write(t, filepath.Dir(editor), map[string]string{"Unity": "#!/bin/sh\n"})
+	os.MkdirAll(handoff, 0o755)
+	run(t, src, "git", "init", "-q", "-b", "main")
+	run(t, src, "git", "add", "-A")
+	run(t, src, "git", "commit", "-qm", "base")
+	base := run(t, src, "git", "rev-parse", "HEAD")
+	run(t, tmp, "git", "clone", "-q", "--bare", src, mirror)
+	write(t, src, map[string]string{"work.txt": "x\n"})
+	run(t, src, "git", "add", "-A")
+	run(t, src, "git", "commit", "-qm", "work")
+	head := run(t, src, "git", "rev-parse", "HEAD")
+	run(t, src, "git", "bundle", "create", "-q", filepath.Join(handoff, "GH-1.bundle"), base+"..HEAD")
+
+	work := filepath.Join(tmp, "checks")
+	r := &Runner{MirrorDir: mirror, HandoffDir: handoff, WorkDir: work, home: home, noSandbox: true}
+	top := filepath.Join(work, "GH-1")
+	dir, service := filepath.Join(top, "work"), filepath.Join(top, "service")
+
+	// The fence lets the check write its work folder and nothing of the
+	// service's folder beside it.
+	prof, err := Profile(dir, home, nil, nil, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prof, `(deny file-write* (subpath "`+service+`"))`) || strings.Contains(prof, `(subpath "`+top+`")`) {
+		t.Fatalf("the profile lets the check write the service's folder:\n%s", prof)
+	}
+
+	outside := filepath.Join(tmp, "written-outside-the-fence")
+	target := filepath.Join(tmp, "a-folder-of-the-user")
+	os.MkdirAll(target, 0o700)
+	hook := "printf '#!/bin/sh\\ntouch " + outside + "\\n'"
+	plant := strings.Join([]string{
+		// A git folder of its own in the tree, with a hook and a setting that starts a program.
+		"mkdir -p .git/hooks",
+		hook + " > .git/hooks/post-checkout", "chmod +x .git/hooks/post-checkout",
+		hook + " > fsmonitor.sh", "chmod +x fsmonitor.sh",
+		"printf '[core]\\n\\tfsmonitor = ./fsmonitor.sh\\n' > .git/config",
+		// Links where the service writes in the check's home.
+		"rm -rf ../home/.config", "ln -s " + target + " ../home/.config",
+	}, " && ")
+	if _, err := r.Unity(context.Background(), editor, "GH-1", head, plant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "repo", ".git", "hooks", "post-checkout")); err != nil {
+		t.Fatalf("the script did not plant its hook: %v", err)
+	}
+	if _, err := r.Unity(context.Background(), editor, "GH-1", head, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Error("a program the check planted ran in the service's git")
+	}
+	if es, _ := os.ReadDir(target); len(es) != 0 {
+		t.Errorf("the service wrote through a link the check left: %v", es)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "repo", ".git")); err == nil {
+		t.Error("the git folder the check made was kept")
+	}
+	for _, p := range []string{filepath.Join(service, "git", "HEAD"), filepath.Join(service, "shim", "unity", "version")} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s is not in the service's folder", p)
+		}
+	}
+
+	// A folder from before the two were apart: the tree is taken along,
+	// its git folder, shims and profile are not.
+	r.Forget("GH-1")
+	old := filepath.Join(top, "repo")
+	write(t, top, map[string]string{"repo/Library/imported": "x", "repo/.git/hooks/post-checkout": "#!/bin/sh\ntouch " + outside + "\n",
+		"shim/unity/version": "old", "sandbox.sb": "old"})
+	if _, err := r.Unity(context.Background(), editor, "GH-1", head, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "repo", "Library", "imported")); err != nil {
+		t.Error("the Library of the old folder was lost")
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Error("the old folder was kept")
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Error("the old hook ran")
 	}
 }
