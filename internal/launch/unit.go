@@ -187,17 +187,69 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 	return u, nil
 }
 
-// args is the systemd-run command line for the unit. The command inside
-// is always this program's "inside" helper, which starts the relay when
-// the step has network, then runs argv.
-func (u *unit) args(self string) []string {
+// since is the systemd version that first knows a property. systemd-run
+// refuses a unit with one it does not know ("Unknown assignment"), so on
+// an older systemd the property is left out. RHEL 8 has systemd 239.
+//
+// What each one adds is covered there in another way, except
+// RestrictSUIDSGID and OOMPolicy:
+//   - ProtectKernelLogs: the unit has no CAP_SYSLOG, PrivateDevices hides
+//     /dev/kmsg, /proc/kmsg is made inaccessible and syslog(2) is filtered
+//     (see compat);
+//   - ProtectClock and ProtectHostname: the unit has no capabilities to
+//     set the clock or the host name;
+//   - RestrictSUIDSGID: NoNewPrivileges keeps a set-user-ID file from
+//     giving the unit more rights; the workspace folders are closed to
+//     other users;
+//   - OOMPolicy: MemoryMax still bounds the unit, and the kernel kills
+//     within it.
+var since = map[string]int{
+	"ProtectKernelLogs": 244,
+	"ProtectClock":      245,
+	"ProtectHostname":   242,
+	"RestrictSUIDSGID":  242,
+	"OOMPolicy":         243,
+}
+
+// typeExecSince is the systemd version with Type=exec, which fails the
+// unit when its command cannot be started. Before it, Type=simple.
+const typeExecSince = 240
+
+// compat is what is added instead on a systemd that lacks
+// ProtectKernelLogs.
+var compat = []string{"SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg"}
+
+// supported reports whether systemd version v knows the property kv. A
+// version of 0 is unknown and counts as new.
+func supported(kv string, v int) bool {
+	key, _, _ := strings.Cut(kv, "=")
+	need, ok := since[key]
+	return !ok || v == 0 || v >= need
+}
+
+// args is the systemd-run command line for the unit, for systemd version
+// systemd (0: unknown, taken as new). The command inside is always this
+// program's "inside" helper, which starts the relay when the step has
+// network, then runs argv.
+func (u *unit) args(self string, systemd int) []string {
 	stdio := "--pipe"
 	if u.pty {
 		stdio = "--pty"
 	}
-	a := []string{"--wait", "--collect", stdio, "--quiet", "--service-type=exec", "--unit=" + u.name}
+	serviceType := "--service-type=exec"
+	if systemd != 0 && systemd < typeExecSince {
+		serviceType = "--service-type=simple"
+	}
+	a := []string{"--wait", "--collect", stdio, "--quiet", serviceType, "--unit=" + u.name}
 	for _, kv := range u.props {
-		a = append(a, "--property="+kv)
+		if supported(kv, systemd) {
+			a = append(a, "--property="+kv)
+		}
+	}
+	if !supported("ProtectKernelLogs=yes", systemd) {
+		for _, kv := range compat {
+			a = append(a, "--property="+kv)
+		}
 	}
 	keys := make([]string, 0, len(u.env))
 	for k := range u.env {

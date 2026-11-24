@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,10 @@ type Launcher struct {
 	// SystemdRun runs systemd-run with args and returns the exit status of
 	// the unit. Default: the real one; tests replace it.
 	SystemdRun func(ctx context.Context, unit string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
+	// Systemd is the version of the machine's systemd, which decides the
+	// properties a unit may have. Default: read once from systemctl; 0
+	// when it cannot be read, taken as new.
+	Systemd int
 	// Lookup and Chown work on the machine's users; tests replace them.
 	Lookup func(name string) (uid, gid int, err error)
 	Chown  func(path string, uid, gid int) error
@@ -204,7 +209,23 @@ func (l *Launcher) run(ctx context.Context, u *unit, stdin io.Reader, stdout, st
 	if run == nil {
 		run = systemdRun
 	}
-	return run(ctx, u.name, u.args(l.self()), stdin, stdout, stderr)
+	return run(ctx, u.name, u.args(l.self(), l.systemd()), stdin, stdout, stderr)
+}
+
+var systemdVersionRE = regexp.MustCompile(`^systemd (\d+)`)
+
+// systemd returns the version of the machine's systemd.
+func (l *Launcher) systemd() int {
+	if l.Systemd == 0 && l.SystemdRun == nil {
+		cmd := exec.Command("/usr/bin/systemctl", "--version")
+		cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
+		if out, err := cmd.Output(); err == nil {
+			if m := systemdVersionRE.FindSubmatch(out); m != nil {
+				l.Systemd, _ = strconv.Atoi(string(m[1]))
+			}
+		}
+	}
+	return l.Systemd
 }
 
 // systemdRun runs systemd-run and, when ctx ends first, stops the unit,
