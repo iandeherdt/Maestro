@@ -160,9 +160,8 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 // target names the repository and checks the branch a workspace is
 // published on.
 func target(cfg *config.Config, ws workspace.Workspace) error {
-	m := repoRE.FindStringSubmatch(cfg.Workspace.Repo)
-	if m == nil || strings.HasSuffix(m[2], ".git") || m[2] == "." || m[2] == ".." {
-		return errors.New("workspace.repo must be owner/name")
+	if !validRepo(cfg.Workspace) {
+		return errors.New("workspace.repo cannot name the repository")
 	}
 	prefix := cfg.Publish.BranchPrefix
 	// The service only ever writes below its own prefix, so no ticket can

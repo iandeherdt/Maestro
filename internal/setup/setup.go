@@ -160,6 +160,16 @@ type State struct {
 	// instead of containers (`maestro setup --sandbox systemd`, Linux only).
 	Sandbox string `json:"sandbox,omitempty"`
 
+	// Host is HostGitLab when the code is on GitLab (`maestro setup --host
+	// gitlab`); empty is GitHub. HostURL is the GitLab instance, GitLabBot
+	// the user of the project access token, GitLabProject the project's
+	// number, and Reviewer the GitLab user whose reviews and comments count.
+	Host          string `json:"host,omitempty"`
+	HostURL       string `json:"host_url,omitempty"`
+	GitLabBot     string `json:"gitlab_bot,omitempty"`
+	GitLabProject int64  `json:"gitlab_project,omitempty"`
+	Reviewer      string `json:"reviewer,omitempty"`
+
 	// TakenWorkers are the worker names of the other projects on this
 	// machine. Every worker has its own containers, volumes and service, so
 	// two projects may not share one. They are not saved.

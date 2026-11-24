@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
@@ -74,8 +75,16 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	case st.OwnerType == kindOrg && (!authorRE.MatchString(st.Author) || st.Board <= 0):
 		return errors.New("the earlier steps have to be finished first")
 	}
-	if m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker) {
+	owner := ""
+	switch {
+	case st.UsesGitLab():
+		if !gitlab.ValidPath(st.Repo) || st.GitLabBot == "" || st.Reviewer == "" || !st.UsesLinear() || !workerRE.MatchString(st.Worker) {
+			return errors.New("the earlier steps have to be finished first")
+		}
+	case m == nil || !slugRE.MatchString(st.AppSlug) || !workerRE.MatchString(st.Worker):
 		return errors.New("the earlier steps have to be finished first")
+	default:
+		owner = m[1]
 	}
 	path := filepath.Join(st.Dir(), workflowFileName)
 	if _, err := os.Lstat(path); err == nil {
@@ -120,10 +129,14 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 		}
 	}
 	ui.Say("")
-	ui.Say("  One more: does %s run automatic checks on pull requests (GitHub Actions or another CI)?", st.Repo)
-	ui.Say("  If it does, the service waits until they pass before it hands a pull request to you.")
+	change, ciName := "pull request", "GitHub Actions"
+	if st.UsesGitLab() {
+		change, ciName = "merge request", "GitLab CI"
+	}
+	ui.Say("  One more: does %s run automatic checks on %ss (%s or another CI)?", st.Repo, change, ciName)
+	ui.Say("  If it does, the service waits until they pass before it hands a %s to you.", change)
 	ui.Say("  If it does not, answer n, or the service would wait for checks that never come.")
-	ci, err := ui.Confirm("  Does it run checks on pull requests?")
+	ci, err := ui.Confirm("  Does it run checks on " + change + "s?")
 	if err != nil {
 		return err
 	}
@@ -138,7 +151,7 @@ func (w *WorkflowFile) Run(_ context.Context, ui *UI, st *State) error {
 	case engine == "":
 		engine = "docker"
 	}
-	text := render(engine, st, m[1], verify, ci)
+	text := render(engine, st, owner, verify, ci)
 	ui.Say("  This file will be written to %s:", path)
 	ui.Say("")
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
@@ -186,6 +199,12 @@ func render(engine string, st *State, owner, verify string, ci bool) string {
 		renderGitHub(&b, st, owner)
 	}
 	b.WriteString("workspace:\n  root: " + root + "\n  repo: " + st.Repo + "\n")
+	if st.UsesGitLab() {
+		b.WriteString("  host: gitlab\n")
+		if st.HostURL != "" && st.HostURL != gitlab.Default {
+			b.WriteString("  host_url: " + strconv.Quote(st.HostURL) + "\n")
+		}
+	}
 	b.WriteString("sandbox:\n  backend: " + engine + "\n")
 	b.WriteString("verify:\n  command: |\n    " + verify + "\n")
 	if !ci {
@@ -219,6 +238,10 @@ func renderLinear(b *strings.Builder, st *State) {
 	b.WriteString("  allowed_authors: " + quoted([]string{st.LinearAuthor}) + "\n")
 	b.WriteString("  terminal_states: " + quoted(terminal) + "\n")
 	b.WriteString("  handoff_state: " + strconv.Quote(st.LinearHandoff) + "\n")
+	if st.UsesGitLab() {
+		// Reviews and comments on GitLab are by GitLab users.
+		b.WriteString("  allowed_commenters: " + quoted([]string{st.Reviewer}) + "\n")
+	}
 }
 
 func renderGitHub(b *strings.Builder, st *State, owner string) {

@@ -110,7 +110,8 @@ In this order, one pull request each:
    issues as a later step; self-managed instances through `workspace.host_url`, with
    certificates the system already trusts. Steps: 10a moves the GitHub calls of the publisher
    behind a host interface and adds `workspace.host` (written); 10b GitLab, with a project access
-   token; 10c Gitea, with a bot account's token; 10d a real run on each.
+   token (written: merge requests, checks from commit statuses, reviews from approvals, the
+   token's renewal, `maestro setup --host gitlab`, `maestro gitlab`, doctor); 10c Gitea, with a bot account's token; 10d a real run on each.
 
 ## Phase 0 status
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/iandeherdt/Maestro/internal/conventions"
+	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/workflow"
 )
 
@@ -618,9 +619,14 @@ func (b *builder) workspace(s *section) {
 	w.BaseBranch = s.str("base_branch", "")
 	w.CloneDepth = b.nonNegative("workspace.clone_depth", s.integer("clone_depth", 0))
 	b.lenient(s)
-	if w.Repo == "" {
+	switch {
+	case w.Repo == "":
 		b.fail("workspace.repo", "is required")
-	} else if !repoRE.MatchString(w.Repo) {
+	case w.Host == "gitlab":
+		if !gitlab.ValidPath(w.Repo) {
+			b.fail("workspace.repo", "must be the project's path on GitLab, such as group/name or group/sub/name")
+		}
+	case !repoRE.MatchString(w.Repo):
 		b.fail("workspace.repo", "must have the form owner/name")
 	}
 	if w.BaseBranch != "" && !validBranch(w.BaseBranch) {
@@ -631,10 +637,16 @@ func (b *builder) workspace(s *section) {
 		if w.HostURL != "" {
 			b.fail("workspace.host_url", "is for a self-managed GitLab or Gitea; GitHub is always github.com")
 		}
-	case "gitlab", "gitea":
-		b.fail("workspace.host", "%s is not built yet; github is", w.Host)
+	case "gitlab":
+		web, err := gitlab.CheckWeb(w.HostURL)
+		if err != nil {
+			b.fail("workspace.host_url", "%v", err)
+		}
+		w.HostURL = web
+	case "gitea":
+		b.fail("workspace.host", "gitea is not built yet; github and gitlab are")
 	default:
-		b.fail("workspace.host", "must be github")
+		b.fail("workspace.host", "must be github or gitlab")
 	}
 }
 
@@ -1049,6 +1061,9 @@ func (b *builder) crossChecks(workflowPath string) {
 	}
 
 	// The branch prefix must not be able to match the base branch.
+	if c.Workspace.Host != "github" && c.Tracker.Kind == "github" {
+		b.fail("tracker.kind", "github keeps the tickets in the GitHub repository; with the code on %s, use linear", c.Workspace.Host)
+	}
 	if c.Workspace.BaseBranch != "" && c.Publish.BranchPrefix != "" &&
 		strings.HasPrefix(c.Workspace.BaseBranch+"/", c.Publish.BranchPrefix) {
 		b.fail("publish.branch_prefix", "must not match the base branch %q", c.Workspace.BaseBranch)

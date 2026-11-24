@@ -1028,6 +1028,39 @@ move a ticket with the machine's label to `Idea`, answer the questions in its co
 to `Planned` to approve the plan. The tasks become sub-issues of the idea, in the idea's project,
 and a task that depends on another is `blocked by` it.
 
+### GitLab as the code host
+
+The code can be on GitLab, on gitlab.com or your own instance, instead of on GitHub. The tickets
+are then in Linear (see above); GitLab's own issues come later. Run
+
+```
+maestro setup --host gitlab
+```
+
+It asks where your GitLab is, which project the agents work on (`group/name`, subgroups allowed),
+and for a project access token. Make it in the project under Settings, Access tokens: name it
+`maestro`, give it the role **Developer** (not Maintainer or Owner) and the scopes `api` and
+`write_repository`. The token has a bot user of its own, so what the service does is never your
+approval, and you approve the merge requests it opens. Setup refuses a Maintainer's token or a
+person's token. The token is kept in the setup folder, readable by you only, and the service
+renews it before it expires. The settings file gets:
+
+```yaml
+workspace:
+  host: gitlab
+  host_url: https://gitlab.example.com   # only for your own instance
+  repo: mygroup/myproject
+tracker:
+  kind: linear
+  allowed_commenters: [your-gitlab-username]
+```
+
+Protect the base branch under Settings, Repository, Protected branches: allowed to merge
+Maintainers, allowed to push and merge no one, force push off. The service and `maestro doctor`
+say when it is not. `maestro gitlab` shows the token's state, `maestro gitlab token` stores a new
+one and `maestro gitlab remove` removes it. The merge request opens as a draft (`Draft:` in the
+title) and is marked ready when the checks pass; reviews by the username you gave count.
+
 ## Project status
 
 Last updated 2026-11-23, at release 0.5.18.
@@ -1078,7 +1111,7 @@ Last updated 2026-11-23, at release 0.5.18.
 | Native Linux sandbox (systemd) | Written, not yet run on a real server. In release 0.5.18: the root launcher `maestro-launch` and the service's side that sends it each step through one sudo rule. Since then: the service runs on `sandbox.backend: systemd` with its proxies on unix sockets, `maestro login`, the start-up self-test and `maestro doctor` through the launcher, and `maestro setup --sandbox systemd` installs the launcher, the sandbox user, Claude Code and the sudo rule. Releases and `maestro update` carry the launcher. Tested with a simulated systemd and sudo; a run on the RHEL server is next ([plan](docs/PLAN.md)). |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
-| Code hosts other than GitHub (GitLab, Gitea) | Not started. Asked for by users. |
+| Code hosts other than GitHub (GitLab, Gitea) | GitLab written (`workspace.host: gitlab`, `maestro setup --host gitlab`, `maestro gitlab`) and tested against a fake GitLab; not yet run against GitLab itself. Gitea next. |
 
 ## Documentation
 

@@ -141,6 +141,9 @@ type CreateApp struct {
 func (*CreateApp) Title() string { return "Create the service's GitHub App" }
 
 func (c *CreateApp) Check(_ context.Context, st *State) (Status, error) {
+	if st.UsesGitLab() {
+		return Status{Done: true, Detail: "Not needed: the code is on GitLab."}, nil
+	}
 	if st.AppID == "" || st.AppKeyFile == "" {
 		return Status{Detail: "The service needs its own GitHub identity, so that it never uses your personal access."}, nil
 	}
@@ -371,6 +374,9 @@ type InstallApp struct {
 func (*InstallApp) Title() string { return "Give the App access to the repository" }
 
 func (i *InstallApp) Check(ctx context.Context, st *State) (Status, error) {
+	if st.UsesGitLab() {
+		return Status{Done: true, Detail: "Not needed: the code is on GitLab."}, nil
+	}
 	if st.AppID == "" || st.Repo == "" {
 		return Status{Detail: "The App has to be created first."}, nil
 	}

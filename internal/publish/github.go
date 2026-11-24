@@ -38,6 +38,20 @@ type api struct {
 	base  *url.URL
 	hc    *http.Client
 	token func(context.Context) (string, error)
+	// gitlab leaves out GitHub's own headers.
+	gitlab bool
+}
+
+// url joins the base and an escaped path.
+func (a *api) url(path string) (*url.URL, error) {
+	u := *a.base
+	raw := strings.TrimSuffix(a.base.EscapedPath(), "/") + path
+	p, err := url.PathUnescape(raw)
+	if err != nil {
+		return nil, err
+	}
+	u.Path, u.RawPath = p, raw
+	return &u, nil
 }
 
 type apiError struct {
@@ -50,8 +64,10 @@ func (e *apiError) Error() string {
 }
 
 func (a *api) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
-	u := *a.base
-	u.Path = strings.TrimSuffix(u.Path, "/") + path
+	u, err := a.url(path)
+	if err != nil {
+		return err
+	}
 	u.RawQuery = query.Encode()
 	var rd io.Reader
 	if body != nil {
@@ -70,8 +86,10 @@ func (a *api) do(ctx context.Context, method, path string, query url.Values, bod
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	if !a.gitlab {
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/ghapp"
+	"github.com/iandeherdt/Maestro/internal/gitlab"
 	"github.com/iandeherdt/Maestro/internal/sandbox"
 )
 
@@ -168,8 +169,13 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 		d.selfTest(rep, in.oldProbe())
 	}
 
-	d.section("GitHub")
-	d.github(ctx, in)
+	if in.state.UsesGitLab() {
+		d.section("GitLab")
+		d.gitLab(ctx, in)
+	} else {
+		d.section("GitHub")
+		d.github(ctx, in)
+	}
 
 	if in.cfg.Tracker.Kind == "linear" {
 		d.section("Linear")
@@ -358,6 +364,69 @@ func (d *doctor) github(ctx context.Context, in *install) {
 		d.warn("GitHub requires a pull request for "+base, strings.TrimPrefix(unguardedNote(gitHub.git, in.cfg.Workspace.Repo, base), "\n"))
 	default:
 		d.ok("GitHub requires a pull request for " + base)
+	}
+}
+
+// gitLab checks the project access token: that it works, what it may do,
+// when it expires, and the protection of the base branch.
+func (d *doctor) gitLab(ctx context.Context, in *install) {
+	w := in.cfg.Workspace
+	tok, err := gitlab.ReadToken(in.dir)
+	if err != nil || tok == "" {
+		d.fail("a GitLab token is stored", "Store one with "+mention("maestro gitlab token")+".")
+		return
+	}
+	c := &gitlab.Client{Web: w.HostURL, Token: tok}
+	u, err := c.Who(ctx)
+	if err != nil {
+		d.fail("GitLab accepts the token", err.Error()+"\nStore a new one with "+mention("maestro gitlab token")+".")
+		return
+	}
+	d.ok("GitLab accepts the token; it acts as " + u.Username)
+	if !u.Bot {
+		d.fail("the token is a project access token", u.Username+" is a person, who could then not approve the merge requests.\n"+
+			"Make a project access token with the role Developer and store it with "+mention("maestro gitlab token")+".")
+	}
+	if info, err := c.Self(ctx); err == nil {
+		switch left := time.Until(info.Expires()); {
+		case info.Expires().IsZero():
+		case left < 7*24*time.Hour:
+			d.warn("the token is valid for a while", "It expires on "+info.ExpiresAt+" and has not been renewed. Is the service running? "+
+				"If renewing fails, make a new one and store it with "+mention("maestro gitlab token")+".")
+		default:
+			d.ok("the token expires on " + info.ExpiresAt + "; the service renews it 30 days before")
+		}
+		if !slices.Contains(info.Scopes, "api") || !slices.Contains(info.Scopes, "write_repository") {
+			d.fail("the token has the scopes api and write_repository", "It has: "+strings.Join(info.Scopes, ", ")+".")
+		}
+	}
+	p, err := c.Project(ctx, w.Repo)
+	if err != nil {
+		d.fail("the token can reach "+w.Repo, err.Error())
+		return
+	}
+	switch role, err := c.Role(ctx, p.ID, u.ID); {
+	case err != nil:
+		d.warn("the token's role is Developer", "It could not be read: "+err.Error())
+	case role >= gitlab.Maintainer:
+		d.fail("the token's role is Developer", "It is a Maintainer or Owner, so it could merge and change the protection. The service refuses to start with it.")
+	case role < gitlab.Developer:
+		d.fail("the token's role is Developer", "Its role cannot push branches.")
+	default:
+		d.ok("the token's role in " + w.Repo + " is Developer")
+	}
+	base := w.BaseBranch
+	if base == "" {
+		base = p.DefaultBranch
+	}
+	pr, err := c.Protected(ctx, p.ID, base)
+	switch note := gitLabUnguarded(pr, w.HostURL, w.Repo, base); {
+	case err != nil:
+		d.warn("GitLab protects "+base, "This could not be read: "+err.Error())
+	case note != "":
+		d.warn("GitLab protects "+base+" from Developers", strings.TrimPrefix(note, "\n"))
+	default:
+		d.ok("GitLab protects " + base + ": only Maintainers merge, nobody pushes")
 	}
 }
 

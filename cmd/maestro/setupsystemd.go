@@ -76,7 +76,7 @@ func planSystemd(in *install) (*systemdPlan, error) {
 		ClaudeState: filepath.Join(sandboxRoot, w, "claude"),
 		Skills:      abs(in.skills.SkillsDir()), Agents: abs(in.skills.AgentsDir()),
 		ProxySockets: map[string]string{},
-		BotName:      in.bot, BotEmail: in.bot + "@users.noreply.github.com",
+		BotName:      in.bot, BotEmail: in.botEmail(),
 		MemoryMax: strings.ToUpper(in.cfg.Sandbox.MemoryMax), CPUQuota: in.cfg.Sandbox.CPUQuota,
 		TasksMax: int(in.cfg.Sandbox.TasksMax), InnerSandbox: in.cfg.Claude.InnerSandbox,
 		MaxTimeoutMS: max(minStepCeilingMS, in.cfg.Claude.TurnTotalTimeoutMS, in.cfg.Verify.TimeoutMS, in.cfg.Hooks.TimeoutMS),

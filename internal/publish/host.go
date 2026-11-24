@@ -3,8 +3,10 @@ package publish
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
+	"github.com/iandeherdt/Maestro/internal/config"
 	"github.com/iandeherdt/Maestro/internal/worker"
 )
 
@@ -128,7 +130,19 @@ func (p *Publisher) host() (host, error) {
 	if p.testHost != nil {
 		return p.testHost, nil
 	}
-	m := repoRE.FindStringSubmatch(p.Config().Workspace.Repo)
+	w := p.Config().Workspace
+	switch w.Host {
+	case "", "github":
+	case "gitlab":
+		g, err := p.gitLab(w.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return g, nil
+	default:
+		return nil, errors.New("workspace.host " + w.Host + " is not supported")
+	}
+	m := repoRE.FindStringSubmatch(w.Repo)
 	if m == nil {
 		return nil, errors.New("workspace.repo must be owner/name")
 	}
@@ -137,4 +151,14 @@ func (p *Publisher) host() (host, error) {
 		return nil, err
 	}
 	return g, nil
+}
+
+// validRepo reports whether the repository in the settings can be named
+// on its host.
+func validRepo(w config.Workspace) bool {
+	if w.Host == "gitlab" {
+		return ValidGitLabPath(w.Repo)
+	}
+	m := repoRE.FindStringSubmatch(w.Repo)
+	return m != nil && !strings.HasSuffix(m[2], ".git") && m[2] != "." && m[2] != ".."
 }

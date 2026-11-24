@@ -350,10 +350,13 @@ Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sa
 
 - `root` (path or `$VAR`): REQUIRED. No default, because a shared temp directory is not acceptable
   here. MUST be owned by `maestro-agent`, mode `0700`, on a filesystem mounted `nosuid,nodev`.
-- `repo` (string): REQUIRED. Target repository as `owner/name`.
-- `host` (string): where the repository is. Default `github`. `gitlab` and `gitea` are planned
-  (phase 10) and refused until they are built.
-- `host_url` (string): the address of a self-managed GitLab or Gitea. Not allowed with `github`.
+- `repo` (string): REQUIRED. Target repository as `owner/name`; on GitLab the project's path,
+  which may hold subgroups (`group/subgroup/name`).
+- `host` (string): where the repository is: `github` (default) or `gitlab`. `gitea` is planned
+  (phase 10) and refused until it is built. With `gitlab`, `tracker.kind` MUST NOT be `github`.
+- `host_url` (string): the https address of a self-managed GitLab or Gitea; default
+  `https://gitlab.com` with `gitlab`. Only certificates the system trusts are accepted. Not
+  allowed with `github`.
 - `base_branch` (string): default: the repository's default branch.
 - `clone_depth` (integer): default `0` (full history).
 
@@ -2026,6 +2029,12 @@ Validated at startup and by `doctor`. The base branch MUST have: pull request re
 one approving review required, required status checks non-empty (or explicitly waived), force
 pushes and deletions disabled, and no bypass allowance for the bot identity. The bot identity MUST
 NOT be a repository administrator.
+
+On GitLab the service acts through a project access token whose bot user has the role Developer.
+The service refuses a token with the role Maintainer or Owner, which could merge or change the
+protection, and refuses a person's token. The base branch SHOULD be protected with merging
+allowed to Maintainers, pushing allowed to no one and force pushes off; when it is not, startup
+and `doctor` warn and say how. The token is renewed by the service 30 days before it expires.
 
 ### 15.8 Hand-off Watch
 
