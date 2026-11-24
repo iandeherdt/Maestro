@@ -196,7 +196,7 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 		cache:       map[string]*cached{},
 	}
 	for _, s := range []string{cfg.Tracker.InProgressState, cfg.Tracker.HandoffState, cfg.Tracker.BlockedState,
-		cfg.Tracker.DoneState, reworkState} {
+		cfg.Tracker.DoneState, reworkState, cfg.Tracker.DesignState} {
 		if s != "" {
 			a.ownedStates[norm(s)] = s
 		}

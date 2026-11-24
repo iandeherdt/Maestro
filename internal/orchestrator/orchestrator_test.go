@@ -99,6 +99,8 @@ func newEnv(t *testing.T, issues ...issue.Issue) *env {
 	e := &env{t: t, cfg: testConfig(), tr: trackertest.New(issues...), w: &fakeWorker{},
 		ws: &fakeWorkspaces{}, dir: t.TempDir(), ctx: context.Background(),
 		clock: &fakeClock{t: time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)}}
+	// As the real boards: only the states the service owns can be written.
+	e.tr.Writable = []string{"In Progress", "Human Review", "Blocked", "Done", "Rework", "Design"}
 	e.open()
 	return e
 }

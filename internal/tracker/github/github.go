@@ -229,7 +229,7 @@ func New(cfg *config.Config, opt Options) (*Adapter, error) {
 	}
 	// The states the orchestrator itself writes (SPEC 7.3).
 	for _, s := range []string{cfg.Tracker.InProgressState, cfg.Tracker.HandoffState, cfg.Tracker.BlockedState,
-		cfg.Tracker.DoneState, reworkState} {
+		cfg.Tracker.DoneState, reworkState, cfg.Tracker.DesignState} {
 		if s != "" {
 			a.ownedStates[norm(s)] = s
 		}

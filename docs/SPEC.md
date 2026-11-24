@@ -2182,7 +2182,8 @@ As upstream Section 13.7, loopback only:
   fails. Not built yet: `--repo`, the readiness check of Appendix C.
 - `maestro pause [reason]`, `maestro resume`: through the loopback API. A pause is stored and
   survives a restart.
-- `maestro unblock <identifier>`: through the loopback API, reset `failure_attempts` for an issue.
+- `maestro unblock <identifier>`: through the loopback API, reset `failure_attempts` for an issue, and move an issue
+  in the blocked state to Rework. The approval state is never written.
   An issue in `blocked_state` that is routed to this worker is also moved back to the first active
   state, with a status comment. The identifier may be given as its number alone (`12`, `#12`).
 - Exit status: `0` on normal shutdown, nonzero on startup failure or abnormal exit.

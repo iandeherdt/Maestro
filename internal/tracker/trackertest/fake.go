@@ -27,6 +27,10 @@ type Fake struct {
 	FailReads  int
 	FailWrites int
 
+	// Writable are the states SetState accepts, as the real adapters accept
+	// only the states the service owns. Nil accepts every state.
+	Writable []string
+
 	// Planning: the board's workers, the owner's comments, and a script of
 	// failures for the planner writes, consumed call by call ("" = succeed).
 	WorkerNames []string
@@ -154,6 +158,15 @@ func (f *Fake) SetState(_ context.Context, is issue.Issue, state string) error {
 	defer f.mu.Unlock()
 	if err := f.writeErr(); err != nil {
 		return err
+	}
+	if f.Writable != nil {
+		ok := false
+		for _, w := range f.Writable {
+			ok = ok || issue.NormalizeState(w) == issue.NormalizeState(state)
+		}
+		if !ok {
+			return &tracker.Error{Category: tracker.WriteRejected, Msg: "the service does not write the state " + state}
+		}
 	}
 	if i, ok := f.issues[is.ID]; ok {
 		i.State = state

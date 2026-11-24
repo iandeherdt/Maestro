@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
 
@@ -25,9 +26,12 @@ type UnblockResult struct {
 }
 
 // Unblock gives an issue a fresh failure budget (SPEC 8.4, `maestro
-// unblock`). An issue in the blocked state is moved back to the first
-// active state, which is what dragging its card back does. It is safe to
-// call from any goroutine; the answer comes on the channel.
+// unblock`). An issue in the blocked state is moved to Rework, which is an
+// active state the service may write. It is not moved to the first active
+// state: that one is the owner's approval, which the board adapters never
+// write. Without Rework among the active states only the count is cleared,
+// and the owner moves the card. It is safe to call from any goroutine; the
+// answer comes on the channel.
 func (o *Orchestrator) Unblock(identifier string) <-chan UnblockResult {
 	ch := make(chan UnblockResult, 1)
 	o.post(func(ctx context.Context) { ch <- o.unblock(ctx, identifier) })
@@ -63,7 +67,11 @@ func (o *Orchestrator) unblock(ctx context.Context, want string) UnblockResult {
 		res.Failures = o.d.Budget.Failures(is.ID)
 		o.d.Budget.ClearIssue(is.ID)
 		o.persist()
-		to := o.cfg.Tracker.ActiveStates[0]
+		if !o.hasActiveState(reworkState) {
+			res.Err = errors.New("this installation has no active state " + reworkState + " to move it to")
+			return res
+		}
+		to := reworkState
 		if err := o.d.Tracker.SetState(ctx, is, to); err != nil {
 			res.Err = err
 			return res

@@ -508,6 +508,9 @@ Todo (or put `status:todo` back on it), or:
 maestro unblock GH-12       # or just: maestro unblock 12
 ```
 
+The command moves the card to Rework, not Todo: Todo is your approval, and the service never
+writes it.
+
 ### Watching the agents: `maestro dashboard`
 
 `maestro dashboard` opens the service's status page in the browser. It refreshes every few
