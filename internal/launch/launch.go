@@ -204,6 +204,32 @@ func (l *Launcher) exists(key string) bool {
 	return err == nil && fi.IsDir()
 }
 
+// GitConfigPath is the git system configuration of the steps
+// (GIT_CONFIG_SYSTEM). The mirror belongs to the service user, not the
+// sandbox user, so git refuses to clone from it ("dubious ownership")
+// unless it is named as safe, which git accepts only from a system or
+// global configuration. The container image sets the same in its own
+// system configuration.
+const GitConfigPath = "/etc/maestro/sandbox.gitconfig"
+
+const gitConfig = "[safe]\n\tdirectory = " + mirrorDir + "\n\tdirectory = " + repoDir + "\n"
+
+// writeGitConfig puts gitConfig in place when it is missing or differs.
+func writeGitConfig(path string) error {
+	if raw, err := os.ReadFile(path); err == nil && string(raw) == gitConfig {
+		return nil
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, []byte(gitConfig), 0o644); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func (l *Launcher) run(ctx context.Context, u *unit, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	if stdin == nil {
 		stdin = strings.NewReader("")
@@ -211,6 +237,9 @@ func (l *Launcher) run(ctx context.Context, u *unit, stdin io.Reader, stdout, st
 	run := l.SystemdRun
 	if run == nil {
 		run = systemdRun
+		if err := writeGitConfig(GitConfigPath); err != nil {
+			return 0, fmt.Errorf("the sandbox's git configuration: %w", err)
+		}
 	}
 	return run(ctx, u.name, u.args(l.self(), l.systemd()), stdin, stdout, stderr)
 }
