@@ -125,4 +125,5 @@ func TestDrainKeepsTheOwnersPause(t *testing.T) {
 		t.Fatalf("no service: %v %v", paused, err)
 	}
 }
+
 var bg = context.Background()
