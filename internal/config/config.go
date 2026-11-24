@@ -73,8 +73,13 @@ type Tracker struct {
 type Polling struct{ IntervalMS int64 }
 
 type Workspace struct {
-	Root       string
-	Repo       string
+	Root string
+	Repo string
+	// Host is where the repository is: github, and gitlab or gitea once
+	// they are built (phase 10). HostURL is a self-managed instance; empty
+	// means the host's public site.
+	Host       string
+	HostURL    string
 	BaseBranch string // empty means the repository's default branch
 	CloneDepth int64
 }
@@ -608,6 +613,8 @@ func (b *builder) workspace(s *section) {
 	w := &b.cfg.Workspace
 	w.Root = b.path("workspace.root", s.str("root", ""))
 	w.Repo = s.str("repo", "")
+	w.Host = strings.ToLower(s.str("host", "github"))
+	w.HostURL = s.str("host_url", "")
 	w.BaseBranch = s.str("base_branch", "")
 	w.CloneDepth = b.nonNegative("workspace.clone_depth", s.integer("clone_depth", 0))
 	b.lenient(s)
@@ -618,6 +625,16 @@ func (b *builder) workspace(s *section) {
 	}
 	if w.BaseBranch != "" && !validBranch(w.BaseBranch) {
 		b.fail("workspace.base_branch", "is not a valid branch name")
+	}
+	switch w.Host {
+	case "github":
+		if w.HostURL != "" {
+			b.fail("workspace.host_url", "is for a self-managed GitLab or Gitea; GitHub is always github.com")
+		}
+	case "gitlab", "gitea":
+		b.fail("workspace.host", "%s is not built yet; github is", w.Host)
+	default:
+		b.fail("workspace.host", "must be github")
 	}
 }
 

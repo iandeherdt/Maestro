@@ -351,6 +351,9 @@ Unknown top-level keys SHOULD be ignored with a warning. Unknown keys inside `sa
 - `root` (path or `$VAR`): REQUIRED. No default, because a shared temp directory is not acceptable
   here. MUST be owned by `maestro-agent`, mode `0700`, on a filesystem mounted `nosuid,nodev`.
 - `repo` (string): REQUIRED. Target repository as `owner/name`.
+- `host` (string): where the repository is. Default `github`. `gitlab` and `gitea` are planned
+  (phase 10) and refused until they are built.
+- `host_url` (string): the address of a self-managed GitLab or Gitea. Not allowed with `github`.
 - `base_branch` (string): default: the repository's default branch.
 - `clone_depth` (integer): default `0` (full history).
 
@@ -646,6 +649,7 @@ skip dispatch for that tick and keep reconciling.
 - `polling.interval_ms`: default `30000`
 - `workspace.root`: path, REQUIRED
 - `workspace.repo`: `owner/name`, REQUIRED
+- `workspace.host`: default `github`; `workspace.host_url`: default the host's public site
 - `workspace.base_branch`: default repository default branch
 - `workspace.clone_depth`: default `0`
 - `hooks.*`: scripts, default null; `hooks.timeout_ms` default `60000`

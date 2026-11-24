@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -72,6 +71,9 @@ type Publisher struct {
 	APIURL, GitURL string
 	HTTP           *http.Client
 	Now            func() time.Time
+
+	// testHost replaces the code host in tests.
+	testHost host
 }
 
 var repoRE = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)$`)
@@ -92,8 +94,7 @@ func (p *Publisher) now() time.Time {
 // set when the error is nil.
 func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Workspace, v worker.VerifyResult) (*orchestrator.PublishRecord, *worker.Rejection, error) {
 	cfg := p.Config()
-	owner, repo, err := target(cfg, ws)
-	if err != nil {
+	if err := target(cfg, ws); err != nil {
 		return nil, nil, err
 	}
 	ad, rej, err := p.admit(ctx, cfg, ws)
@@ -101,7 +102,7 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 		return nil, rej, err
 	}
 	imp, diff, res := ad.imp, ad.diff, ad.res
-	api, gitURL, err := p.endpoints(owner, repo)
+	h, err := p.host()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -109,7 +110,7 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 	if err != nil {
 		return nil, nil, fmt.Errorf("repository token: %w", err)
 	}
-	if err := p.Mirror.Push(ctx, gitURL, ws.Key, ws.Branch, tok); err != nil {
+	if err := p.Mirror.Push(ctx, h.gitURL(), ws.Key, ws.Branch, tok); err != nil {
 		return nil, nil, fmt.Errorf("push: %w", err)
 	}
 
@@ -140,12 +141,12 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 	if len(v.Screenshots) > 0 {
 		// Pictures are an extra. A pull request without them is better
 		// than no pull request.
-		if proof.Screenshots, err = p.store(ctx, api, owner, repo, ws.Key, imp.Head, v.Screenshots); err != nil {
+		if proof.Screenshots, err = h.storeShots(ctx, ws.Key, imp.Head, v.Screenshots); err != nil {
 			proof.ScreenshotNote = "The screenshots were taken but could not be stored in the repository."
 		}
 	}
 	text := body(closes, flags, proof, "")
-	number, err := api.upsert(ctx, owner, repo, ws.Branch, cfg.Workspace.BaseBranch, title(is.Identifier, is.Title), text,
+	number, err := h.upsert(ctx, ws.Branch, cfg.Workspace.BaseBranch, title(is.Identifier, is.Title), text,
 		cfg.Publish.DraftUntilGreen)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pull request: %w", err)
@@ -158,23 +159,21 @@ func (p *Publisher) Publish(ctx context.Context, is issue.Issue, ws workspace.Wo
 
 // target names the repository and checks the branch a workspace is
 // published on.
-func target(cfg *config.Config, ws workspace.Workspace) (owner, repo string, err error) {
+func target(cfg *config.Config, ws workspace.Workspace) error {
 	m := repoRE.FindStringSubmatch(cfg.Workspace.Repo)
 	if m == nil || strings.HasSuffix(m[2], ".git") || m[2] == "." || m[2] == ".." {
-		return "", "", errors.New("workspace.repo must be owner/name")
+		return errors.New("workspace.repo must be owner/name")
 	}
-	owner, repo = m[1], m[2]
 	prefix := cfg.Publish.BranchPrefix
 	// The service only ever writes below its own prefix, so no ticket can
 	// steer a push at the base branch or at someone's feature branch.
 	if prefix == "" || !strings.HasPrefix(ws.Branch, prefix) || len(ws.Branch) == len(prefix) || !mirror.ValidBranch(ws.Branch) {
-		return "", "", errors.New("the workspace branch is not under publish.branch_prefix")
+		return errors.New("the workspace branch is not under publish.branch_prefix")
 	}
 	if ws.Branch == cfg.Workspace.BaseBranch {
-		return "", "", errors.New("the workspace branch is the base branch")
+		return errors.New("the workspace branch is the base branch")
 	}
-
-	return owner, repo, nil
+	return nil
 }
 
 // historyFactor is how many times policy.max_diff_bytes the commits may
@@ -265,31 +264,6 @@ func (p *Publisher) admit(ctx context.Context, cfg *config.Config, ws workspace.
 	}
 
 	return &admitted{imp, diff, res}, nil, nil
-}
-
-func (p *Publisher) endpoints(owner, repo string) (*api, string, error) {
-	apiURL := p.APIURL
-	if apiURL == "" {
-		apiURL = "https://api.github.com"
-	}
-	base, err := url.Parse(apiURL)
-	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" {
-		return nil, "", errors.New("the API URL is not valid")
-	}
-	if base.Scheme != "https" && !(base.Scheme == "http" && (base.Hostname() == "127.0.0.1" || base.Hostname() == "localhost")) {
-		return nil, "", errors.New("the API URL must use https")
-	}
-	hc := &http.Client{Timeout: 30 * time.Second}
-	if p.HTTP != nil {
-		cp := *p.HTTP
-		hc = &cp
-	}
-	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	git := p.GitURL
-	if git == "" {
-		git = "https://github.com"
-	}
-	return &api{base: base, hc: hc, token: p.Token}, strings.TrimSuffix(git, "/") + "/" + owner + "/" + repo + ".git", nil
 }
 
 // Publish must keep the signature of the worker's publish gate.

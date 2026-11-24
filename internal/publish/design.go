@@ -24,8 +24,7 @@ const DesignOutside = "design_outside_folder"
 func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws workspace.Workspace, folder string,
 	shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error) {
 	cfg := p.Config()
-	owner, repo, err := target(cfg, ws)
-	if err != nil {
+	if err := target(cfg, ws); err != nil {
 		return nil, nil, err
 	}
 	folder = strings.Trim(folder, "/")
@@ -57,7 +56,7 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 		return nil, r, nil
 	}
 
-	api, gitURL, err := p.endpoints(owner, repo)
+	h, err := p.host()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -65,7 +64,7 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 	if err != nil {
 		return nil, nil, fmt.Errorf("repository token: %w", err)
 	}
-	if err := p.Mirror.Push(ctx, gitURL, ws.Key, ws.Branch, tok); err != nil {
+	if err := p.Mirror.Push(ctx, h.gitURL(), ws.Key, ws.Branch, tok); err != nil {
 		return nil, nil, fmt.Errorf("push: %w", err)
 	}
 
@@ -75,7 +74,7 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 	}
 	proof := Proof{Worker: cfg.Worker.Name, Commits: len(ad.imp.Commits), Files: len(ad.diff.Changes), ScreenshotNote: note}
 	if len(shots) > 0 {
-		if proof.Screenshots, err = p.store(ctx, api, owner, repo, ws.Key, ad.imp.Head, shots); err != nil {
+		if proof.Screenshots, err = h.storeShots(ctx, ws.Key, ad.imp.Head, shots); err != nil {
 			proof.ScreenshotNote = "The pictures were taken but could not be stored in the repository."
 		}
 	}
@@ -91,7 +90,7 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 	}
 	text := designBody(idea, folder, flags, proof)
 	// Not a draft: there are no checks to wait for, the owner is next.
-	number, err := api.upsert(ctx, owner, repo, ws.Branch, cfg.Workspace.BaseBranch,
+	number, err := h.upsert(ctx, ws.Branch, cfg.Workspace.BaseBranch,
 		title("Design for "+is.Identifier, is.Title), text, false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pull request: %w", err)
