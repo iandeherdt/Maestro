@@ -973,6 +973,12 @@ is supplied through an ephemeral `GIT_ASKPASS` helper.
      as is.
    - If the pull request branch exists in the mirror and is ahead of the workspace branch (pushed
      by a previous process), fast-forward the workspace branch to it.
+   - If that branch is published and the newest base branch in the mirror is not in it, merge the
+     base branch into it with a merge commit, when the tree is clean and no merge is in progress.
+     `base_sha` becomes the newest base, so what the merge brings in is not counted as the
+     agent's work. A conflict is left in the tree: the prompt tells the agent to resolve it and
+     commit the merge first. GitHub runs no pull request workflow on a branch that conflicts with
+     its base, so without this such a branch could never pass its checks.
 4. Population failure on a new workspace removes the partial directory. A reused workspace is
    never destructively reset.
 

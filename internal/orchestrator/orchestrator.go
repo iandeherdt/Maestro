@@ -1353,7 +1353,8 @@ func (o *Orchestrator) blockLead(reason string) string {
 	case "merge_conflict":
 		return "Blocked: the pull request has conflicts with its base branch (`merge_conflict`), " +
 			"so its CI does not run and it cannot be merged. Another change to the same files was merged first. " +
-			"Resolve the conflicts on the pull request (GitHub's Resolve conflicts button, or locally); " +
+			"Move the card back to Todo: before the next attempt the service merges the base branch into the branch, " +
+			"and the agent resolves the conflicts. Or resolve them yourself on the pull request; " +
 			"its checks then run, and you review and merge it as usual."
 	case "pull_request_closed":
 		return "Blocked: the pull request was closed before its checks passed (`pull_request_closed`)."
