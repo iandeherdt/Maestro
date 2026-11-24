@@ -1291,7 +1291,7 @@ UMask=0077
 MemoryMax=<sandbox.memory_max> MemorySwapMax=0
 CPUQuota=<sandbox.cpu_quota>   TasksMax=<sandbox.tasks_max>
 RuntimeMaxSec=<step timeout>   KillMode=control-group      OOMPolicy=kill
-PrivateNetwork=yes             IPAddressDeny=any
+PrivateNetwork=yes             IPAddressDeny=any           IPAddressAllow=localhost
 BindReadOnlyPaths=<proxy socket of the profile>:/run/maestro-proxy.sock   # only with network
 ```
 
@@ -1301,7 +1301,8 @@ BindReadOnlyPaths=<proxy socket of the profile>:/run/maestro-proxy.sock   # only
   socket, it serves it on `127.0.0.1:3128` inside the unit, sets nothing else, and runs the
   step's command; `HTTPS_PROXY` points there. This replaces `IPAddressAllow=<proxy address>`, which
   cannot limit ports and so would leave every other loopback service of the worker reachable, and
-  it does not depend on cgroup v2.
+  it does not depend on cgroup v2. `IPAddressAllow=localhost` lets the step reach that relay: the
+  address filter covers loopback too, and inside the unit loopback is the unit's own.
 - Paths inside a unit: the workspace is `/workspace` (the repository is `/workspace/repo`), the
   mirror `/mirror`, the hand-off folder `/handoff`, the Claude state `/claude`
   (`CLAUDE_CONFIG_DIR`), the Unity licence `/unity-licence`. `HOME` is `/tmp`. Nothing of the

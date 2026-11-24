@@ -119,8 +119,10 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 		"NoNewPrivileges=yes", "CapabilityBoundingSet=", "AmbientCapabilities=",
 		"ProtectSystem=strict", "ProtectHome=tmpfs",
 		"PrivateTmp=yes", "PrivateDevices=yes", "PrivateUsers=no",
-		// No network of its own: only loopback, inside the unit.
-		"PrivateNetwork=yes", "IPAddressDeny=any",
+		// No network of its own: only loopback, inside the unit. The
+		// address filter applies to loopback too, so it is allowed: the
+		// step reaches its proxy relay on 127.0.0.1.
+		"PrivateNetwork=yes", "IPAddressDeny=any", "IPAddressAllow=localhost",
 		"ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectKernelLogs=yes",
 		"ProtectControlGroups=yes", "ProtectClock=yes", "ProtectHostname=yes",
 		"RestrictSUIDSGID=yes", "LockPersonality=yes", "RestrictRealtime=yes",
@@ -205,8 +207,8 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 // What each one adds is covered there in another way, except
 // RestrictSUIDSGID, LockPersonality and OOMPolicy:
 //   - ProtectKernelLogs: the unit has no CAP_SYSLOG, PrivateDevices hides
-//     /dev/kmsg, /proc/kmsg is made inaccessible and syslog(2) is filtered
-//     (see compat);
+//     /dev/kmsg, /proc/kmsg is root's alone and the unit has no
+//     capability to pass that, and syslog(2) is filtered (see compat);
 //   - ProtectClock and ProtectHostname: the unit has no capabilities to
 //     set the clock or the host name;
 //   - RestrictSUIDSGID: NoNewPrivileges keeps a set-user-ID file from
@@ -231,8 +233,9 @@ var since = map[string]int{
 const typeExecSince = 240
 
 // compat is what is added instead on a systemd that lacks
-// ProtectKernelLogs.
-var compat = []string{"SystemCallFilter=~syslog", "InaccessiblePaths=-/proc/kmsg"}
+// ProtectKernelLogs. Not InaccessiblePaths=/proc/kmsg: on systemd 239
+// (RHEL 8) the unit then starts without its BindPaths= (the workspace).
+var compat = []string{"SystemCallFilter=~syslog"}
 
 // supported reports whether systemd version v knows the property kv. A
 // version of 0 is unknown and counts as new.
