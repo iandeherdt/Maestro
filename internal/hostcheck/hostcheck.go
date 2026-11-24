@@ -449,12 +449,20 @@ func Profile(dir, home string, secret, read []string) (string, error) {
 	// own have to be passed through. Without this every full path in it is
 	// refused: the shell's `cd x/..` says "Not a directory", and Unity cannot
 	// open the project by its path.
-	w(";; The folders above it can be passed through, not listed or read.")
+	// The same holds for the folders that are read, such as an Editor below
+	// the home folder: .NET looks up its own full path, and without its
+	// parents Unity's compiler stops with "Failed to resolve full path of
+	// the current executable".
+	w(";; The folders above it and above what is read can be passed through, not listed or read.")
 	w("(allow file-read-metadata")
-	for d := filepath.Dir(real(dir)); ; d = filepath.Dir(d) {
-		w("    (literal %s)", q(d))
-		if d == filepath.Dir(d) {
-			break
+	seen := map[string]bool{}
+	for _, p := range append([]string{dir}, read...) {
+		for d := filepath.Dir(real(p)); !seen[d]; d = filepath.Dir(d) {
+			seen[d] = true
+			w("    (literal %s)", q(d))
+			if d == filepath.Dir(d) {
+				break
+			}
 		}
 	}
 	w(")")
