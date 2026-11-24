@@ -1660,7 +1660,9 @@ The message is capped and stripped of control characters before it is logged.
 Request safety: the token is sent only to the configured API origin. Redirects are not followed,
 and a pagination link that points to another origin fails the call with `tracker_pagination`.
 `upsert_status_comment` edits only a comment written by `bot_login`, so a marker planted by
-someone else is ignored. Blockers are cached for five minutes. If the dependencies endpoint does
+someone else is ignored. Blockers are cached for five minutes, and forgotten at once when the service
+moves a ticket to `done_state`, so a ticket waiting for it is picked up on the next poll. A
+`Todo` ticket held back by an open blocker is logged once at info, naming the blockers. If the dependencies endpoint does
 not exist for the repository, blockers are not checked and a warning is logged once.
 
 Not implemented yet: conditional requests, and the `doctor` check of who can write to the

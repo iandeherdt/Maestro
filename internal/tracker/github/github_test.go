@@ -1,9 +1,11 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -466,6 +468,38 @@ func TestBlockers(t *testing.T) {
 	got, _ = a.FetchIssuesByStates(ctx, []string{"Todo"})
 	if !got[0].Dispatchable {
 		t.Fatal("closed blocker still blocks")
+	}
+
+	// Moving a ticket to done rechecks the tickets that wait for it at once,
+	// and the log says which open issue a ticket waits for.
+	var logged bytes.Buffer
+	h3 := newHub(t)
+	h3.add(1, "ian", "ian", "status:Todo", "run:linux").blockers = []int{2}
+	h3.add(2, "ian", "ian", "status:Human Review", "run:linux")
+	a3, err := New(testCfg(h3.srv.URL), Options{Env: env, Now: func() time.Time { return now },
+		Log: slog.New(slog.NewTextHandler(&logged, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ = a3.FetchIssuesByStates(ctx, []string{"Todo"})
+	if got[0].Dispatchable {
+		t.Fatal("open blocker ignored")
+	}
+	a3.FetchIssuesByStates(ctx, []string{"Todo"})
+	if n := strings.Count(logged.String(), "waits_for=GH-2"); n != 1 {
+		t.Fatalf("wait logged %d times:\n%s", n, logged.String())
+	}
+	two, _ := a3.FetchIssuesByStates(ctx, []string{"Human Review"})
+	h3.issues[2].state = "closed" // the merged pull request closed it
+	if err := a3.SetState(ctx, two[0], "Done"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = a3.FetchIssuesByStates(ctx, []string{"Todo"}) // the clock has not moved
+	if !got[0].Dispatchable {
+		t.Fatal("a ticket waits for blockerTTL after its blocker was moved to done")
+	}
+	if !strings.Contains(logged.String(), "no longer waits") {
+		t.Fatalf("end of wait not logged:\n%s", logged.String())
 	}
 
 	// Where the dependencies API does not exist, blockers are not checked.
