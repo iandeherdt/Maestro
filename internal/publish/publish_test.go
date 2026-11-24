@@ -704,6 +704,11 @@ type gh struct {
 	inline  []map[string]any
 	posted  []string
 	headAt  string
+	// one is what reading pull request 31 by itself answers.
+	one map[string]any
+	// merge is what MergeBase answers; merges and pushes count the calls.
+	merge          mirror.BaseMerge
+	merges, pushes int
 }
 
 func (g *gh) Import(context.Context, string, string, string) (mirror.Imported, error) {
@@ -716,7 +721,17 @@ func (g *gh) OnBranch(context.Context, string, string, string) (bool, error) { r
 func (g *gh) HistoryAdded(context.Context, string, string, int64) ([]string, bool, error) {
 	return nil, true, nil
 }
-func (g *gh) Push(context.Context, string, string, string, string) error { return nil }
+func (g *gh) Push(context.Context, string, string, string, string) error {
+	g.pushes++
+	return nil
+}
+func (g *gh) MergeBase(_ context.Context, key, branch, base, name, email string) (mirror.BaseMerge, string, error) {
+	g.merges++
+	if key != "GH-7" || branch != "maestro/GH-7" || base != "main" || name == "" || email == "" {
+		return mirror.BaseSkipped, "", context.Canceled
+	}
+	return g.merge, "3333333333333333333333333333333333333333", nil
+}
 func (g *gh) ForgetPush(_ context.Context, key string) error {
 	g.forgot = append(g.forgot, key)
 	return nil
@@ -748,6 +763,12 @@ func newGH(t *testing.T) (*gh, *Publisher) {
 		case "GET /repos/ian/app/pulls":
 			g.queries = append(g.queries, r.URL.RawQuery)
 			json.NewEncoder(w).Encode(g.pulls)
+		case "GET /repos/ian/app/pulls/31":
+			if g.one == nil {
+				w.WriteHeader(404)
+				return
+			}
+			json.NewEncoder(w).Encode(g.one)
 		case "GET /repos/ian/app/pulls/31/reviews":
 			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 			start := min((page-1)*100, len(g.reviews))
@@ -1141,5 +1162,60 @@ func TestACommentDraftedBeforeAMarkCountsFromItsReview(t *testing.T) {
 	if err != nil || st.State != orchestrator.ReviewFeedback || st.FeedbackCount != 1 ||
 		!st.FeedbackThrough.Equal(time.Date(2026, 11, 21, 11, 50, 0, 0, time.UTC)) {
 		t.Fatalf("%+v, %v", st, err)
+	}
+}
+
+func TestReviewSeesAConflict(t *testing.T) {
+	g, p := newGH(t)
+	g.pulls = []map[string]any{pullOn(31, "open", "", "sym[bot]", "ian/app")}
+	if st, err := p.Review(ctx, ticket); err != nil || st.State != orchestrator.ReviewOpen || st.Conflicted {
+		t.Fatalf("pull request that cannot be read by itself: %+v, %v", st, err)
+	}
+	g.one = pullOn(31, "open", "", "sym[bot]", "ian/app")
+	g.one["mergeable_state"] = "unknown"
+	if st, _ := p.Review(ctx, ticket); st.Conflicted {
+		t.Fatalf("not known yet: %+v", st)
+	}
+	g.one["mergeable_state"] = "dirty"
+	if st, err := p.Review(ctx, ticket); err != nil || st.State != orchestrator.ReviewOpen || !st.Conflicted {
+		t.Fatalf("conflicting: %+v, %v", st, err)
+	}
+}
+
+func TestUpdateBranch(t *testing.T) {
+	g, p := newGH(t)
+	p.Config().Publish.UpdateBranches = true
+	p.BotName, p.BotEmail = "sym[bot]", "sym@example.com"
+	fetched := 0
+	p.Fetch = func(context.Context) error { fetched++; return nil }
+
+	// No open pull request: nothing is fetched or merged.
+	g.pulls = []map[string]any{pullOn(31, "closed", "2026-11-21T10:00:00Z", "sym[bot]", "ian/app")}
+	if up, err := p.UpdateBranch(ctx, ticket); err != nil || up.State != orchestrator.BaseUnchanged || fetched != 0 || g.merges != 0 {
+		t.Fatalf("merged pull request: %+v, %v", up, err)
+	}
+	g.pulls = []map[string]any{pullOn(31, "open", "", "sym[bot]", "ian/app")}
+	for merge, want := range map[mirror.BaseMerge]orchestrator.BaseState{
+		mirror.BaseSkipped: orchestrator.BaseUnchanged, mirror.BaseCurrent: orchestrator.BaseUnchanged,
+		mirror.BaseConflict: orchestrator.BaseConflicted, mirror.BaseMerged: orchestrator.BaseUpdated,
+	} {
+		g.merge, g.pushes = merge, 0
+		up, err := p.UpdateBranch(ctx, ticket)
+		if err != nil || up.State != want || up.PRNumber != 31 {
+			t.Fatalf("merge %v: %+v, %v", merge, up, err)
+		}
+		if pushed := g.pushes == 1; pushed != (merge == mirror.BaseMerged) {
+			t.Fatalf("merge %v: %d push(es)", merge, g.pushes)
+		}
+	}
+	if fetched != 4 {
+		t.Fatalf("fetched %d times", fetched)
+	}
+
+	// Switched off.
+	p.Config().Publish.UpdateBranches = false
+	g.merges = 0
+	if up, err := p.UpdateBranch(ctx, ticket); err != nil || up.State != orchestrator.BaseUnchanged || g.merges != 0 {
+		t.Fatalf("switched off: %+v, %v", up, err)
 	}
 }

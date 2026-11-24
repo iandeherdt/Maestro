@@ -325,6 +325,35 @@ type ReviewStatus struct {
 	// newest. Acknowledge records that time on the pull request.
 	FeedbackCount   int
 	FeedbackThrough time.Time
+	// Conflicted is true for an open pull request that the host says
+	// conflicts with its base branch.
+	Conflicted bool
+}
+
+// BaseState is what bringing a pull request up to date with its base did.
+type BaseState int
+
+const (
+	// BaseUnchanged: nothing to do, or nothing the service may do.
+	BaseUnchanged BaseState = iota
+	// BaseUpdated: the base was merged into the branch and pushed.
+	BaseUpdated
+	// BaseConflicted: the base does not merge without conflicts.
+	BaseConflicted
+)
+
+// BaseUpdate is the answer of Updater.UpdateBranch.
+type BaseUpdate struct {
+	State BaseState
+	// HeadSHA is the pushed merge commit, for BaseUpdated.
+	HeadSHA  string
+	PRNumber int
+}
+
+// Updater brings the branch of a ticket's open pull request up to date
+// with the base branch, without an agent, when that needs no decision.
+type Updater interface {
+	UpdateBranch(ctx context.Context, is issue.Issue) (BaseUpdate, error)
 }
 
 // Reviews follows pull requests after hand-off (SPEC 15.8).

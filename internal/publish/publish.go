@@ -40,6 +40,7 @@ type Mirror interface {
 	HistoryAdded(ctx context.Context, baseSHA, head string, maxBytes int64) (lines []string, complete bool, err error)
 	Push(ctx context.Context, remoteURL, workspaceKey, branch, token string) error
 	ForgetPush(ctx context.Context, workspaceKey string) error
+	MergeBase(ctx context.Context, workspaceKey, branch, baseBranch, name, email string) (mirror.BaseMerge, string, error)
 }
 
 // Publisher implements the publish gate.
@@ -71,6 +72,10 @@ type Publisher struct {
 	APIURL, GitURL string
 	HTTP           *http.Client
 	Now            func() time.Time
+
+	// Fetch brings the mirror up to date with the remote. Without it the
+	// service does not update branches itself.
+	Fetch func(context.Context) error
 
 	// testHost replaces the code host in tests.
 	testHost host

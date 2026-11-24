@@ -674,3 +674,154 @@ func TestSync(t *testing.T) {
 		t.Error("a missing remote did not fail")
 	}
 }
+
+func TestMergeBase(t *testing.T) {
+	l := newLab(t)
+	remote := l.remote()
+	seed := filepath.Join(l.root, "seed")
+	sync := func() {
+		t.Helper()
+		if err := l.mirror.Sync(ctx, remote, "tok"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	merge := func() (BaseMerge, string) {
+		t.Helper()
+		st, head, err := l.mirror.MergeBase(ctx, "k", "maestro/gh-1", "main", "bot", "bot@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st, head
+	}
+	// Nothing was pushed yet.
+	if st, _ := merge(); st != BaseSkipped {
+		t.Fatalf("before a push: %v", st)
+	}
+	l.write("a", "ticket\n")
+	l.commit("ticket work")
+	if _, err := l.mirror.Import(ctx, l.bundle(), "k", l.base); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	sync()
+	if st, _ := merge(); st != BaseCurrent {
+		t.Fatalf("on an unchanged base: %v", st)
+	}
+
+	// The base moves on in another file: the merge is clean and is pushed.
+	work := l.work
+	l.work = seed
+	l.write("b", "sibling\n")
+	next := l.commit("a sibling merged")
+	l.run(seed, "push", "-q", remote, "HEAD:refs/heads/main")
+	sync()
+	st, head := merge()
+	if st != BaseMerged {
+		t.Fatalf("on a base that moved: %v", st)
+	}
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.run(remote, "rev-parse", "refs/heads/maestro/gh-1"); got != head {
+		t.Fatalf("remote branch at %s, want the merge %s", got, head)
+	}
+	if got := l.run(remote, "rev-parse", head+"^2"); got != next {
+		t.Fatalf("the merge's second parent is %s", got)
+	}
+	if got := l.run(remote, "log", "-1", "--format=%an <%ae> %s", head); got != "bot <bot@example.com> Merge main into maestro/gh-1" {
+		t.Fatalf("merge commit: %s", got)
+	}
+	if got := l.run(remote, "ls-tree", "--name-only", head, "a", "b"); got != "a\nb" {
+		t.Fatalf("merged tree: %s", got)
+	}
+	sync()
+	if st, _ := merge(); st != BaseCurrent {
+		t.Fatalf("after the merge: %v", st)
+	}
+
+	// The workspace takes the merge and the agent goes on from it: what it
+	// hands in next is measured from the newest base, and is accepted.
+	l.run(work, "fetch", "-q", l.mirror.Dir, "refs/heads/maestro/gh-1")
+	l.run(work, "merge", "-q", "--ff-only", "FETCH_HEAD")
+	l.work = work
+	l.write("c", "more ticket work\n")
+	after := l.commit("more ticket work")
+	imp, err := l.mirror.Import(ctx, l.bundle(next+"..HEAD"), "k", next)
+	if err != nil || imp.Head != after {
+		t.Fatalf("import after the merge: %+v, %v", imp, err)
+	}
+	d, err := l.mirror.Diff(ctx, next, imp.Head, Limits{MaxChangedFiles: 10, MaxDiffBytes: 1 << 20, MaxFileBytes: 1 << 20})
+	if err != nil || len(d.Changes) != 2 {
+		t.Fatalf("the diff from the newest base holds %d file(s), want the ticket's 2: %v", len(d.Changes), err)
+	}
+	if err := l.mirror.Push(ctx, remote, "k", "maestro/gh-1", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	head = after
+	sync()
+	l.work = seed
+
+	// The base changes the ticket's own file: a conflict, and nothing moves.
+	l.write("a", "sibling\n")
+	l.commit("a sibling changed the same file")
+	l.run(seed, "push", "-q", remote, "HEAD:refs/heads/main")
+	sync()
+	if st, _ := merge(); st != BaseConflict {
+		t.Fatalf("on a conflicting base: %v", st)
+	}
+	if got := l.run(l.mirror.Dir, "rev-parse", IncomingRef("k")); got != head {
+		t.Fatalf("a conflict moved the imported head to %s", got)
+	}
+
+	// Someone else pushed to the branch: it is left alone.
+	l.run(remote, "update-ref", "refs/heads/maestro/gh-1", next)
+	sync()
+	if st, _ := merge(); st != BaseSkipped {
+		t.Fatalf("on a branch someone else moved: %v", st)
+	}
+	l.work = work
+}
+
+// A merge of the base branch is the one merge the work may hold. What was
+// typed while resolving it is part of the history that is scanned.
+func TestAMergeOfTheBaseIsImportedAndScanned(t *testing.T) {
+	l := newLab(t)
+	seed := filepath.Join(l.root, "seed")
+	l.write("notes.txt", "one\ntwo by the agent\n")
+	l.commit("ticket work")
+	work := l.work
+	l.work = seed
+	l.write("notes.txt", "one\ntwo by the owner\n")
+	next := l.commit("the owner changed the same line")
+	l.run(l.mirror.Dir, "fetch", "-q", seed, "+refs/heads/main:refs/heads/main")
+	l.work = work
+	l.run(work, "fetch", "-q", seed, "main")
+	cmd := exec.Command("git", "merge", "-q", "--no-edit", "FETCH_HEAD")
+	cmd.Dir = work
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "HOME="+l.root,
+		"GIT_AUTHOR_NAME=agent", "GIT_AUTHOR_EMAIL=agent@example.com",
+		"GIT_COMMITTER_NAME=agent", "GIT_COMMITTER_EMAIL=agent@example.com")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("the merge was expected to conflict")
+	}
+	l.write("notes.txt", "one\ntwo by both\nTOKEN-typed-in-the-merge\n")
+	l.run(work, "add", "-A")
+	l.run(work, "commit", "-q", "-m", "Merge main into the work")
+	l.write("notes.txt", "one\ntwo by both\n")
+	head := l.commit("take the token out again")
+
+	imp, err := l.mirror.Import(ctx, l.bundle(next+"..HEAD"), "k", next)
+	if err != nil || imp.Head != head || len(imp.Commits) != 3 {
+		t.Fatalf("import: %+v, %v", imp, err)
+	}
+	lines, complete, err := l.mirror.HistoryAdded(ctx, next, head, 1<<20)
+	if err != nil || !complete || !strings.Contains(strings.Join(lines, "\n"), "TOKEN-typed-in-the-merge") {
+		t.Fatalf("the line added in the merge is not in the history: %v, complete %v, %v", lines, complete, err)
+	}
+	// Measured from the base before the merge, the merge brings in a
+	// commit that is not below that base: refused.
+	_, err = l.mirror.Import(ctx, l.bundle(l.base+"..HEAD"), "k", l.base)
+	wantRejected(t, err, "single line of history")
+}

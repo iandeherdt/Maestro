@@ -123,7 +123,7 @@ func TestFailedChecksCountAgainstTheBudget(t *testing.T) {
 }
 
 func TestForeignPushAndClosedPullRequestBlock(t *testing.T) {
-	for state, reason := range map[CheckState]string{ChecksForeignPush: "foreign_push", ChecksClosed: "pull_request_closed", ChecksConflict: "merge_conflict"} {
+	for state, reason := range map[CheckState]string{ChecksForeignPush: "foreign_push", ChecksClosed: "pull_request_closed"} {
 		e, c := published(t)
 		c.status = CheckStatus{State: state}
 		e.tick()
@@ -253,5 +253,113 @@ func TestNoCheckAtAllIsPointedOutOnce(t *testing.T) {
 	e.tick()
 	if strings.Contains(comments(e), "No check has started") {
 		t.Fatal("pointed out while checks run")
+	}
+}
+
+type fakeUpdater struct {
+	up    BaseUpdate
+	err   error
+	calls []string
+}
+
+func (u *fakeUpdater) UpdateBranch(_ context.Context, is issue.Issue) (BaseUpdate, error) {
+	u.calls = append(u.calls, is.Identifier)
+	return u.up, u.err
+}
+
+func TestAConflictGoesBackToTheAgent(t *testing.T) {
+	e, c := published(t)
+	c.status = CheckStatus{State: ChecksConflict}
+	e.tick()
+	r := e.retry("id-1")
+	if r.Kind != KindGate || r.Error != "merge_conflict" || len(e.o.awaiting) != 0 || e.b.Failures("id-1") != 1 || lastState(e) != "In Progress" {
+		t.Fatalf("retry %+v, failures %d, state %s", r, e.b.Failures("id-1"), lastState(e))
+	}
+	e.after(time.Second)
+	e.wantStarts(2)
+	if a := e.w.last().attempt; len(a.Feedback) != 1 || !strings.Contains(a.Feedback[0].Body, "Resolve every conflict") {
+		t.Fatalf("attempt %+v", a)
+	}
+
+	// A conflict that keeps coming back ends in the blocked state.
+	e, c = published(t)
+	e.b.IncFailure("id-1")
+	e.b.IncFailure("id-1")
+	c.status = CheckStatus{State: ChecksConflict}
+	e.tick()
+	if lastState(e) != "Blocked" || !strings.Contains(comments(e), "merge_conflict") {
+		t.Fatalf("state %s, comments %s", lastState(e), comments(e))
+	}
+}
+
+func TestAMergeBringsAWaitingPullRequestUpToDate(t *testing.T) {
+	e, c := published(t)
+	e.cfg.Publish.UpdateBranches = true
+	e.cfg.Publish.ChecksTimeoutMS = 3600000
+	u := &fakeUpdater{up: BaseUpdate{State: BaseUpdated, HeadSHA: "def", PRNumber: 7}}
+	e.o.d.Updater = u
+	e.tick()
+	if len(u.calls) != 0 || c.calls != 1 {
+		t.Fatalf("updated without a merge: %v, %d check(s)", u.calls, c.calls)
+	}
+	e.o.baseMoved()
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	rec := e.o.awaiting["id-1"]
+	if len(u.calls) != 1 || c.calls != 1 || rec == nil || rec.HeadSHA != "def" ||
+		!rec.ChecksDeadline.Equal(e.clock.Now().Add(time.Hour)) {
+		t.Fatalf("updates %v, checks %d, record %+v", u.calls, c.calls, rec)
+	}
+	// Once per merge: the next look reads the checks of the new commit.
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if len(u.calls) != 1 || c.calls != 2 {
+		t.Fatalf("updates %v, checks %d", u.calls, c.calls)
+	}
+
+	// A base that does not merge cleanly is work for the agent.
+	u.up = BaseUpdate{State: BaseConflicted, PRNumber: 7}
+	e.o.baseMoved()
+	e.clock.advance(61 * time.Second)
+	e.tick()
+	if r := e.retry("id-1"); r.Error != "merge_conflict" || len(e.o.awaiting) != 0 {
+		t.Fatalf("retry %+v", r)
+	}
+
+	// Switched off: nothing is noted.
+	e, _ = published(t)
+	e.o.d.Updater = u
+	e.o.baseMoved()
+	if len(e.o.needUpdate) != 0 || e.o.updateHandoff {
+		t.Fatal("update_branches is off, and an update was noted")
+	}
+}
+
+// A second conflict after the agent resolved the first is a new failure,
+// not the same one twice. The same commit conflicting again is.
+func TestASecondConflictIsNotARepeatedFailure(t *testing.T) {
+	conflictAt := func(e *env, c *fakeChecks, head string) {
+		e.exit(Outcome{Kind: Published, Publish: &PublishRecord{IssueID: "id-1", Identifier: "GH-1", PRNumber: 7,
+			HeadSHA: head, ChecksDeadline: e.clock.Now().Add(30 * time.Minute)}})
+		c.status = CheckStatus{State: ChecksConflict}
+		e.clock.advance(61 * time.Second)
+		e.tick()
+	}
+	e, c := published(t)
+	e.cfg.Budget.BlockRepeatedFailure = true
+	e.cfg.Budget.MaxFailureAttempts = 10
+	c.status = CheckStatus{State: ChecksConflict}
+	e.tick()
+	e.after(time.Second)
+	e.wantStarts(2)
+	conflictAt(e, c, "bcdefabcdefabcdefabcdefabcdefabcdefabcdef")
+	if lastState(e) == "Blocked" {
+		t.Fatalf("a conflict on a new commit blocked the ticket: %s", comments(e))
+	}
+	e.after(time.Minute)
+	e.wantStarts(3)
+	conflictAt(e, c, "bcdefabcdefabcdefabcdefabcdefabcdefabcdef")
+	if lastState(e) != "Blocked" {
+		t.Fatalf("the same commit conflicting twice did not block: %s", lastState(e))
 	}
 }

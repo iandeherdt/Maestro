@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -339,5 +340,44 @@ func TestBriefOffersOnlySelf(t *testing.T) {
 	d.Self = "elsewhere"
 	if b, _ = d.Brief(ctx, idea); strings.Join(b.Workers, ",") != "mac,linux,maestro-mac-mini" {
 		t.Errorf("unknown self: %v", b.Workers)
+	}
+}
+
+func TestTasksThatTouchTheSameFileAreChained(t *testing.T) {
+	answer := func(tasks string) string {
+		return "```json\n{\"tasks\": [" + tasks + "]}\n```\nMAESTRO_PLAN: tasks\n"
+	}
+	p, err := Parse(answer(`
+		{"title":"A","description":"D","worker":"mac","touches":["src/Player.cs","./src/Tuning.cs"," src/Player.cs "]},
+		{"title":"B","description":"D","worker":"mac","touches":["src/Light.cs"]},
+		{"title":"C","description":"D","worker":"mac","touches":["src/Tuning.cs"]},
+		{"title":"D","description":"D","worker":"mac","depends_on":[3],"touches":["src/Player.cs","art/"]},
+		{"title":"E","description":"D","worker":"mac","touches":["art/gun.png","src/Light.cs"]},
+		{"title":"F","description":"D","worker":"mac"}`), []string{"mac"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]int{nil, nil, {1}, {3}, {2, 4}, nil}
+	for i, task := range p.Tasks {
+		if fmt.Sprint(task.DependsOn) != fmt.Sprint(want[i]) {
+			t.Errorf("task %d waits for %v, want %v", i+1, task.DependsOn, want[i])
+		}
+	}
+	if got := strings.Join(p.Tasks[0].Touches, "|"); got != "src/Player.cs|src/Tuning.cs" {
+		t.Errorf("touches %q", got)
+	}
+	c := p.Comment("Planning", "Planned", "Todo")
+	if !strings.Contains(c, "Files this task is expected to change: src/Player.cs, src/Tuning.cs") ||
+		!strings.Contains(c, ", after task 2, 4") || !strings.Contains(c, "one after the other") {
+		t.Errorf("comment:\n%s", c)
+	}
+
+	for name, touches := range map[string]string{
+		"absolute": `["/etc/passwd"]`, "parent": `["src/../../x"]`, "backtick": "[\"a`b\"]", "empty": `[""]`,
+		"newline": `["a\\nb"]`, "backslash": `["a\\\\b"]`, "list in one": `["a, b"]`,
+	} {
+		if _, err := Parse(answer(`{"title":"A","description":"D","worker":"mac","touches":`+touches+`}`), []string{"mac"}); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

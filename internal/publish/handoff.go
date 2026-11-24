@@ -69,7 +69,13 @@ func (p *Publisher) Review(ctx context.Context, is issue.Issue) (orchestrator.Re
 	case pr.State != changeOpen:
 		return orchestrator.ReviewStatus{State: orchestrator.ReviewClosed, PRNumber: pr.Number}, nil
 	}
-	st := orchestrator.ReviewStatus{State: orchestrator.ReviewOpen, PRNumber: pr.Number}
+	st := orchestrator.ReviewStatus{State: orchestrator.ReviewOpen, PRNumber: pr.Number, Conflicted: pr.Conflicted}
+	// A list of pull requests does not say on every host whether one
+	// conflicts with its base; the pull request itself does. Not knowing
+	// is "no conflict": the next look asks again.
+	if full, err := h.change(ctx, pr.Number); err == nil && full.State == changeOpen && full.HeadSHA == pr.HeadSHA {
+		st.Conflicted = st.Conflicted || full.Conflicted
+	}
 	comments := p.commentsOn(cfg)
 	if !cfg.Publish.ReworkOnChangesRequested && !comments {
 		return st, nil

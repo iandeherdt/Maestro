@@ -1016,6 +1016,7 @@ changed ones:
 | `screenshots.pages` | none | Pages the service takes a picture of for the pull request, see [Screenshots on the pull request](#screenshots-on-the-pull-request) |
 | `publish.required_checks` | the repository's checks | `none` hands a pull request to you without waiting for CI. A list of names waits for exactly those. |
 | `publish.rework_on_comments` | `true` | Your comments on a pull request send the card back to work, see [Asking for changes](#asking-for-changes) |
+| `publish.update_branches` | `true` | After you merge a pull request, the service merges the base branch into its other open pull requests, so their checks run on the two together. One that conflicts goes back to an agent, which resolves the conflicts |
 | `publish.review_quiet_ms` | `120000` | How long you have to be quiet on the pull request before that happens, in milliseconds |
 | `sandbox.network.allow_hooks` | none | Hosts the `after_create` and `before_run` hooks may reach, for installing dependencies |
 | `claude.model` | `opus` | The model for every ticket, see [Choosing the model](#choosing-the-model) |
