@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -133,6 +134,9 @@ func since(stamp *string, now time.Time) string {
 	return d.String() + " ago"
 }
 
+// limitKeyRE finds the setting a daily-limit reason names.
+var limitKeyRE = regexp.MustCompile(`raise (budget\.[a-z_]+)`)
+
 func printStatus(w io.Writer, s statusJSON, now time.Time) {
 	fmt.Fprintf(w, "Maestro is running (worker %q).\n", plain(s.Worker, 40))
 	switch {
@@ -145,7 +149,12 @@ func printStatus(w io.Writer, s statusJSON, now time.Time) {
 		fmt.Fprintf(w, "The settings file has an error, so no new tickets are started:\n  %s\n", plain(*s.ConfigError, 500))
 	}
 	if s.Budget.Limit != "" {
-		fmt.Fprintf(w, "No new tickets are started until tomorrow: %s.\n  Raise it in the budget section of the settings file; it applies at once.\n", plain(s.Budget.Limit, 200))
+		fmt.Fprintf(w, "No new tickets are started until tomorrow: %s.\n", plain(s.Budget.Limit, 200))
+		if m := limitKeyRE.FindStringSubmatch(s.Budget.Limit); m != nil {
+			fmt.Fprintf(w, "  Raise it now with: maestro settings set %s NUMBER\n  (or none for no limit, where the setting allows it). It applies at once.\n", m[1])
+		} else {
+			fmt.Fprintln(w, "  Raise it with `maestro settings`; it applies at once.")
+		}
 	}
 	if len(s.Running)+len(s.Retrying)+len(s.Awaiting) == 0 {
 		fmt.Fprintln(w, "Nothing is being worked on.")

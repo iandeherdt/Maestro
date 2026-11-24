@@ -474,7 +474,8 @@ Replaces upstream `codex`.
 - `max_failure_attempts` (integer): default `3`. Per issue, across restarts.
 - `max_runs_per_day` (integer): default `20`. A run is an attempt whose agent started its first
   turn; an attempt that has not started yet holds its place under the limit. When a daily limit
-  stops dispatch, the service logs it once at warning level and `maestro status` says which.
+  stops dispatch, the service logs it once at warning level, and `maestro status` says which and
+  names the `maestro settings set` command that raises it.
 - `max_tokens_per_day` (integer or null): default null.
 - `max_agent_seconds_per_day` (integer or null): default `28800`.
 - `quota_backoff_ms` (integer): default `3600000`.
