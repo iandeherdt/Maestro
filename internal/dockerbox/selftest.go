@@ -297,12 +297,15 @@ func (p prober) run(profile, canary, deny string, pids, memory int64) []ProbeChe
 		}
 	}
 
+	// The step's own cgroup: "/" in a container, which has a cgroup
+	// namespace; the unit's path under systemd, which gives none.
+	own := p.path(filepath.Join("sys/fs/cgroup", ownCgroup(p.path("proc/self/cgroup"))))
 	if pids > 0 {
-		have := limit(p.path("sys/fs/cgroup/pids.max"), p.path("sys/fs/cgroup/pids/pids.max"))
+		have := limit(filepath.Join(own, "pids.max"), p.path("sys/fs/cgroup/pids.max"), p.path("sys/fs/cgroup/pids/pids.max"))
 		add("the process limit is in force", have > 0 && have <= pids, true, limitDetail(have, pids))
 	}
 	if memory > 0 {
-		have := limit(p.path("sys/fs/cgroup/memory.max"), p.path("sys/fs/cgroup/memory/memory.limit_in_bytes"))
+		have := limit(filepath.Join(own, "memory.max"), p.path("sys/fs/cgroup/memory.max"), p.path("sys/fs/cgroup/memory/memory.limit_in_bytes"))
 		add("the memory limit is in force", have > 0 && have <= memory, true, limitDetail(have, memory))
 	}
 	return out
@@ -403,6 +406,21 @@ func proxyDetail(code int, err error) string {
 		return err.Error()
 	}
 	return "the proxy answered " + strconv.Itoa(code)
+}
+
+// ownCgroup is the cgroup v2 path in /proc/self/cgroup ("0::/path"), or
+// "/" when there is none.
+func ownCgroup(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "/"
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if rest, ok := strings.CutPrefix(line, "0::"); ok && strings.HasPrefix(rest, "/") && !strings.Contains(rest, "..") {
+			return rest
+		}
+	}
+	return "/"
 }
 
 // limit reads the first cgroup limit file that exists. "max" and missing
