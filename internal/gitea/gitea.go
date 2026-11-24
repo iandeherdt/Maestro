@@ -164,7 +164,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	res, err := hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("Gitea could not be reached: %w", err)
+		return fmt.Errorf("the Gitea instance could not be reached: %w", err)
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
@@ -172,7 +172,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return &Error{Path: strings.SplitN(path, "?", 2)[0], Status: res.StatusCode}
 	}
 	if out != nil && json.Unmarshal(raw, out) != nil {
-		return errors.New("Gitea's answer could not be read")
+		return errors.New("the answer from Gitea could not be read")
 	}
 	return nil
 }
@@ -192,7 +192,7 @@ func (c *Client) Who(ctx context.Context) (User, error) {
 		return u, err
 	}
 	if u.ID <= 0 || u.Login == "" {
-		return u, errors.New("Gitea did not say whom the token acts as")
+		return u, errors.New("the instance did not say whom the token acts as")
 	}
 	return u, nil
 }
@@ -224,7 +224,7 @@ func (c *Client) Repo(ctx context.Context, path string) (Repo, error) {
 		return r, err
 	}
 	if r.ID <= 0 {
-		return r, errors.New("Gitea did not describe the repository")
+		return r, errors.New("the instance did not describe the repository")
 	}
 	return r, nil
 }

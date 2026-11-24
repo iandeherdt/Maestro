@@ -263,7 +263,7 @@ func (g *giteaHost) markReady(ctx context.Context, c change) error {
 		return err
 	}
 	if pr.change().Draft {
-		return errors.New("Gitea did not mark the pull request as ready")
+		return errors.New("the pull request is still a draft on Gitea")
 	}
 	return nil
 }
