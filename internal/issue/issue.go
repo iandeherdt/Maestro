@@ -138,6 +138,7 @@ type Feedback struct {
 	Source string // "ci", "policy", "verify", "review" or "tracker"
 	Author string
 	Body   string
-	Path   string // review comments only
-	Line   int    // review comments only, 0 when absent
+	Path   string    // review comments only
+	Line   int       // review comments only, 0 when absent
+	At     time.Time // when it was written, zero when unknown
 }

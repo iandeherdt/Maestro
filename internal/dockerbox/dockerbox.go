@@ -230,6 +230,11 @@ func (b *Box) baseEnv(profile string) map[string]string {
 		"HOME": "/home/agent", "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"LANG": "C.UTF-8", "TZ": "UTC", "CI": "1", "TERM": "dumb", "NO_PROXY": "",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+		// No memory carried from one run to the next: each attempt
+		// starts from the ticket and the branch, not from what an
+		// earlier attempt concluded (it wrote "identical to attempts
+		// 6-18" and stopped without trying).
+		"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
 	}
 	if profile != "" {
 		proxy := "http://" + b.ProxyName(profile) + ":" + ProxyPort

@@ -107,7 +107,12 @@ func (b *Builder) First(in Input) (string, error) {
 		if in.RetryKind != "" {
 			fmt.Fprintf(&out, " (reason: %s)", safeWord(in.RetryKind))
 		}
-		out.WriteString(". Earlier commits, if any, are on the current branch.\n\n")
+		out.WriteString(". Earlier commits, if any, are on the current branch.")
+		if len(in.Feedback) > 0 {
+			out.WriteString(" The comments below are oldest first, with the date they were written where known. " +
+				"An older one may already be done by the commits on the branch: check before you act on it again.")
+		}
+		out.WriteString("\n\n")
 	}
 	block(&out, tok, "ISSUE_TITLE", "", in.Issue.Title)
 	block(&out, tok, "ISSUE_DESCRIPTION", "", in.Issue.Description)
@@ -115,6 +120,9 @@ func (b *Builder) First(in Input) (string, error) {
 		meta := "source=" + safeWord(f.Source)
 		if f.Author != "" {
 			meta += " author=" + safeWord(f.Author)
+		}
+		if !f.At.IsZero() {
+			meta += " written=" + f.At.UTC().Format("2006-01-02T15:04Z")
 		}
 		if f.Path != "" {
 			// A path is untrusted text too. It goes inside the block.

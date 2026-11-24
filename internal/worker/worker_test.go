@@ -268,7 +268,16 @@ func TestDeclaredStatuses(t *testing.T) {
 		cat      string
 		turnsRun int
 	}{
-		"blocked":               {[]script{{text: "Cannot.\nMAESTRO_STATUS: blocked\nNo access."}}, orchestrator.Failed, DeclaredBlocked, 1},
+		"blocked with nothing committed": {[]script{{text: "Cannot.\nMAESTRO_STATUS: blocked\nNo access.", noChanges: true}}, orchestrator.Failed, DeclaredBlocked, 1},
+		// The check passes: the agent stopped for another reason.
+		"blocked and the check passes": {[]script{{text: "Cannot.\nMAESTRO_STATUS: blocked\nNeed a decision.", verifyOK: true}}, orchestrator.Failed, DeclaredBlocked, 1},
+		// The agent could not see the check fail; the service's check
+		// runs, and the agent fixes what it reports.
+		"blocked, check fails, then fixed": {[]script{{text: "No licence here.\nMAESTRO_STATUS: blocked\nCannot run the check."}, {text: "fixed", verifyOK: true}},
+			orchestrator.Published, "", 2},
+		// Once the agent has seen the check's output, blocked stands.
+		"blocked twice": {[]script{{text: "MAESTRO_STATUS: blocked\nNo licence."}, {text: "MAESTRO_STATUS: blocked\nStill stuck."}},
+			orchestrator.Failed, DeclaredBlocked, 2},
 		"no changes and done":   {[]script{{text: "Nothing to do.", noChanges: true}}, orchestrator.Failed, NoChanges, 1},
 		"continue then publish": {[]script{{text: "MAESTRO_STATUS: continue"}, {text: "MAESTRO_STATUS: done", verifyOK: true}}, orchestrator.Published, "", 2},
 		"continue forever": {[]script{{text: "MAESTRO_STATUS: continue"}, {text: "MAESTRO_STATUS: continue"}, {text: "MAESTRO_STATUS: continue"}},
@@ -551,7 +560,7 @@ func TestOwnerCommentsReachTheAgentAndNobodyElses(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 	p := r.f.prompts[0].Prompt
-	if !strings.Contains(p, "source=tracker author=ian\nnote 21.") || !strings.Contains(p, "source=ci\nlint failed") {
+	if !strings.Contains(p, "source=tracker author=ian written=2026-11-21T09:21Z\nnote 21.") || !strings.Contains(p, "source=ci\nlint failed") {
 		t.Fatalf("prompt = %s", p)
 	}
 	// Only the most recent ones, oldest first, after the gate's feedback.

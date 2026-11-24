@@ -266,7 +266,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	}
 	feedback := append([]issue.Feedback(nil), a.Feedback...)
 	for _, c := range comments {
-		feedback = append(feedback, issue.Feedback{Source: "tracker", Author: c.Author, Body: c.Body})
+		feedback = append(feedback, issue.Feedback{Source: "tracker", Author: c.Author, Body: c.Body, At: c.CreatedAt})
 	}
 	if w.Notes != nil {
 		notes, err := w.Notes.Feedback(ctx, is)
@@ -280,6 +280,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	sessionID, reason := "", ""
 	sessionReset := false
 	var lastVerify *prompt.Verify
+	verified := false // the check ran once this attempt
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
 			return orchestrator.Outcome{Kind: orchestrator.Normal}
@@ -348,7 +349,28 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 
 		status := DeclaredStatus(res.ResultText)
 		if status == "blocked" {
-			return orchestrator.Outcome{Kind: orchestrator.Failed, Category: DeclaredBlocked, Message: res.ResultText}
+			blocked := orchestrator.Outcome{Kind: orchestrator.Failed, Category: DeclaredBlocked, Message: res.ResultText}
+			// An agent that cannot run the check where it works (no
+			// licence, no compiler) may stop because it sees no errors.
+			// The service's own check can run, so it runs once on the
+			// committed work and its output goes back to the agent,
+			// rather than the ticket stopping on a guess.
+			if exp.NoChanges || verified || turn >= maxTurns {
+				return blocked
+			}
+			verified = true
+			phase(orchestrator.Verifying)
+			v, err := w.Gates.Verify(ctx, ws)
+			if err != nil {
+				return failed(VerifyError, err)
+			}
+			if v.Passed {
+				return blocked
+			}
+			sink.Event(orchestrator.Event{Kind: "notification", Message: "The agent stopped without seeing the check fail. The check ran and its output goes back to the agent."})
+			reason = prompt.ReasonVerifyFailed
+			lastVerify = &prompt.Verify{ExitStatus: v.ExitStatus, OutputTail: v.OutputTail}
+			continue
 		}
 		if exp.NoChanges || status == "continue" {
 			if exp.NoChanges && status == "done" {
@@ -369,6 +391,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		if err != nil {
 			return failed(VerifyError, err)
 		}
+		verified = true
 		if !v.Passed {
 			if turn >= maxTurns {
 				return orchestrator.Outcome{Kind: orchestrator.Rejected, Category: VerifyFailed,
