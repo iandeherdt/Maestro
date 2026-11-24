@@ -247,9 +247,23 @@ func (m *Mirror) Import(ctx context.Context, bundlePath, workspaceKey, baseSHA s
 		if len(f) != 7 || !shaRE.MatchString(f[0]) {
 			return fail(reject("a commit record could not be read"))
 		}
-		// Exactly one parent: no merge can bring in foreign history, and
-		// no new root commit can start an unrelated one.
-		if len(strings.Fields(f[1])) != 1 {
+		// One parent, so that no new root commit can start an unrelated
+		// history. The one merge that is allowed is the base branch merged
+		// into the work: its second parent is a commit of the base, so it
+		// brings in nothing but the owner's own history. The service makes
+		// that merge when the base moved on, and an agent commits it after
+		// resolving its conflicts.
+		switch parents := strings.Fields(f[1]); {
+		case len(parents) == 1:
+		case len(parents) == 2:
+			if _, err := m.git(ctx, nil, 0, "merge-base", "--is-ancestor", parents[1], baseSHA); err != nil {
+				if exited(err) {
+					return fail(reject("the new commits are not a single line of history: a merge commit brings in commits " +
+						"that are not on the base branch. The only merge the work may hold is the base branch merged into it"))
+				}
+				return fail(err)
+			}
+		default:
 			return fail(reject("the new commits are not a single line of history"))
 		}
 		commits = append(commits, policy.Commit{SHA: f[0], AuthorName: f[2], AuthorEmail: f[3],
@@ -532,6 +546,33 @@ func (m *Mirror) HistoryAdded(ctx context.Context, baseSHA, head string, maxByte
 		"--full-index", "--format=", baseSHA+".."+head, "--"); err != nil {
 		return nil, false, err
 	}
+	// The log shows nothing for a merge. What a merge of the base branch
+	// adds on top of the base it merged is the work so far, with whatever
+	// was typed while resolving conflicts: that is looked at too.
+	merges, err := m.git(ctx, nil, 0, "rev-list", "--merges", baseSHA+".."+head, "--")
+	if err != nil {
+		return nil, false, err
+	}
+	for _, sha := range strings.Fields(string(merges)) {
+		if !shaRE.MatchString(sha) {
+			return nil, false, fmt.Errorf("a merge commit could not be read")
+		}
+		if out.over {
+			break
+		}
+		rest := &capped{limit: out.limit - int64(out.buf.Len())}
+		if rest.limit <= 0 {
+			out.over = true
+			break
+		}
+		if err := m.gitTo(ctx, rest, "diff", "--text", "-U0", "--no-renames", "--no-ext-diff", "--no-textconv", "--no-color",
+			"--full-index", sha+"^2", sha, "--"); err != nil {
+			return nil, false, err
+		}
+		out.buf.WriteString("\n")
+		out.buf.Write(rest.buf.Bytes())
+		out.over = out.over || rest.over
+	}
 	// A line of a file's content always follows a "@@" line and starts
 	// with "+", "-", a space or a backslash, so "diff " at the start of a
 	// line is git's own. Only between the two is "+++ " a file name.
@@ -721,4 +762,102 @@ func (m *Mirror) HasBranch(ctx context.Context, name string) bool {
 	}
 	_, err := m.git(ctx, nil, 0, "rev-parse", "--verify", "--quiet", "refs/heads/"+name+"^{commit}")
 	return err == nil
+}
+
+// BaseMerge is what MergeBase found or did.
+type BaseMerge int
+
+const (
+	// BaseSkipped: there is nothing the service may merge into. Nothing
+	// was pushed for the workspace, a branch is missing, or the remote
+	// branch is not where the service left it.
+	BaseSkipped BaseMerge = iota
+	// BaseCurrent: the branch already holds the newest base.
+	BaseCurrent
+	// BaseMerged: a merge commit was made and waits to be pushed.
+	BaseMerged
+	// BaseConflict: the base does not merge without conflicts. Nothing
+	// was changed.
+	BaseConflict
+)
+
+// MergeBase merges the base branch into the pushed head of a workspace,
+// in the mirror, without a working tree. It expects the mirror to have
+// been fetched just before. A clean merge becomes a commit by name and
+// email, stored as the workspace's imported head, so that Push sends it;
+// the head it returns is that commit. A merge with conflicts changes
+// nothing: resolving them is work for an agent.
+//
+// Both sides are commits the service already accepted: the pushed head
+// went through the publish gate and the base is the owner's branch. No
+// attribute, hook or merge driver of the repository takes part.
+func (m *Mirror) MergeBase(ctx context.Context, workspaceKey, branch, baseBranch, name, email string) (BaseMerge, string, error) {
+	if !keyRE.MatchString(workspaceKey) || strings.Contains(workspaceKey, "..") {
+		return BaseSkipped, "", fmt.Errorf("invalid workspace key")
+	}
+	if !ValidBranch(branch) || !ValidBranch(baseBranch) || branch == baseBranch {
+		return BaseSkipped, "", fmt.Errorf("invalid branch name")
+	}
+	if name == "" || email == "" || strings.ContainsAny(name+email, "<>\n\r") {
+		return BaseSkipped, "", fmt.Errorf("invalid commit identity")
+	}
+	rev := func(ref string) (string, error) {
+		out, err := m.git(ctx, nil, 0, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+		if err != nil {
+			if exited(err) {
+				return "", nil
+			}
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	pushed, err := rev(PushedRef(workspaceKey))
+	if err != nil {
+		return BaseSkipped, "", err
+	}
+	remote, err := rev("refs/heads/" + branch)
+	if err != nil {
+		return BaseSkipped, "", err
+	}
+	base, err := rev("refs/heads/" + baseBranch)
+	if err != nil {
+		return BaseSkipped, "", err
+	}
+	// Only a branch that is exactly what the service pushed is touched.
+	if pushed == "" || base == "" || remote != pushed {
+		return BaseSkipped, "", nil
+	}
+	if _, err := m.git(ctx, nil, 0, "merge-base", "--is-ancestor", base, pushed); err == nil {
+		return BaseCurrent, pushed, nil
+	} else if !exited(err) {
+		return BaseSkipped, "", err
+	}
+	out, err := m.git(ctx, nil, 0, "merge-tree", "--write-tree", "--no-messages", pushed, base)
+	if err != nil {
+		var ge *gitError
+		var ee *exec.ExitError
+		if errors.As(err, &ge) && errors.As(ge.err, &ee) && ee.ExitCode() == 1 {
+			return BaseConflict, "", nil
+		}
+		return BaseSkipped, "", err
+	}
+	tree := strings.TrimSpace(string(out))
+	if !shaRE.MatchString(tree) {
+		return BaseSkipped, "", fmt.Errorf("the merge gave no tree")
+	}
+	env := []string{"GIT_AUTHOR_NAME=" + name, "GIT_AUTHOR_EMAIL=" + email,
+		"GIT_COMMITTER_NAME=" + name, "GIT_COMMITTER_EMAIL=" + email}
+	out, err = m.gitEnv(ctx, nil, 0, env, "commit-tree", tree, "-p", pushed, "-p", base,
+		"-m", "Merge "+baseBranch+" into "+branch)
+	if err != nil {
+		return BaseSkipped, "", err
+	}
+	head := strings.TrimSpace(string(out))
+	if !shaRE.MatchString(head) {
+		return BaseSkipped, "", fmt.Errorf("the merge gave no commit")
+	}
+	if _, err := m.git(ctx, nil, 0, "update-ref", IncomingRef(workspaceKey), head); err != nil {
+		return BaseSkipped, "", err
+	}
+	return BaseMerged, head, nil
 }

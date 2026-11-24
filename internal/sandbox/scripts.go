@@ -48,12 +48,14 @@ $G merge --quiet --ff-only FETCH_HEAD >/dev/null 2>&1 || true
 if [ -n "${2:-}" ] && [ -z "$($G status --porcelain)" ] && [ ! -f .git/MERGE_HEAD ] &&
   $G fetch --quiet origin "refs/heads/$2" 2>/dev/null; then
   new="$($G rev-parse FETCH_HEAD)"
-  if ! $G merge-base --is-ancestor "$new" HEAD; then
-    if $G merge --quiet --no-ff --no-edit -m "Merge $2 into $1" "$new" >/dev/null 2>&1 || [ -f .git/MERGE_HEAD ]; then
-      echo "$new" > .git/maestro-base
-    else
-      $G merge --abort >/dev/null 2>&1 || true
-    fi
+  if $G merge-base --is-ancestor "$new" HEAD; then
+    # The branch already holds the newest base: the service merged it into
+    # the published branch itself, after another pull request was merged.
+    echo "$new" > .git/maestro-base
+  elif $G merge --quiet --no-ff --no-edit -m "Merge $2 into $1" "$new" >/dev/null 2>&1 || [ -f .git/MERGE_HEAD ]; then
+    echo "$new" > .git/maestro-base
+  else
+    $G merge --abort >/dev/null 2>&1 || true
   fi
 fi
 cat .git/maestro-base

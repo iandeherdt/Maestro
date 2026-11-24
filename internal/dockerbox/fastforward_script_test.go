@@ -81,3 +81,18 @@ func TestFastForwardLeavesAConflictForTheAgent(t *testing.T) {
 		t.Fatal("the resolved merge does not contain main")
 	}
 }
+
+// The service merged the newest base into the published branch itself. The
+// workspace takes that merge, and measures the work from the newest base.
+func TestFastForwardTakesAMergeTheServicePushed(t *testing.T) {
+	mirror, repo := fastForwardRepos(t)
+	repoSh(t, mirror, `echo other > b.txt && git add b.txt && git commit -qm "other change" &&
+		git checkout -q maestro/GH-1 && git merge -q --no-ff --no-edit main && git checkout -q main`)
+	newMain := repoSh(t, mirror, `git rev-parse main`)
+	if got := runFastForward(t, repo, "maestro/GH-1", "main"); got != newMain {
+		t.Fatalf("base %q, want the newest main %s", got, newMain)
+	}
+	if got := repoSh(t, repo, `git rev-parse HEAD`); got != repoSh(t, mirror, `git rev-parse maestro/GH-1`) {
+		t.Fatalf("the workspace is not at the published merge: %s", got)
+	}
+}
