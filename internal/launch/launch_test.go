@@ -80,15 +80,13 @@ func testLauncher(t *testing.T) (*Launcher, *fakeSystemd) {
 	if err := cfg.Check(); err != nil {
 		t.Fatal(err)
 	}
-	// The test folders are not root's; the test of the check itself puts
-	// the real one back.
-	ownerCheck = func(string) error { return nil }
-	t.Cleanup(func() { ownerCheck = rootOwned })
 	f := &fakeSystemd{}
 	me := os.Getuid()
 	l := &Launcher{Cfg: cfg, Self: "/usr/local/libexec/maestro-launch", SystemdRun: f.run,
 		Lookup: func(name string) (int, int, error) { return me, os.Getgid(), nil },
-		Chown:  func(string, int, int) error { return nil }}
+		Chown:  func(string, int, int) error { return nil },
+		// The test folders are not root's.
+		OwnerCheck: func(string) error { return nil }}
 	return l, f
 }
 
@@ -561,7 +559,7 @@ func TestUnitOnAnOlderSystemd(t *testing.T) {
 // elsewhere, so such a folder is refused before anything is touched.
 func TestExportRefusesAHandoffFolderThatIsNotRoots(t *testing.T) {
 	l, f := testLauncher(t)
-	ownerCheck = rootOwned
+	l.OwnerCheck = nil    // the real check
 	system := t.TempDir() // stands for a folder only root may change
 	victim := filepath.Join(system, "profile.d")
 	os.Mkdir(victim, 0o755)
