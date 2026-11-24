@@ -1340,7 +1340,7 @@ func (o *Orchestrator) blockLead(reason string) string {
 	switch reason {
 	case "checks_timeout":
 		return fmt.Sprintf("Blocked: the checks on the pull request did not finish within %d minutes "+
-			"(`checks_timeout`, set by `publish.checks_timeout_ms`). The list below says which checks it waited for. "+
+			"(`checks_timeout`; `maestro settings set publish.checks_timeout_ms` changes the limit). The list below says which checks it waited for. "+
 			"A check that never started usually means the CI workflow did not run for this branch, "+
 			"or a required check's name does not match the job's name.",
 			o.cfg.Publish.ChecksTimeoutMS/60000)
