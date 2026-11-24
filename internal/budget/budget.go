@@ -28,12 +28,18 @@ type Day struct {
 }
 
 type record struct {
-	FailureAttempts   map[string]int64     `json:"failure_attempts"`
-	BlockedAt         map[string]time.Time `json:"blocked_at"`
-	Days              map[string]*Day      `json:"days"`
-	Paused            bool                 `json:"paused"`
-	PauseReason       string               `json:"pause_reason,omitempty"`
-	QuotaBlockedUntil *time.Time           `json:"quota_blocked_until,omitempty"`
+	FailureAttempts map[string]int64     `json:"failure_attempts"`
+	BlockedAt       map[string]time.Time `json:"blocked_at"`
+	// TicketTokens are the tokens a ticket's finished attempts used since
+	// its budget was last cleared, for budget.max_tokens_per_ticket.
+	TicketTokens map[string]int64 `json:"ticket_tokens,omitempty"`
+	// LastFailure is what a ticket's last failed attempt failed on, so
+	// that a second failure the same way can block it at once.
+	LastFailure       map[string]string `json:"last_failure,omitempty"`
+	Days              map[string]*Day   `json:"days"`
+	Paused            bool              `json:"paused"`
+	PauseReason       string            `json:"pause_reason,omitempty"`
+	QuotaBlockedUntil *time.Time        `json:"quota_blocked_until,omitempty"`
 }
 
 // Store is the Budget Record and the file behind it. It is not safe for
@@ -67,6 +73,12 @@ func Open(dir string) (*Store, error) {
 	}
 	if s.rec.Days == nil {
 		s.rec.Days = map[string]*Day{}
+	}
+	if s.rec.TicketTokens == nil {
+		s.rec.TicketTokens = map[string]int64{}
+	}
+	if s.rec.LastFailure == nil {
+		s.rec.LastFailure = map[string]string{}
 	}
 	return s, nil
 }
@@ -116,11 +128,29 @@ func (s *Store) IncFailure(id string) int64 {
 	return s.rec.FailureAttempts[id]
 }
 
-// ClearIssue removes the failure count and the block marker of an issue.
+// ClearIssue removes the failure count, the block marker, the token count
+// and the last failure of an issue.
 func (s *Store) ClearIssue(id string) {
 	delete(s.rec.FailureAttempts, id)
 	delete(s.rec.BlockedAt, id)
+	delete(s.rec.TicketTokens, id)
+	delete(s.rec.LastFailure, id)
 }
+
+// TicketTokens are the tokens the issue's finished attempts used since its
+// budget was last cleared.
+func (s *Store) TicketTokens(id string) int64 { return s.rec.TicketTokens[id] }
+
+func (s *Store) AddTicketTokens(id string, n int64) {
+	if n > 0 {
+		s.rec.TicketTokens[id] += n
+	}
+}
+
+// LastFailure is the signature of the issue's last failed attempt, or "".
+func (s *Store) LastFailure(id string) string { return s.rec.LastFailure[id] }
+
+func (s *Store) SetLastFailure(id, sig string) { s.rec.LastFailure[id] = sig }
 
 func (s *Store) MarkBlocked(id string, at time.Time) { s.rec.BlockedAt[id] = at.UTC() }
 

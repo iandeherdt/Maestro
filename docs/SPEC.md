@@ -478,6 +478,16 @@ Replaces upstream `codex`.
   names the `maestro settings set` command that raises it.
 - `max_tokens_per_day` (integer or null): default null.
 - `max_agent_seconds_per_day` (integer or null): default `28800`.
+- `max_tokens_per_attempt` (integer or null): default `10000000`. Tokens are counted as in the
+  daily totals: input, output, cache reads and cache writes. When the cumulative usage of a running
+  attempt goes over it, the orchestrator terminates the attempt and blocks the issue with reason
+  `token_limit` (Section 8.7). null is no limit.
+- `max_tokens_per_ticket` (integer or null): default `30000000`. The tokens of an issue's attempts
+  together, persisted per issue and cleared under the same rules as `failure_attempts`. A running
+  attempt that takes the total over it is terminated and the issue blocked with `token_limit`; so is
+  an issue whose finished attempt took it over, instead of a retry. null is no limit.
+- `block_repeated_failure` (boolean): default `true`. When a failure attempt fails the same way as
+  the issue's previous one, the issue is blocked at once instead of retried (Section 8.7).
 - `quota_backoff_ms` (integer): default `3600000`.
 - `state_dir` (path): REQUIRED. Owned by `maestro`, mode `0700`.
 
@@ -872,7 +882,16 @@ Failure accounting (extension, bounded retries):
 - `continuation` and `quota` retries, cancellations and tracker errors do not.
 - When `failure_attempts` reaches `budget.max_failure_attempts`, the orchestrator sets the issue
   to `blocked_state`, writes the reason to the status comment, and releases the claim.
-- Reset rules. `failure_attempts` is cleared when:
+- With `budget.block_repeated_failure`, each failure attempt also stores a signature: a hash of its
+  category and its error text (the agent's message, else the feedback, as the blocked comment shows
+  it), with whitespace collapsed and every run of digits replaced, so that times, durations and
+  line numbers do not make two failures differ. A failure without error text has no signature.
+  When a failure's signature equals the stored one, the issue is blocked at once, with reason
+  `repeated:<category>`.
+- A token limit (Section 5.3.11) blocks the issue with reason `token_limit`, whatever its
+  `failure_attempts`.
+- Reset rules. `failure_attempts`, the stored signature and the issue's token total are cleared
+  when:
   - the issue reaches the hand-off state or a terminal state;
   - an issue that has a `blocked_at` marker is seen in an active state again. Only a human can
     make that transition, so it is the operator's signal to retry. The marker is cleared too;

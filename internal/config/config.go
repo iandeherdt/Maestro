@@ -226,8 +226,17 @@ type Budget struct {
 	MaxRunsPerDay         int64
 	MaxTokensPerDay       *int64
 	MaxAgentSecondsPerDay *int64
-	QuotaBackoffMS        int64
-	StateDir              string
+	// MaxTokensPerAttempt stops one attempt that uses more; nil is no limit.
+	MaxTokensPerAttempt *int64
+	// MaxTokensPerTicket blocks a ticket whose attempts together use more,
+	// counted until it passes its checks or is moved back by hand; nil is no
+	// limit.
+	MaxTokensPerTicket *int64
+	// BlockRepeatedFailure blocks a ticket at once when an attempt fails
+	// the same way as the one before it.
+	BlockRepeatedFailure bool
+	QuotaBackoffMS       int64
+	StateDir             string
 }
 
 type Worker struct {
@@ -998,6 +1007,10 @@ func (b *builder) budget(s *section) {
 	bg.MaxTokensPerDay = s.optInteger("max_tokens_per_day", nil)
 	defSeconds := int64(28800)
 	bg.MaxAgentSecondsPerDay = s.optInteger("max_agent_seconds_per_day", &defSeconds)
+	defAttempt, defTicket := int64(10_000_000), int64(30_000_000)
+	bg.MaxTokensPerAttempt = s.optInteger("max_tokens_per_attempt", &defAttempt)
+	bg.MaxTokensPerTicket = s.optInteger("max_tokens_per_ticket", &defTicket)
+	bg.BlockRepeatedFailure = s.boolean("block_repeated_failure", true)
 	bg.QuotaBackoffMS = b.positive("budget.quota_backoff_ms", s.integer("quota_backoff_ms", 3600000))
 	bg.StateDir = b.path("budget.state_dir", s.str("state_dir", ""))
 	b.lenient(s)
@@ -1006,6 +1019,12 @@ func (b *builder) budget(s *section) {
 	}
 	if bg.MaxAgentSecondsPerDay != nil {
 		b.positive("budget.max_agent_seconds_per_day", *bg.MaxAgentSecondsPerDay)
+	}
+	if bg.MaxTokensPerAttempt != nil {
+		b.positive("budget.max_tokens_per_attempt", *bg.MaxTokensPerAttempt)
+	}
+	if bg.MaxTokensPerTicket != nil {
+		b.positive("budget.max_tokens_per_ticket", *bg.MaxTokensPerTicket)
 	}
 }
 
