@@ -79,8 +79,10 @@ func (m *Machine) systemdProblems(ctx context.Context) []string {
 		out = append(out, "This machine uses cgroups v1, where systemd cannot apply the sandbox's memory and CPU limits. "+
 			"Switch to cgroups v2 and restart: sudo grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && sudo reboot")
 	}
-	if _, err := m.LookPath("sudo"); err != nil {
-		out = append(out, "sudo is not installed. Setup uses it once to install the sandbox's root launcher: sudo dnf install sudo")
+	// The sudo that counts is the system's: one found first on the PATH,
+	// such as a toolset's wrapper script, is not used.
+	if !m.Exists("/usr/bin/sudo") {
+		out = append(out, "sudo is not installed in /usr/bin. Setup uses it once to install the sandbox's root launcher: sudo dnf install sudo")
 	}
 	if v, err := m.Output(ctx, "/usr/bin/node", "--version"); err != nil {
 		out = append(out, "Node.js is not installed in /usr/bin. The steps run Claude Code with it: sudo dnf install nodejs npm")
