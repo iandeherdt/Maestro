@@ -433,6 +433,11 @@ func (l *Launcher) export(ctx context.Context, s spec, stdout, stderr io.Writer)
 	if err != nil {
 		return 0, err
 	}
+	// What follows removes and creates folders as root, by path. That is
+	// only safe in a folder nobody else can change or replace by a link.
+	if err := ownerCheck(c.HandoffRoot); err != nil {
+		return 0, fmt.Errorf("the hand-off folder is not root's alone (%v). Run `maestro setup` again, which makes it", err)
+	}
 	dir, final := c.handoff(s.key), c.bundle(s.key)
 	os.Remove(final)
 	if err := os.RemoveAll(dir); err != nil {

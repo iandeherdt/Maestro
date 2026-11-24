@@ -231,7 +231,9 @@ with sudo:
   `maestro` for the self-test, because the steps see no home folder;
 - the root launcher `/usr/local/libexec/maestro-launch` and its settings in `/etc/maestro`,
   which only root can change;
-- `/var/lib/maestro/<worker>` for the workspaces and the agent's Claude login;
+- `/var/lib/maestro/<worker>` for the workspaces, the agent's Claude login and the finished work
+  the launcher hands to the service. Only root and your user can enter it: a step gets its own
+  workspace by a mount, and cannot walk to the login or to another ticket's workspace;
 - one sudo rule that lets your user start the launcher, and nothing else.
 
 On systemd older than 245 (RHEL 8 has 239), the launcher leaves out the unit settings that
