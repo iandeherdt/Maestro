@@ -110,7 +110,7 @@ func TestAgentStepUnit(t *testing.T) {
 	}
 	for _, want := range []string{
 		"User=maestro-agent", "NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict", "ProtectHome=tmpfs",
-		"SystemCallFilter=@system-service", "SystemCallErrorNumber=ENOSYS", "PrivateNetwork=yes", "IPAddressDeny=any", "RestrictNamespaces=yes", "UMask=0077", "KillMode=control-group",
+		"SystemCallFilter=@system-service", "SystemCallErrorNumber=ENOSYS", "PrivateNetwork=yes", "IPAddressDeny=any", "IPAddressAllow=localhost", "RestrictNamespaces=yes", "UMask=0077", "KillMode=control-group",
 		"MemoryMax=4G", "CPUQuota=200%", "TasksMax=512", "RuntimeMaxSec=2",
 		"BindPaths=" + l.Cfg.workspace("GH-12") + ":/workspace",
 		"BindPaths=" + l.Cfg.ClaudeState + ":/claude",

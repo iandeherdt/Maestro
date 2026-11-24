@@ -119,8 +119,10 @@ func (c *Config) build(s spec, argv []string, extra map[string]string) (*unit, e
 		"NoNewPrivileges=yes", "CapabilityBoundingSet=", "AmbientCapabilities=",
 		"ProtectSystem=strict", "ProtectHome=tmpfs",
 		"PrivateTmp=yes", "PrivateDevices=yes", "PrivateUsers=no",
-		// No network of its own: only loopback, inside the unit.
-		"PrivateNetwork=yes", "IPAddressDeny=any",
+		// No network of its own: only loopback, inside the unit. The
+		// address filter applies to loopback too, so it is allowed: the
+		// step reaches its proxy relay on 127.0.0.1.
+		"PrivateNetwork=yes", "IPAddressDeny=any", "IPAddressAllow=localhost",
 		"ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectKernelLogs=yes",
 		"ProtectControlGroups=yes", "ProtectClock=yes", "ProtectHostname=yes",
 		"RestrictSUIDSGID=yes", "LockPersonality=yes", "RestrictRealtime=yes",
