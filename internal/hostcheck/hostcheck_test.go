@@ -219,6 +219,11 @@ func TestProfile(t *testing.T) {
 		`    (literal "/Users/i")`,
 		`    (literal "/Users")`,
 		`    (literal "/")`,
+		// And above the Editor, so .NET can find its own path.
+		`    (literal "/Users/i/Applications/Unity/Hub/Editor")`,
+		`    (literal "/Users/i/Applications/Unity/Hub")`,
+		`    (literal "/Users/i/Applications/Unity")`,
+		`    (literal "/Users/i/Applications")`,
 	}
 	rest := text
 	for _, rule := range order {
@@ -240,6 +245,9 @@ func TestProfile(t *testing.T) {
 		if strings.Contains(writes, not) {
 			t.Errorf("the check can write to %s:\n%s", not, writes)
 		}
+	}
+	if n := strings.Count(text, `    (literal "/Users/i")`+"\n"); n != 1 {
+		t.Errorf("the home folder is listed %d times among the parents", n)
 	}
 	if strings.Count(text, "(") != strings.Count(text, ")") {
 		t.Error("unbalanced parentheses")
