@@ -83,10 +83,16 @@ func (m *Machine) systemdProblems(ctx context.Context) []string {
 	} else if g := nodeVersionRE.FindStringSubmatch(strings.TrimSpace(v)); g == nil {
 		out = append(out, "The Node.js version could not be read.")
 	} else if n, _ := strconv.Atoi(g[1]); n < 18 {
-		out = append(out, fmt.Sprintf("Node.js %d is too old; 18 or newer is needed: sudo dnf module install nodejs:20", n))
+		// RHEL 8 keeps Node.js 10 as its default stream, and dnf does not
+		// switch streams without a reset. A Node.js in the operator's own
+		// account (nvm) does not count: the steps cannot see it.
+		out = append(out, fmt.Sprintf("Node.js %d in /usr/bin is too old; 18 or newer is needed there (one in your own account does not count). "+
+			"On RHEL 8: sudo dnf module reset -y nodejs, then sudo dnf module install -y nodejs:20", n))
 	}
-	if _, err := m.LookPath("npm"); err != nil {
-		out = append(out, "npm is not installed. Setup installs Claude Code for the steps with it: sudo dnf install npm")
+	// Root runs npm with sudo's own path, so the one that counts is the
+	// system's, not one in the operator's account.
+	if !m.Exists("/usr/bin/npm") {
+		out = append(out, "npm is not installed in /usr/bin. Setup installs Claude Code for the steps with it: sudo dnf install npm")
 	}
 	return out
 }

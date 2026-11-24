@@ -211,7 +211,9 @@ maestro setup --sandbox systemd
 ```
 
 It needs systemd 239 or newer (RHEL 8 or 9), sudo, and Node.js 18 or newer with npm in
-`/usr/bin` (`sudo dnf install nodejs npm`). RHEL 8 also needs cgroup v2 for the memory and CPU
+`/usr/bin` (`sudo dnf install nodejs npm`; RHEL 8 ships Node.js 10, so there first
+`sudo dnf module reset -y nodejs` and `sudo dnf module install -y nodejs:20`). A Node.js in your own
+account, such as from nvm, does not count: the steps cannot see it. RHEL 8 also needs cgroup v2 for the memory and CPU
 limits; setup says how to switch. Setup shows every command before it runs them, once,
 with sudo:
 

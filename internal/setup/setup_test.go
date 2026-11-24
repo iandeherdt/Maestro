@@ -798,7 +798,7 @@ func TestMachineForTheSystemdSandbox(t *testing.T) {
 	}{
 		"old systemd": {answers("systemd 219\n", "v20.1.0"), "too old; 239"},
 		"no node":     {answers("systemd 239\n", ""), "Node.js is not installed"},
-		"old node":    {answers("systemd 239\n", "v16.20.0"), "Node.js 16 is too old"},
+		"old node":    {answers("systemd 239\n", "v16.20.0"), "dnf module reset -y nodejs"},
 	} {
 		p := tc.m.problems(ctx, SandboxSystemd)
 		if len(p) != 1 || !strings.Contains(p[0], tc.want) {
