@@ -1,9 +1,9 @@
 # Maestro
 
-**Maestro turns a GitHub board into a team of Claude Code agents that you can leave alone.** You
-write an idea on a card. Maestro plans it with you in the comments, splits it into tasks, does the
-work in a locked box on your own machines, and hands you a pull request that already passed its
-checks. Nothing is merged without you.
+**Maestro turns a board of tickets into a team of Claude Code agents that you can leave alone.**
+You write an idea on a card. Maestro plans it with you in the comments, splits it into tasks, does the
+work in a locked box on your own machines, and hands you a pull request (a merge request on GitLab)
+that already passed its checks. Nothing is merged without you.
 
 What sets it apart:
 
@@ -12,8 +12,8 @@ What sets it apart:
   request. A ticket, a web page or a dependency that tries to trick the agent gets nowhere.
 - **Your Claude subscription, not an API bill.** It drives the official `claude` command that you
   logged in to yourself. No key is passed around.
-- **Only GitHub.** The board, the tickets, the comments and the pull requests all live there. No
-  other tracker, no extra server, no database.
+- **Where you already work.** The code on GitHub, GitLab or your own Gitea or Forgejo; the
+  tickets on a GitHub board, as labels, or in Linear. No extra server, no database.
 - **From idea to done, not only from ticket to code.** Planning, your answers, a design to look
   at before anything is built, rework when you ask for changes, and closing the card after the
   merge are all part of it.
@@ -24,13 +24,14 @@ What sets it apart:
 - **One guided setup.** `maestro setup` walks you through every step.
 
 It follows the [Symphony specification](https://github.com/openai/symphony) published by OpenAI,
-whose reference setup pairs Linear with Codex. Maestro is a separate implementation for GitHub and
-Claude Code, built for one person or a small team that trusts each other, running agents on their
+whose reference setup pairs Linear with Codex. Maestro is a separate implementation for Claude Code, built for one person or a small team that trusts each other, running agents on their
 own hardware. Each machine works under the Claude subscription of the person who signed it in.
 
-> **Status: early.** The service has taken a real ticket to a merged pull request on a Mac, with
-> labels. The board and the planning stage described below have had one real run on a Mac: setup,
-> an idea planned, the plan changed after a comment, and its tasks created in Todo. See [Project status](#project-status) for exactly what exists.
+> **Status: early.** On GitHub, the service has taken a real ticket to a merged pull request on a
+> Mac, with labels, and runs game cards on a RHEL server with Podman. The board and the planning
+> stage have had one real run on a Mac. Linear, GitLab, Gitea and the Linux sandbox without
+> containers are written and tested against stand-ins, and are being tried for real now. See
+> [Project status](#project-status) for exactly what exists.
 
 ## How it works
 
@@ -39,13 +40,13 @@ own hardware. Each machine works under the Claude subscription of the person who
 2. The service sees the card, checks that **you** wrote the issue, and moves the card to
    **In Progress**.
 3. It creates a fresh copy of the repository in a sandbox and starts Claude Code there with the
-   ticket as its task. The agent has no GitHub token, no access to your home network and no way to
+   ticket as its task. The agent has no token, no access to your home network and no way to
    reach the service's own files.
 4. When the agent says it is done, the service does not take its word. It runs your verify
    command (tests, lint) itself, then inspects the diff: no changes to CI configuration, no
    credentials, no oversized or binary files, no tampering with paths you protect.
-5. If everything passes, the service pushes a branch and opens a pull request under its own
-   GitHub identity. The pull request lists anything a reviewer should look at twice, such as
+5. If everything passes, the service pushes a branch and opens a pull request under an identity
+   of its own: a GitHub App, a GitLab project access token, or a Gitea account. The pull request lists anything a reviewer should look at twice, such as
    removed tests or changed dependencies.
 6. Once CI is green the card moves to **Human Review**. You review and merge. To have something
    changed, write a comment on the pull request: the card goes back to work by itself.
@@ -53,18 +54,20 @@ own hardware. Each machine works under the Claude subscription of the person who
 If the agent fails, the ticket is retried a limited number of times and then parked in
 **Blocked** with an explanation.
 
-The board is a GitHub Project. GitHub only lets a service use a board that belongs to an
-organization, so the repository has to live in one (a free organization is enough, see
+On GitHub the board is a GitHub Project. GitHub only lets a service use a board that belongs to
+an organization, so the repository has to live in one (a free organization is enough, see
 [Install](#install)). For a repository on your personal account the service uses labels
-instead: `status:todo`, `status:in progress` and so on. Everything else is the same.
+instead: `status:todo`, `status:in progress` and so on. The tickets can also be in
+[Linear](#linear-as-the-board), and with the code on [GitLab](#gitlab-as-the-code-host) or
+[Gitea or Forgejo](#gitea-or-forgejo-as-the-code-host) they are. Everything else is the same.
 
 ## What keeps it safe
 
 | Rule | How it is enforced |
 |---|---|
-| The agent holds nothing worth stealing | It runs as a separate user in a sandbox with no tokens. Pushing and all GitHub calls are done by the service, outside the sandbox. |
+| The agent holds nothing worth stealing | It runs as a separate user in a sandbox with no tokens. Pushing and all calls to the code host and the board are done by the service, outside the sandbox. |
 | The agent's word is not trusted | The service runs the verify command, checks the diff and waits for CI before a ticket reaches you. |
-| Nothing reaches the main branch without you | The service has no code that merges, approves or pushes to the main branch. It only opens pull requests, and only on branches under its own prefix. GitHub itself would let the App's key push or merge, so add a rule on the main branch that requires a pull request and one approval: `maestro run` tells you when there is none and how to add it. |
+| Nothing reaches the main branch without you | The service has no code that merges, approves or pushes to the main branch. It only opens pull requests, and only on branches under its own prefix. The code host itself would let the service's credential push or merge, so protect the main branch: `maestro run` and `maestro doctor` tell you when it is not, and how, on each host. |
 | Only you can start work | A ticket is picked up only if an allowlisted account wrote it and it was approved: its card stands in Todo on a board only you can change, or you applied its labels. Comments from anyone else never reach the agent. |
 | What you run yourself was pointed out first | Once you merge and run the code, it runs with your rights, and the sandbox no longer helps. So the pull request starts with what deserves a look: added code that opens a network connection, starts another program, runs code built at run time or holds a long encoded block; changed dependencies and build scripts; weakened tests. Compiled files are refused outright. This helps you review. It does not replace reading the diff. |
 | Cost is bounded | Per-ticket retry limit, daily run limits, and `pause`. |
@@ -84,8 +87,9 @@ The full threat model is in [docs/SPEC.md](docs/SPEC.md), section 18.
   [Linux without containers](#linux-without-containers-the-systemd-sandbox).
 - A Claude subscription. You sign in once, inside the container. Claude Code does not have to be
   installed on the machine itself.
-- A GitHub repository you own. Private repositories work. For the board, the repository has to
-  be in a GitHub organization. Everyone who can edit its board can approve work, so keep that to
+- A repository you own on GitHub, GitLab (gitlab.com or your own) or your own Gitea or Forgejo.
+  Private repositories work. On GitHub, for the board, the repository has to be in an
+  organization. Everyone who can edit its board can approve work, so keep that to
   people you trust with it. Creating an organization is free: on github.com
   press **+** at the top right, **New organization**, and pick the Free plan. Then create the
   repository there, or move an existing one with Settings, **Transfer ownership**.
@@ -131,6 +135,10 @@ the `NO_COLOR` environment variable is set, it prints plain lines instead.
 What the setup does:
 
 1. **Checks the machine** for Git and Docker or Podman. For anything missing it tells you what to install.
+   With the code on GitLab or Gitea (`--host gitlab` or `--host gitea`), steps 2 and 3 are one
+   step that connects the project with a token instead; see
+   [GitLab](#gitlab-as-the-code-host) and [Gitea or Forgejo](#gitea-or-forgejo-as-the-code-host).
+   With `--board linear`, step 4 sets up a Linear team; see [Linear](#linear-as-the-board).
 2. **Creates a GitHub App for the service.** You say which repository the agents work on, open a
    local page and press one button on github.com. The App's key is saved on your machine in a
    file only you can read. The App can open pull requests and read check results, and in an
@@ -466,7 +474,7 @@ it, and nothing else changes.
 What happens to a ticket, step by step: the service clones the repository into a fresh
 container, runs Claude Code there on a branch named `maestro/GH-<number>`, runs your test
 command itself, checks the changes against its rules, pushes the branch and opens a pull request.
-The agent's container has no GitHub token and can reach only the Claude service. Merging is
+The agent's sandbox has no token and can reach only the Claude service. Merging is
 always yours: merge the pull request and the ticket is closed, or request changes and the agent
 continues.
 
@@ -970,6 +978,8 @@ changed ones:
 
 | Setting | Default | What it does |
 |---|---|---|
+| `workspace.host` | `github` | Where the code is: `github`, `gitlab`, or `gitea` (also for Forgejo); `maestro setup --host` sets it |
+| `workspace.host_url` | none | The address of your own GitLab, Gitea or Forgejo |
 | `conventions` | none | Rule packs that are switched on, for example `[typescript]`. Set it with `maestro conventions enable` |
 | `verify.command` | none | What the service runs to decide whether the work is acceptable. With a rule pack, the pack's checks run first and this may be left out |
 | `screenshots.pages` | none | Pages the service takes a picture of for the pull request, see [Screenshots on the pull request](#screenshots-on-the-pull-request) |
@@ -995,7 +1005,7 @@ changed ones:
 ### Linear as the board
 
 The tickets can live in Linear instead of on GitHub. The code, the checks and the pull requests
-stay on GitHub. The board is one Linear team, and a ticket is given to a machine with the label
+stay on the code host: GitHub, or GitLab or Gitea, where Linear is the only board for now. The board is one Linear team, and a ticket is given to a machine with the label
 `run:<worker>`, for example `run:linux`, because Linear has no field for it.
 
 `maestro setup` asks where you keep the tickets. Pick Linear, and it asks for the API key, the
@@ -1089,7 +1099,8 @@ Last updated 2026-11-23, at release 0.5.18.
 | GitHub App tokens | Done, used once against github.com by the guided setup |
 | Install script and release downloads (macOS and Linux, Intel and ARM) | Done. The binaries are not signed or notarized. |
 | Windows, through WSL 2 | Written, in release 0.5.16: setup and the service recognise WSL, check systemd and folders on Windows drives, and create the scheduled task that keeps WSL running. Tested against a simulated WSL, not yet run on a real Windows PC. |
-| Guided setup | Five of seven steps done (machine, App, installation, board or labels, settings file). Run once on a Mac against github.com with labels. Also run once on an organization, with the board. |
+| Guided setup | Done. Run on Macs and on the RHEL server against github.com, with labels and with the board of an organization. The GitLab and Gitea steps are tested against stand-ins only. |
+| Help (`maestro help`, `COMMAND --help`) | Done, release 0.5.21. |
 | Checks gate (waiting for CI) | Done, tested against a fake GitHub API |
 | Hand-off watch (merge closes the ticket, requested changes send it back) | Done, tested against a fake GitHub API |
 | Comments on a pull request send the card back to work | Written, tested against a fake GitHub API. Not yet run against github.com. |
@@ -1113,10 +1124,10 @@ Last updated 2026-11-23, at release 0.5.18.
 | Claude Code runner | Done, tested against a scripted agent and run once for real. |
 | `maestro dashboard`, live feed on the status page | Written and tested against a running service's status file and a stand-in orchestrator. Not yet opened on a real Mac. |
 | Traces in Arize Phoenix (`traces:`) | Written. The OTLP encoding is tested by decoding it again, and a turn of a real stream's shape is followed to its spans. Not yet sent to a real Phoenix. |
-| `maestro update` | Written. The download, the checksum, the archive and the restart of the right service are tested against a stand-in for GitHub's releases. Not yet run against a real release. |
+| `maestro update` | Done. Run against real releases on the RHEL server. |
 | Tasks of a plan stay on the planning machine | Written and tested against a stand-in board, after a plan on a Mac mini put its tasks on a worker no machine ran. |
 | Unity's checks on a Mac, started from `maestro setup` | Written. The setup step is tested against a stand-in for GitHub. The checks failed on a Mac mini with "Not a directory" because the sandbox closed the folders above the check's own; that is fixed but not yet run again on the Mac. |
-| Native Linux sandbox (systemd) | Written, not yet run on a real server. In release 0.5.18: the root launcher `maestro-launch` and the service's side that sends it each step through one sudo rule. Since then: the service runs on `sandbox.backend: systemd` with its proxies on unix sockets, `maestro login`, the start-up self-test and `maestro doctor` through the launcher, and `maestro setup --sandbox systemd` installs the launcher, the sandbox user, Claude Code and the sudo rule. Releases and `maestro update` carry the launcher. Tested with a simulated systemd and sudo; a run on the RHEL server is next ([plan](docs/PLAN.md)). |
+| Native Linux sandbox (systemd) | Being tried on the RHEL 8.10 server. `maestro setup --sandbox systemd` installed the launcher, the sandbox user, Claude Code and the sudo rule there (after fixes for a toolset's `sudo` wrapper and for Node.js in release 0.5.23), and `maestro doctor` passed the launcher, the rule and the proxies. The self-test then needed the launcher to leave out unit settings that systemd 239 lacks (release 0.5.24). No agent turn has run in it yet ([plan](docs/PLAN.md)). |
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
 | Code hosts other than GitHub (GitLab, Gitea, Forgejo) | Written: `workspace.host: gitlab` with `maestro setup --host gitlab` and `maestro gitlab`, and `workspace.host: gitea` (also for Forgejo) with `maestro setup --host gitea` and `maestro gitea`. Tested against a fake GitLab and a fake Gitea; not yet run against either. |
