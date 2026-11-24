@@ -1285,7 +1285,7 @@ ProtectKernelTunables=yes      ProtectKernelModules=yes    ProtectKernelLogs=yes
 ProtectControlGroups=yes       ProtectClock=yes            ProtectHostname=yes
 RestrictSUIDSGID=yes           LockPersonality=yes         RestrictRealtime=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-SystemCallFilter=@system-service
+SystemCallFilter=@system-service SystemCallErrorNumber=ENOSYS
 SystemCallArchitectures=native
 UMask=0077
 MemoryMax=<sandbox.memory_max> MemorySwapMax=0
