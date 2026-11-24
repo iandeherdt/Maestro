@@ -448,6 +448,8 @@ Replaces upstream `codex`.
 - `rework_on_comments` (boolean): default `true`. Comments on the pull request by an allowlisted
   commenter send the issue back to work (Section 15.8).
 - `review_quiet_ms` (integer): default `120000`. How long the commenter has to be quiet first.
+- `update_branches` (boolean): default `true`. After a pull request is merged, the service merges
+  the base branch into the branch of every other open pull request of its own (Section 15.9).
 - `max_bundle_bytes` (integer): default `104857600`.
 
 #### 5.3.10 `policy` (object)
@@ -684,6 +686,7 @@ skip dispatch for that tick and keep reconciling.
 - `publish.required_checks` `branch-protection` (or a list, or `none`); `publish.checks_timeout_ms` `3600000`
 - `publish.rework_on_changes_requested` `true`; `publish.max_bundle_bytes` `104857600`
 - `publish.rework_on_comments` `true`; `publish.review_quiet_ms` `120000`
+- `publish.update_branches` `true`
 - `policy.*`: see Sections 5.3.10 and 15.3
 - `budget.max_failure_attempts` `3`; `budget.max_runs_per_day` `20`
 - `budget.max_agent_seconds_per_day` `28800`; `budget.quota_backoff_ms` `3600000`
@@ -978,7 +981,9 @@ is supplied through an ephemeral `GIT_ASKPASS` helper.
      `base_sha` becomes the newest base, so what the merge brings in is not counted as the
      agent's work. A conflict is left in the tree: the prompt tells the agent to resolve it and
      commit the merge first. GitHub runs no pull request workflow on a branch that conflicts with
-     its base, so without this such a branch could never pass its checks.
+     its base, so without this such a branch could never pass its checks. When the published
+     branch already holds the newest base (the service merged it, Section 15.9), `base_sha`
+     becomes the newest base as well.
 4. Population failure on a new workspace removes the partial directory. A reused workspace is
    never destructively reset.
 
@@ -1854,8 +1859,13 @@ Import (control zone):
    `refs/maestro/incoming/<workspace_key>` with object checking enabled
    (`transfer.fsckObjects=true`). Fetching from a bundle executes nothing from the workspace.
 3. Require that `base_sha` is an ancestor of the incoming head, that the incoming head is not
-   `base_sha`, and that every new commit has exactly one parent. The new commits are therefore a
-   single line from `base_sha`: no unrelated history, no new root commit and no merge. At most
+   `base_sha`, and that every new commit has exactly one parent, with one exception: a commit
+   with two parents whose second parent is `base_sha` or an ancestor of it. That is the base
+   branch merged into the work (Sections 9.4 and 15.9), and it brings in nothing but the owner's
+   own history. The new commits are therefore a line from `base_sha`: no unrelated history, no
+   new root commit and no merge of anything else. For the secret scan of the history (Section
+   15.4), what such a merge adds on top of its second parent is looked at as well, because the
+   log of the commits shows nothing for a merge. At most
    500 new commits are accepted. A head that fails these checks is removed from the mirror.
    The incoming head must also be the commit the export step printed, which is the one the
    verify step ran on.
@@ -2024,8 +2034,12 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
 2. Read the pull request. If it is closed or merged, block the issue with `pull_request_closed`.
    If its head is not `head_sha`, someone else pushed to the branch: block the issue with
    `foreign_push`. If the host says it conflicts with its base branch (GitHub's
-   `mergeable_state` `dirty`, GitLab's `has_conflicts`), block the issue with `merge_conflict`:
-   its CI does not run, so waiting would only end at the deadline.
+   `mergeable_state` `dirty`, GitLab's `has_conflicts`), its CI does not run, so waiting would
+   only end at the deadline: drop the record and schedule a `gate` retry with the category
+   `merge_conflict` and feedback that tells the agent to resolve the conflicts and commit the
+   merge. It counts as a failed attempt, so a conflict the agent does not get resolved ends in
+   the blocked state with `merge_conflict`. The workspace refresh of that attempt leaves the
+   conflicts in the tree (Section 9.4).
 3. Read the check runs (latest run per check) and the commit statuses for `head_sha`. A check
    run counts as passed when it completed with `success`, `neutral` or `skipped`; any other
    completed conclusion is a failure. When two results carry the same name, the worse one counts.
@@ -2099,7 +2113,15 @@ repository itself (not a fork that reuses the name) and it was opened by the bot
   round in circles.
 - Issue moved to `Rework` by a human: nothing to do here. The next tick dispatches it as an active
   issue, with review feedback (Section 13.3).
-- No pull request, or an open one without such a review: nothing.
+- An open pull request without such a comment or review, which the host says conflicts with its
+  base branch: set the issue to `Rework`, if `Rework` is an active state, and say so in the status
+  comment. The next tick dispatches it, and the workspace refresh leaves the conflicts in the tree
+  for the agent. Without `Rework` as an active state, say once in the status comment that the pull
+  request conflicts. On GitHub the conflict is read from the pull request itself: a list of pull
+  requests does not carry it.
+- An open pull request without such a comment or review, after a merge was seen in the previous
+  run: bring its branch up to date (Section 15.9).
+- No pull request: nothing.
 
 What counts as a comment: a comment in the pull request's conversation, a comment on a line of
 the diff, and the summary of a submitted review. Only those by `tracker.allowed_commenters`, and
@@ -2128,6 +2150,35 @@ When the tracker closes an issue by itself on merge (a GitHub issue named by `Cl
 issue never appears in the hand-off state as merged. Its workspace is then removed by the
 terminal-state cleanup, and its branch is left to the repository's own "delete head branches"
 setting.
+
+
+### 15.9 Keeping Open Pull Requests Up To Date
+
+Two tickets that are worked on side by side each start from the base branch as it was. When the
+first is merged, the second no longer holds the newest base. If the two changed the same lines,
+its pull request conflicts; if they did not, its checks ran without the first one's work. With
+`publish.update_branches`, the service brings the others up to date itself.
+
+When the hand-off watch sees a merged pull request, every Publish Record and every issue in the
+hand-off state is marked. At the next look at each of them, before anything else:
+
+1. Find the issue's open pull request, as in Section 15.8. Without one, do nothing.
+2. Fetch the mirror.
+3. Only when the remote branch is exactly the commit the service last pushed for the workspace:
+   merge the base branch into it in the mirror, without a working tree and without any
+   attribute, hook or merge driver of the repository (`git merge-tree --write-tree`). A branch
+   anyone else pushed to is left alone.
+4. No conflicts: commit the merge as the bot identity with both parents, push it with the same
+   lease as any other push (Section 15.4), and, for a Publish Record, set `head_sha` to the merge
+   and start the checks deadline again. The host runs the checks on the merge. An issue in the
+   hand-off state stays there.
+5. Conflicts: nothing is pushed. A Publish Record is handled as a conflicting pull request in
+   Section 15.6, an issue in the hand-off state as one in Section 15.8.
+
+The merge is made only of commits that were accepted before: what passed the publish gate, and
+the owner's base branch. A failure in any step is logged and changes nothing; a conflict is still
+found through the host. Base commits that arrive another way (a push by a person) start no
+update; the conflict flag of the host covers them.
 
 ## 16. Logging, Status, and Observability
 
@@ -2882,7 +2933,7 @@ part of it.
 The agent's final message MUST end in one of two forms:
 
 - Questions as plain text, followed by a line `MAESTRO_PLAN: questions`.
-- One fenced `json` block `{"tasks": [{"title", "description", "worker", "depends_on"}]}` followed
+- One fenced `json` block `{"tasks": [{"title", "description", "worker", "depends_on", "touches"}]}` followed
   by a line `MAESTRO_PLAN: tasks`.
 
 The service reads the answer strictly: the last marker line counts; unknown JSON fields are an
@@ -2891,6 +2942,17 @@ and at most 6000 characters; the plan is at most 40000 characters in total; `wor
 of the board's workers (it MAY be omitted when there is only one); `depends_on` names earlier
 tasks by position, counted from 1, so the dependencies cannot form a cycle. Questions are at most
 6000 characters.
+
+`touches` lists the files the task is expected to create or change: at most 40 paths from the top
+of the repository, each at most 200 characters, without control characters, backticks, backslashes
+or `..`; a path that ends in `/` names a folder. Tasks without a dependency between them are
+worked on at the same time, and two that change the same file hand in pull requests that conflict.
+So after reading the plan the service adds to `depends_on`: every task waits for each earlier task
+whose `touches` share a path with its own (the same path, or a folder and a path inside it),
+unless it already waits for that task through another one. The plan the owner sees and the
+tickets carry the added dependencies and, in the task's text, the files. The planning prompt
+tells the agent this, and to cut tasks along files and to put a change several tasks need in a
+shared file into one early task.
 
 An answer that does not parse is sent back to the agent in the same session with the reason, up
 to `agent.max_turns`, and then fails the attempt with `plan_malformed`. The reason is the

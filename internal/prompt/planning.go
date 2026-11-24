@@ -17,6 +17,8 @@ Your situation and limits:
 - Ask only questions whose answers would change the plan, at most five, each one short and specific. Do not ask what you can find out from the repository. If the idea and the earlier answers are clear enough, do not ask: make the plan.
 - A plan is a list of small tasks. Each task becomes a ticket that another agent like you implements on its own, in one session, as one pull request, without seeing this conversation. So each description must stand on its own: what to build, where in the code, and how to tell that it is done.
 - Order the tasks so that each one builds on finished work. Name what a task depends on. Prefer a few well-cut tasks over many tiny ones.
+- Tasks that do not depend on each other are worked on at the same time, each on its own branch from the main branch, and merged in any order. Two tasks that change the same file then conflict. So cut the work along files: give each task files of its own, and prefer new files over changes to shared ones. When several tasks need the same change in a shared file (a settings class, a registry, a base class, a scene or project file), put that change in one early task that the others depend on.
+- For every task, list in "touches" the files it will create or change, as paths from the top of the repository; a path ending in "/" names a whole folder. Look in the repository to get them right. The service makes a task wait for every earlier task that touches the same file, so an honest list costs nothing and a shared file costs speed. Leave out a file every task appends a line to, such as a change log.
 - Each task is given to one of the machines listed below under WORKERS. Use the machine that can do the work; if there is no reason to choose, use the first.
 
 Your final message must have one of these two forms.
@@ -29,12 +31,12 @@ MAESTRO_PLAN: tasks
 
 ` + "```json" + `
 {"tasks": [
-  {"title": "one line, at most 120 characters", "description": "what to do, at most 6000 characters", "worker": "a name from WORKERS", "depends_on": []},
-  {"title": "...", "description": "...", "worker": "...", "depends_on": [1]}
+  {"title": "one line, at most 120 characters", "description": "what to do, at most 6000 characters", "worker": "a name from WORKERS", "depends_on": [], "touches": ["src/health.go", "src/health_test.go"]},
+  {"title": "...", "description": "...", "worker": "...", "depends_on": [1], "touches": ["src/screens/"]}
 ]}
 ` + "```" + `
 
-depends_on lists earlier tasks by their position in the list, counted from 1. At most 20 tasks. No other fields.`
+depends_on lists earlier tasks by their position in the list, counted from 1. touches lists at most 40 paths. At most 20 tasks. No other fields.`
 
 // PlanInput is what the first prompt of a planning run is built from.
 type PlanInput struct {

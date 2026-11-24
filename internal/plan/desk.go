@@ -86,7 +86,7 @@ func (d *Desk) Brief(ctx context.Context, is issue.Issue) (Brief, error) {
 				var b strings.Builder
 				b.WriteString("An earlier run proposed this plan:\n")
 				for i, t := range r.Plan.Tasks {
-					fmt.Fprintf(&b, "\nTask %d (worker %s): %s\n%s\n", i+1, t.Worker, t.Title, t.Body)
+					fmt.Fprintf(&b, "\nTask %d (worker %s): %s\n%s%s\n", i+1, t.Worker, t.Title, t.Body, t.FilesNote())
 				}
 				body = b.String()
 			}
@@ -173,7 +173,7 @@ func (d *Desk) Materialize(ctx context.Context, is issue.Issue) (string, error) 
 		if rec.Progress[i].Ref.ID != "" {
 			continue
 		}
-		body := tracker.Neutral(t.Body, MaxBodyChars) + note +
+		body := tracker.Neutral(t.Body, MaxBodyChars) + tracker.Neutral(t.FilesNote(), MaxTouches*(MaxPathChars+2)+100) + note +
 			fmt.Sprintf("\n\n---\nTask %d of %d from the approved plan of %s.", i+1, len(tasks), is.Identifier)
 		ref, err := d.Planner.CreateTask(ctx, tracker.Task{Title: tracker.Neutral(t.Title, MaxTitleChars), Body: body, Worker: t.Worker})
 		if err != nil {
