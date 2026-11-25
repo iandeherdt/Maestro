@@ -1013,7 +1013,7 @@ func (b *builder) budget(s *section) {
 	bg.MaxTokensPerDay = s.optInteger("max_tokens_per_day", nil)
 	defSeconds := int64(28800)
 	bg.MaxAgentSecondsPerDay = s.optInteger("max_agent_seconds_per_day", &defSeconds)
-	defAttempt, defTicket := int64(10_000_000), int64(30_000_000)
+	defAttempt, defTicket := int64(30_000_000), int64(100_000_000)
 	bg.MaxTokensPerAttempt = s.optInteger("max_tokens_per_attempt", &defAttempt)
 	bg.MaxTokensPerTicket = s.optInteger("max_tokens_per_ticket", &defTicket)
 	bg.BlockRepeatedFailure = s.boolean("block_repeated_failure", true)
