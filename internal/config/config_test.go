@@ -137,11 +137,11 @@ func TestDefaults(t *testing.T) {
 	if c.Budget.MaxAgentSecondsPerDay == nil || *c.Budget.MaxAgentSecondsPerDay != 28800 {
 		t.Errorf("budget.max_agent_seconds_per_day = %v, want 28800", c.Budget.MaxAgentSecondsPerDay)
 	}
-	if c.Budget.MaxTokensPerAttempt == nil || *c.Budget.MaxTokensPerAttempt != 10_000_000 {
-		t.Errorf("budget.max_tokens_per_attempt = %v, want 10000000", c.Budget.MaxTokensPerAttempt)
+	if c.Budget.MaxTokensPerAttempt == nil || *c.Budget.MaxTokensPerAttempt != 100_000_000 {
+		t.Errorf("budget.max_tokens_per_attempt = %v, want 100000000", c.Budget.MaxTokensPerAttempt)
 	}
-	if c.Budget.MaxTokensPerTicket == nil || *c.Budget.MaxTokensPerTicket != 30_000_000 {
-		t.Errorf("budget.max_tokens_per_ticket = %v, want 30000000", c.Budget.MaxTokensPerTicket)
+	if c.Budget.MaxTokensPerTicket == nil || *c.Budget.MaxTokensPerTicket != 300_000_000 {
+		t.Errorf("budget.max_tokens_per_ticket = %v, want 300000000", c.Budget.MaxTokensPerTicket)
 	}
 	if !c.Budget.BlockRepeatedFailure {
 		t.Error("budget.block_repeated_failure is off by default")

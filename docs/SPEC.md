@@ -480,11 +480,11 @@ Replaces upstream `codex`.
   names the `maestro settings set` command that raises it.
 - `max_tokens_per_day` (integer or null): default null.
 - `max_agent_seconds_per_day` (integer or null): default `28800`.
-- `max_tokens_per_attempt` (integer or null): default `10000000`. Tokens are counted as in the
+- `max_tokens_per_attempt` (integer or null): default `100000000`. Tokens are counted as in the
   daily totals: input, output, cache reads and cache writes. When the cumulative usage of a running
   attempt goes over it, the orchestrator terminates the attempt and blocks the issue with reason
   `token_limit` (Section 8.7). null is no limit.
-- `max_tokens_per_ticket` (integer or null): default `30000000`. The tokens of an issue's attempts
+- `max_tokens_per_ticket` (integer or null): default `300000000`. The tokens of an issue's attempts
   together, persisted per issue and cleared under the same rules as `failure_attempts`. A running
   attempt that takes the total over it is terminated and the issue blocked with `token_limit`; so is
   an issue whose finished attempt took it over, instead of a retry. null is no limit.
