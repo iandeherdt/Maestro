@@ -296,7 +296,57 @@ Flags:
 Examples:
   maestro talk 12
   maestro talk ENG-7 --new`,
-		see: []string{"shell", "status"},
+		see: []string{"shell", "status", "telegram"},
+	},
+	{
+		name: "telegram", group: "Watching and steering",
+		usage:   "maestro telegram [token|link|test|remove]",
+		summary: "follow and talk to the agents from a Telegram chat",
+		body: `Links a Telegram bot to this project. The service then tells you in your chat
+with the bot when an idea has questions or a plan, a design or pull request
+is ready, a ticket is blocked, and when work is merged or an idea is done.
+
+Reply to one of its messages to talk to the agent of that ticket, the way
+maestro talk does on a terminal: one turn of Claude Code in the ticket's
+sandbox, continuing the agent's conversation, with the agent's login,
+network and restrictions. The answer comes back in the chat, and the next
+run on the ticket continues that conversation: for an idea, move its card
+back to planning on the board when you have talked it through. The chat
+never moves cards: approving stays on the board, where only you can do it.
+Talking waits while the service works on the ticket.
+
+In the chat:
+  /talk GH-12 text   talk to the agent of a ticket; messages without a
+                     command go to the ticket you talked to last
+  /new GH-12 text    start a new conversation on a ticket
+  /status            what runs now
+
+Set it up:
+  1. In Telegram, talk to @BotFather, send /newbot and pick a name.
+  2. maestro telegram token, and paste the token BotFather gave you.
+  3. maestro telegram link, and send the bot the code it shows. Only that
+     private chat is linked; the bot ignores everyone else, without an
+     answer.
+  4. maestro restart.
+
+The service polls Telegram, so nothing on this machine listens for
+connections. The token is kept in the setup folder, readable by you only;
+it never reaches the agent, and the secret scan refuses work that holds it.
+Each project needs a bot of its own. Talking works with the container
+sandbox only.
+
+Commands:
+  (none)   whether a bot is set up, and which chat it answers
+  token    store the bot's token
+  link     link your private chat with the bot (to link another chat
+           later, stop the service first)
+  test     send a test message
+  remove   delete the token and the link
+
+Examples:
+  maestro telegram token
+  maestro telegram link`,
+		see: []string{"talk", "status"},
 	},
 	{
 		name: "assistant", group: "Watching and steering",

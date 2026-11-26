@@ -96,6 +96,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runUnity(args[1:], os.Stdin, stdout, stderr)
 		case "linear":
 			return runLinear(args[1:], os.Stdin, stdout, stderr)
+		case "telegram":
+			return runTelegram(args[1:], os.Stdin, stdout, stderr)
 		case "gitlab":
 			return runGitLab(args[1:], os.Stdin, stdout, stderr)
 		case "gitea":
