@@ -152,8 +152,11 @@ func TestDefaults(t *testing.T) {
 	if got := strings.Join(c.Tracker.ActiveStates, ","); got != "Todo,In Progress,Rework" {
 		t.Errorf("active states = %q", got)
 	}
-	if got := strings.Join(c.Claude.DisallowedTools, ","); got != "WebFetch,WebSearch" {
-		t.Errorf("disallowed tools = %q", got)
+	if got := strings.Join(c.Claude.DisallowedTools, ","); got != "WebFetch" {
+		t.Errorf("disallowed tools = %q, want only WebFetch: search is on, fetch has no hosts", got)
+	}
+	if !c.Claude.WebSearch || len(c.Claude.WebFetch) != 0 {
+		t.Errorf("web_search = %v, web_fetch = %v; want on and none", c.Claude.WebSearch, c.Claude.WebFetch)
 	}
 	if got := strings.Join(c.Tracker.AllowedCommenters, ","); got != "owner" {
 		t.Errorf("allowed_commenters = %q, want the allowed authors", got)
@@ -286,6 +289,8 @@ func TestInvalid(t *testing.T) {
 		{"shell in claude command", minimal + "claude:\n  command: 'claude; rm -rf /'\n", "claude.command"},
 		{"claude command with args", minimal + "claude:\n  command: claude --bare\n", "claude.command"},
 		{"bad permission mode", minimal + "claude:\n  permission_mode: yolo\n", "claude.permission_mode"},
+		{"url in web_fetch", minimal + "claude:\n  web_fetch: ['https://go.dev/doc']\n", "claude.web_fetch"},
+		{"web_search not a boolean", minimal + "claude:\n  web_search: sometimes\n", "claude.web_search"},
 		{"missing sandbox backend", with("  backend: systemd\n", "", ""), "sandbox.backend"},
 		{"no sandbox backend 'none'", with("backend: systemd", "backend: none", ""), "sandbox.backend"},
 		{"missing proxy", strings.Replace(with("    proxy: 127.0.0.1:3128\n", "    allow_agent: []\n", ""), "backend: systemd", "backend: macos-user", 1), "sandbox.network.proxy"},
@@ -649,5 +654,21 @@ func TestTraces(t *testing.T) {
 	c = mustBuild(t, minimal+"traces:\n  url: https://otel.example/v1/traces\n  project: games\n")
 	if c.Traces.Project != "games" {
 		t.Errorf("project %q", c.Traces.Project)
+	}
+}
+
+func TestWebTools(t *testing.T) {
+	c := mustBuild(t, minimal+"claude:\n  web_search: false\n  web_fetch: [Go.dev, '*.readthedocs.io']\n")
+	if got := strings.Join(c.Claude.DisallowedTools, ","); got != "WebSearch" {
+		t.Errorf("disallowed tools = %q, want WebSearch only", got)
+	}
+	if got := strings.Join(c.Claude.WebFetch, ","); got != "go.dev,*.readthedocs.io" {
+		t.Errorf("web_fetch = %q", got)
+	}
+	// The file's own list is kept, and a tool named there stays away even
+	// when its own setting would allow it.
+	c = mustBuild(t, minimal+"claude:\n  disallowed_tools: [WebSearch, 'Bash(curl:*)']\n  web_fetch: [go.dev]\n")
+	if got := strings.Join(c.Claude.DisallowedTools, ","); got != "WebSearch,Bash(curl:*)" {
+		t.Errorf("disallowed tools = %q", got)
 	}
 }

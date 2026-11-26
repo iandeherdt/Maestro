@@ -313,6 +313,13 @@ func absAll(paths ...string) []string {
 // allow writes the proxies' allowlists from the configuration.
 func (in *install) allow(cfg *config.Config) error {
 	agent := append(append([]string{}, proxy.DefaultAgentHosts...), cfg.Sandbox.AllowAgent...)
+	// The pages the agent may read with WebFetch. The proxy is what
+	// enforces it: a host that is not here is refused, whichever tool asks.
+	for _, h := range cfg.Claude.WebFetch {
+		if !slices.Contains(agent, h) {
+			agent = append(agent, h)
+		}
+	}
 	if err := dockerbox.WriteAllow(in.allowDir, "agent", agent); err != nil {
 		return err
 	}

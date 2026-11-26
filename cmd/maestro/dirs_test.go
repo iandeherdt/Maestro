@@ -3,9 +3,11 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/iandeherdt/Maestro/internal/config"
+	"github.com/iandeherdt/Maestro/internal/proxy"
 )
 
 // Other users of the machine cannot get to the mirror, the allowlists or
@@ -37,5 +39,25 @@ func TestDirsAreClosedToOtherUsers(t *testing.T) {
 		if got := st.Mode().Perm(); got != want {
 			t.Errorf("%s has mode %04o, want %04o", d, got, want)
 		}
+	}
+}
+
+func TestAllowlistsTakeWebFetchHosts(t *testing.T) {
+	in := &install{allowDir: t.TempDir()}
+	cfg := &config.Config{}
+	cfg.Sandbox.AllowAgent = []string{"go.dev"}
+	cfg.Claude.WebFetch = []string{"go.dev", "*.readthedocs.io"}
+	cfg.Sandbox.AllowHooks = []string{"registry.npmjs.org"}
+	if err := in.allow(cfg); err != nil {
+		t.Fatal(err)
+	}
+	agent := proxy.ReadAllow(filepath.Join(in.allowDir, "agent.json"))
+	want := append(append([]string{}, proxy.DefaultAgentHosts...), "go.dev", "*.readthedocs.io")
+	if !slices.Equal(agent, want) {
+		t.Errorf("agent allowlist = %v, want %v", agent, want)
+	}
+	// The hooks never get the agent's reading list.
+	if hooks := proxy.ReadAllow(filepath.Join(in.allowDir, "hooks.json")); !slices.Equal(hooks, []string{"registry.npmjs.org"}) {
+		t.Errorf("hooks allowlist = %v", hooks)
 	}
 }
