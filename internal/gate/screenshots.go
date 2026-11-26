@@ -139,7 +139,17 @@ func (g *Gates) shoot(ctx context.Context, key string, cfg config.Screenshots) (
 	case err != nil:
 		return nil, fmt.Sprintf("No screenshots: taking them did not finish within %s, or the sandbox could not be started.", timeout)
 	case res.ExitStatus != 0:
-		return nil, "No screenshots: " + reason(cfg, res)
+		note := "No screenshots: " + reason(cfg, res)
+		if len(cfg.Pages) == 0 && g.Log != nil {
+			// The command's output is text from the sandbox, written by
+			// code the agent may have changed, so it does not go into the
+			// pull request. The operator reads it in the service's log.
+			g.Log.Warn("screenshots.command failed", "workspace", key, "status", res.ExitStatus,
+				"output", outputTail(res.Stderr, res.Stdout))
+			note += " Its last lines are in the service log of worker " + code(g.Config().Worker.Name) +
+				": search it for `screenshots.command failed`."
+		}
+		return nil, note
 	}
 
 	var shots []worker.Screenshot
@@ -217,6 +227,32 @@ func reason(cfg config.Screenshots, res sandbox.Result) string {
 	}
 	return fmt.Sprintf("taking them stopped with status %d.", res.ExitStatus)
 }
+
+// outputTail is the last lines of a step's output, at most 2 KB, with
+// control characters other than line breaks taken out.
+func outputTail(stderr, stdout []byte) string {
+	text := strings.TrimSpace(string(stderr))
+	if text == "" {
+		text = strings.TrimSpace(string(stdout))
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 20 {
+		lines = lines[len(lines)-20:]
+	}
+	text = strings.Join(lines, "\n")
+	if len(text) > 2048 {
+		text = text[len(text)-2048:]
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f) {
+			return r
+		}
+		return -1
+	}, text)
+}
+
+// code is s in inline code, for a pull request.
+func code(s string) string { return "`" + strings.ReplaceAll(s, "`", "'") + "`" }
 
 func lastLine(b []byte) string {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")

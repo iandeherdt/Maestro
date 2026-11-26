@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -235,5 +236,25 @@ func TestScreenshotsOfPagesWithARealBrowser(t *testing.T) {
 	// A page that is not there, and an address nothing answers at.
 	if _, note := l.gates(config.Screenshots{Pages: []string{"missing.html"}, Width: 640, Height: 400}).screenshots(ctx, "GH-1"); note != `No screenshots: "missing.html" is not a file in the repository.` {
 		t.Fatalf("note %q", note)
+	}
+}
+
+func TestAFailedScreenshotCommandIsExplainedInTheLog(t *testing.T) {
+	l := newLocal(t)
+	var logged bytes.Buffer
+	g := l.gates(config.Screenshots{Command: `printf 'one\ntwo\nconventions: the Unity Editor is missing\033[31m\n' >&2; exit 1`})
+	g.Config().Worker.Name = "mac-mini"
+	g.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	_, note := g.screenshots(ctx, "GH-1")
+	if note != "No screenshots: screenshots.command exited with status 1. Its last lines are in the service log of worker `mac-mini`: search it for `screenshots.command failed`." {
+		t.Fatalf("note %q", note)
+	}
+	out := logged.String()
+	if !strings.Contains(out, "screenshots.command failed") || !strings.Contains(out, "the Unity Editor is missing") || strings.Contains(out, "\033") {
+		t.Fatalf("log %q", out)
+	}
+	// The command's text never reaches the note, which goes into the pull request.
+	if strings.Contains(note, "Unity") {
+		t.Fatal("the command's output is in the note")
 	}
 }

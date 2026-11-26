@@ -761,7 +761,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	}
 	spaces := workspace.New(cur.config(), in.box, log)
 	host := in.hostChecks(cur.config, log)
-	gates := &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub, Host: host}
+	gates := &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub, Host: host, Log: log}
 	// What is pushed is the commit the export step named and verify ran on.
 	pub.ExportedHead = gates.ExportedHead
 	wk := &worker.Worker{

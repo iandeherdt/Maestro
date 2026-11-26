@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -48,6 +49,9 @@ type Gates struct {
 	// Host runs the checks that do not run in the sandbox. Nil: there
 	// are none on this machine.
 	Host HostChecks
+	// Log takes what the service's own operator may read, such as the
+	// last lines of a screenshot command that failed. Nil: no log.
+	Log *slog.Logger
 
 	mu    sync.Mutex
 	heads map[string]string // workspace key -> head of the last export
