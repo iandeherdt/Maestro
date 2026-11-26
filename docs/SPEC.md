@@ -399,7 +399,19 @@ Replaces upstream `codex`.
 - `permission_mode` (string): default `bypassPermissions`. One of `acceptEdits`, `auto`,
   `bypassPermissions`, `manual`, `dontAsk`, `plan`. Any value other than `plan` requires
   `sandbox.backend` to be a real backend (Section 11), enforced by validation.
-- `disallowed_tools` (list): default `["WebFetch", "WebSearch"]`.
+- `disallowed_tools` (list): default `[]`. Tools the agent may not use. The service adds
+  `WebSearch` when `web_search` is `false` and `WebFetch` when `web_fetch` is empty, and passes the
+  result as `--disallowedTools`. A tool named here stays away whatever the two settings say.
+- `web_search` (boolean): default `true`. Lets the agent use Claude Code's `WebSearch`. The search
+  runs on Anthropic's side, so it opens no host beyond the Claude service hosts of the `agent`
+  profile (Section 11.4). Extension.
+- `web_fetch` (list of host names): default `[]`. Hosts whose pages the agent may read with
+  `WebFetch`, in the form of `sandbox.network.allow_agent` (`*.example.com` allows the names below
+  `example.com`). They are added to the `agent` allowlist, so the proxy is what enforces the list,
+  for every tool and command of the turn. With none, `WebFetch` is taken away. Only hosts the owner
+  trusts to serve pages, and where a request cannot be read back by someone else, belong here: a
+  request is a way to carry data out. With a backend whose proxy is not the service's own, that
+  proxy has to allow the hosts too. Extension.
 - `inner_sandbox` (boolean): default `false`. Enables Claude Code's own command sandbox in addition
   to the OS sandbox. It needs `bubblewrap`, `socat` and user namespaces, covers shell commands
   only, and is incompatible with `RestrictNamespaces` (Section 11.3).
@@ -679,7 +691,9 @@ skip dispatch for that tick and keep reconciling.
 - `claude.card_models`: default `[]`
 - `claude.max_steps_per_turn`: default `150`
 - `claude.permission_mode`: default `bypassPermissions`
-- `claude.disallowed_tools`: default `[WebFetch, WebSearch]`
+- `claude.disallowed_tools`: default `[]` (plus `WebSearch` and `WebFetch` as below)
+- `claude.web_search`: default `true`
+- `claude.web_fetch`: default `[]` (no `WebFetch`)
 - `claude.inner_sandbox`: default `false`
 - `claude.turn_timeout_ms`: default `3600000`
 - `claude.turn_total_timeout_ms`: default `5400000`
@@ -1413,7 +1427,7 @@ BindReadOnlyPaths=<proxy socket of the profile>:/run/maestro-proxy.sock   # only
 - Allowlists by network profile:
   - `none`: no proxy access (verify by default, export, populate, `after_run`, `before_remove`).
   - `agent`: `api.anthropic.com`, `claude.ai` and `platform.claude.com`, plus
-    `sandbox.network.allow_agent`. Non-essential traffic (updates, telemetry, error reports) is
+    `sandbox.network.allow_agent` and `claude.web_fetch`. Non-essential traffic (updates, telemetry, error reports) is
     switched off by environment (Section 10.1). To verify by observing the proxy log: whether all
     three hosts are needed for inference and login refresh.
   - `hooks`: `sandbox.network.allow_hooks`.

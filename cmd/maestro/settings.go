@@ -35,6 +35,7 @@ const (
 	whole    settingKind = iota // a positive whole number
 	optional                    // a positive whole number, or none
 	word                        // a word, such as a model name
+	onOff                       // true or false
 )
 
 type setting struct {
@@ -72,6 +73,8 @@ var everydaySettings = []setting{
 		func(c *config.Config) string { return c.Claude.Model }},
 	{"claude.planning_model", word, "the model for planning an idea; empty means claude.model",
 		func(c *config.Config) string { return c.Claude.PlanningModel }},
+	{"claude.web_search", onOff, "whether the agent may search the web; the search runs on Anthropic's side",
+		func(c *config.Config) string { return strconv.FormatBool(c.Claude.WebSearch) }},
 	{"publish.checks_timeout_ms", whole, "milliseconds to wait for a pull request's checks before the ticket is blocked",
 		func(c *config.Config) string { return strconv.FormatInt(c.Publish.ChecksTimeoutMS, 10) }},
 	{"polling.interval_ms", whole, "milliseconds between two looks at the board",
@@ -177,6 +180,16 @@ func setSetting(path, name, value string, stdout, stderr io.Writer) int {
 			return report(stderr, explain("%s takes one line.", name))
 		}
 		literal = strconv.Quote(value)
+	case onOff:
+		switch strings.ToLower(value) {
+		case "true", "on", "yes":
+			value = "true"
+		case "false", "off", "no":
+			value = "false"
+		default:
+			return report(stderr, explain("%s takes true or false, not %q.", name, value))
+		}
+		literal = value
 	}
 
 	raw, err := os.ReadFile(path)

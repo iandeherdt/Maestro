@@ -105,10 +105,19 @@ type Claude struct {
 	PlanningModel string
 	// CardModels are the models a ticket may ask for with a model: label or
 	// the board's Model field. Empty allows every well-formed name.
-	CardModels         []string
-	MaxStepsPerTurn    int64
-	PermissionMode     string
-	DisallowedTools    []string
+	CardModels      []string
+	MaxStepsPerTurn int64
+	PermissionMode  string
+	// DisallowedTools is what the agent may not use: the file's own
+	// disallowed_tools, plus WebSearch when WebSearch is off and WebFetch
+	// when WebFetch lists no host.
+	DisallowedTools []string
+	// WebSearch lets the agent search the web. The search runs on
+	// Anthropic's side, so it needs no host beyond the Claude service.
+	WebSearch bool
+	// WebFetch are the hosts whose pages the agent may read. They join the
+	// agent's proxy allowlist; with none, the tool is taken away.
+	WebFetch           []string
 	InnerSandbox       bool
 	TurnTimeoutMS      int64
 	TurnTotalTimeoutMS int64
@@ -765,7 +774,15 @@ func (b *builder) claude(s *section) {
 	c.CardModels = trimAll(s.strList("card_models", nil))
 	c.MaxStepsPerTurn = b.positive("claude.max_steps_per_turn", s.integer("max_steps_per_turn", 150))
 	c.PermissionMode = s.str("permission_mode", "bypassPermissions")
-	c.DisallowedTools = trimAll(s.strList("disallowed_tools", []string{"WebFetch", "WebSearch"}))
+	c.DisallowedTools = trimAll(s.strList("disallowed_tools", nil))
+	c.WebSearch = s.boolean("web_search", true)
+	c.WebFetch = b.hosts("claude.web_fetch", s.strList("web_fetch", nil))
+	if !c.WebSearch && !slices.Contains(c.DisallowedTools, "WebSearch") {
+		c.DisallowedTools = append(c.DisallowedTools, "WebSearch")
+	}
+	if len(c.WebFetch) == 0 && !slices.Contains(c.DisallowedTools, "WebFetch") {
+		c.DisallowedTools = append(c.DisallowedTools, "WebFetch")
+	}
 	c.InnerSandbox = s.boolean("inner_sandbox", false)
 	c.TurnTimeoutMS = b.positive("claude.turn_timeout_ms", s.integer("turn_timeout_ms", 3600000))
 	c.TurnTotalTimeoutMS = b.positive("claude.turn_total_timeout_ms", s.integer("turn_total_timeout_ms", 5400000))
@@ -838,6 +855,10 @@ func (b *builder) sandbox(s *section) {
 	}
 	if !imageRE.MatchString(sb.Image) {
 		b.fail("sandbox.image", "must be an image name such as maestro-sandbox:latest")
+	}
+	if len(b.cfg.Claude.WebFetch) > 0 && sb.Backend != "docker" && sb.Backend != "podman" && sb.Backend != "systemd" {
+		b.cfg.Warnings = append(b.cfg.Warnings,
+			"claude.web_fetch: the proxy at sandbox.network.proxy is not Maestro's own, so it must allow these hosts itself")
 	}
 	// The docker and systemd backends run their own proxies.
 	if sb.Proxy == "" && (sb.Backend == "docker" || sb.Backend == "podman" || sb.Backend == "systemd") {

@@ -70,6 +70,7 @@ func TestSettingsShowAndSet(t *testing.T) {
 		{"budget.max_tokens_per_day", "5000000"},
 		{"budget.max_tokens_per_day", "none"},
 		{"claude.model", "sonnet"},
+		{"claude.web_search", "off"},
 	} {
 		if code := run(append([]string{"settings", "set"}, append(args, "--file", path)...), &out, &errOut); code != 0 {
 			t.Fatalf("set %v: %d %s", args, code, errOut.String())
@@ -80,7 +81,7 @@ func TestSettingsShowAndSet(t *testing.T) {
 	}
 	out.Reset()
 	run([]string{"settings", "--file", path}, &out, &errOut)
-	for _, want := range []string{"budget.max_runs_per_day            40 ", "budget.max_tokens_per_day          none ", "claude.model                       sonnet "} {
+	for _, want := range []string{"budget.max_runs_per_day            40 ", "budget.max_tokens_per_day          none ", "claude.model                       sonnet ", "claude.web_search                  false "} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("show lacks %q:\n%s", want, out.String())
 		}
@@ -92,6 +93,7 @@ func TestSettingsShowAndSet(t *testing.T) {
 		{"budget.max_runs_per_day", "0"},
 		{"budget.max_runs_per_day", "none"},
 		{"budget.state_dir", "/tmp"},
+		{"claude.web_search", "maybe"},
 	} {
 		errOut.Reset()
 		if code := run(append([]string{"settings", "set"}, append(args, "--file", path)...), &out, &errOut); code != 1 {

@@ -1140,6 +1140,8 @@ changed ones:
 | `design.folder` | `design` | Where designs are kept in the repository, one folder per idea |
 | `tracker.design_state` | `Design` | The column that asks for a design; `""` switches designs off |
 | `claude.card_models` | any | The models a card may ask for |
+| `claude.web_search` | `true` | Whether the agent may search the web, see [Searching and reading the web](#searching-and-reading-the-web) |
+| `claude.web_fetch` | none | The sites whose pages the agent may read |
 | `agent.max_concurrent_agents` | 1 | How many tickets are worked on at once |
 | `budget.max_failure_attempts` | 3 | Failed attempts before a ticket is blocked |
 | `budget.max_runs_per_day` | 20 | Daily limit on agent runs |
@@ -1151,6 +1153,28 @@ changed ones:
 | `unity.editor` | none | On a Mac with Apple silicon, the Unity Editor that runs Unity's checks, see [Unity](#unity) |
 | `traces.url` | none | Where each agent turn is sent as a trace, see [traces in Arize Phoenix](#every-step-of-every-turn-traces-in-arize-phoenix) |
 | `traces.project` | `worker.name` | The Phoenix project the traces are filed under |
+
+### Searching and reading the web
+
+The agent can search the web, for example for an error message or the documentation of a
+library. The search runs on Anthropic's side, so the sandbox needs no other site for it, and the
+results come back to the agent as text. Switch it off with
+`maestro settings set claude.web_search false`.
+
+Reading a page is different: the page is fetched from the sandbox, so every site the agent may
+read is a site it can send a request to, and a request can carry your code out. That is why it is
+off until you name the sites, in the settings file:
+
+```yaml
+claude:
+  web_fetch: [go.dev, pkg.go.dev, docs.python.org, "*.readthedocs.io"]
+```
+
+The service adds these to the sandbox proxy's list, which is what holds the agent to them: any
+other site is refused, whichever tool or command asks. A running service picks a change up by
+itself. Name only sites that serve documentation; leave out ones where someone else could read
+back the requests, such as paste sites or request catchers. With the `macos-user` and `macos-vm`
+sandboxes the proxy is your own, and has to allow the sites as well.
 
 ### Linear as the board
 
