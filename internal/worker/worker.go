@@ -208,7 +208,7 @@ type Conversations interface {
 
 // talkedNote starts the first prompt of a run that continues the owner's
 // own conversation with the agent.
-const talkedNote = "The owner and you talked about this ticket in this conversation, on a terminal. " +
+const talkedNote = "The owner and you talked about this ticket in this conversation, on a terminal or in a chat. " +
 	"What you agreed there counts as the owner's wishes for this ticket. Now carry on with the task below.\n\n"
 
 // conversation is the session a run starts in: the owner's pending

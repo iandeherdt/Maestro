@@ -12,7 +12,7 @@ import (
 
 // fakeDocker is a docker client that answers from a script and records
 // its arguments.
-func fakeDocker(t *testing.T, script string) (*Box, string) {
+func scriptDocker(t *testing.T, script string) (*Box, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "args")
@@ -25,7 +25,7 @@ func fakeDocker(t *testing.T, script string) (*Box, string) {
 }
 
 func TestWorkspaceKeys(t *testing.T) {
-	b, log := fakeDocker(t, `printf 'maestro-nuc-ws-GH-1\nmaestro-nuc-claude\nmaestro-nuc-ws-ENG-12\nmaestro-nuc-ws-\n'`)
+	b, log := scriptDocker(t, `printf 'maestro-nuc-ws-GH-1\nmaestro-nuc-claude\nmaestro-nuc-ws-ENG-12\nmaestro-nuc-ws-\n'`)
 	keys, err := b.WorkspaceKeys(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestWorkspaceKeys(t *testing.T) {
 }
 
 func TestStaleImages(t *testing.T) {
-	b, log := fakeDocker(t, `case "$1 $2" in
+	b, log := scriptDocker(t, `case "$1 $2" in
 "image ls") printf 'sha256:aaa\t1.2GB\nsha256:aaa\t1.2GB\nsha256:bbb\t900MB\n' ;;
 "image rm") [ "$3" = sha256:bbb ] && { echo 'conflict: image is being used by running container' >&2; exit 1; } ; exit 0 ;;
 esac`)

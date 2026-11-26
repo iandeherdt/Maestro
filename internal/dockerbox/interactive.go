@@ -122,11 +122,26 @@ func (b *Box) Join(ctx context.Context, name string, stdin io.Reader, stdout, st
 // Interactive runs a session on the caller's terminal in a new container.
 // The proxies must be up (Up). It returns the command's exit status.
 func (b *Box) Interactive(ctx context.Context, sess Session, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	return b.runSession(ctx, sess, true, stdin, stdout, stderr)
+}
+
+// Batch runs a session without a terminal: the owner's message from a chat
+// goes in on stdin, and the answer comes out on stdout. It has the same
+// isolation as Interactive.
+func (b *Box) Batch(ctx context.Context, sess Session, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	return b.runSession(ctx, sess, false, stdin, stdout, stderr)
+}
+
+func (b *Box) runSession(ctx context.Context, sess Session, terminal bool, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	s, cleanup, err := b.session(ctx, sess)
 	if err != nil {
 		return 0, err
 	}
 	defer cleanup()
+	s.terminal = terminal
+	if !terminal {
+		delete(s.env, "TERM")
+	}
 	name := b.prefix() + "-" + strings.ToLower(s.key) + "-" + string(s.step) + "-" + token()
 	cmd := exec.Command(b.docker(), b.runArgs(name, s)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
