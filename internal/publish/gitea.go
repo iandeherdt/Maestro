@@ -62,6 +62,10 @@ func (p *Publisher) gitea(path string) (*giteaHost, error) {
 
 func (g *giteaHost) gitURL() string { return g.web + "/" + g.owner + "/" + g.repo + ".git" }
 
+func (g *giteaHost) checksPage(number int) string {
+	return g.web + "/" + g.owner + "/" + g.repo + "/pulls/" + strconv.Itoa(number) + "/checks"
+}
+
 // giteaList reads a list page by page until a page is empty. It reports
 // false when there were more pages than it reads.
 func giteaList[T any](ctx context.Context, a *api, path string, q url.Values) ([]T, bool, error) {

@@ -2154,6 +2154,11 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
    next poll.
 6. Any required check failed: pass each failed check's name and report to the agent as feedback
    with source `ci`, and schedule a `gate` retry with category `checks_failed`.
+   The failure's detail names the failed checks (cleaned, at most ten), and the status carries
+   a link to the pull request's checks page, built from the settings and the pull request's
+   number. When the ticket is blocked, the note shows the link in its own text and the names as
+   quoted text; the checks' reports go to the agent and to the service log (`required checks
+   failed`), never to the ticket.
 7. Deadline passed, including when the checks could not be read until then: set the issue to the
    blocked state with `checks_timeout`. The blocked comment says that the checks did not finish
    in time, not that attempts failed, and lists the checks still waited for, each `not started`

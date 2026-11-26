@@ -36,6 +36,10 @@ type host interface {
 	// one when a name repeats. It reports false when there were more than
 	// it reads.
 	checks(ctx context.Context, sha string) (map[string]check, bool, error)
+	// checksPage is the web page where a person reads the checks of a
+	// change request and their logs. It is built from the settings and
+	// the number alone, never from what the host returned.
+	checksPage(number int) string
 	// markReady takes a draft out of draft.
 	markReady(ctx context.Context, c change) error
 	// reviews lists the reviews of a change request. It reports false when

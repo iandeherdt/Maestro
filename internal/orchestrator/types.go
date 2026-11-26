@@ -197,6 +197,8 @@ type RetryEntry struct {
 	// blockReason, when set, means the pending write is the move to the
 	// blocked state rather than a dispatch.
 	blockReason string
+	// blockLink is the link the blocked note carries, if any.
+	blockLink string
 	// writeFailures counts consecutive failed tracker writes.
 	writeFailures int
 }
@@ -284,6 +286,11 @@ type CheckStatus struct {
 	Detail string
 	// Feedback describes failed checks for the agent's next attempt.
 	Feedback []issue.Feedback
+	// Link is the page of the code host where a person reads the checks of
+	// the pull request and their logs. The service builds it from the
+	// repository's settings and the pull request's number, so it is safe
+	// to show as a link. Empty when the host has no such page.
+	Link string
 	// NoneReported is true while not a single check has been reported for
 	// the pushed commit: the repository may have no CI at all.
 	NoneReported bool
