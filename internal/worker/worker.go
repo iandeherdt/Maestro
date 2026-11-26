@@ -86,7 +86,11 @@ type Runner interface {
 }
 
 // Export is the result of exporting the workspace's commits (SPEC 15.1).
-type Export struct{ NoChanges bool }
+type Export struct {
+	NoChanges bool
+	// Head is the commit the export produced; empty when not known.
+	Head string
+}
 
 // VerifyResult is the outcome of the verify command (SPEC 14).
 type VerifyResult struct {
@@ -386,6 +390,12 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	var lastVerify *prompt.Verify
 	verified := false // the check ran once this attempt
 	checks := 0       // checks the agent asked for
+	// The agent looks at the pictures of its work once before it is
+	// published (SPEC 13.7). reviewed holds the commit it looked at and
+	// the result of the checks on it.
+	sawPictures := false
+	var reviewed *VerifyResult
+	reviewedHead := ""
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
 			return orchestrator.Outcome{Kind: orchestrator.Normal}
@@ -508,6 +518,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 				for _, f := range files {
 					lastVerify.Pictures = append(lastVerify.Pictures, prompt.DesignPicture{Caption: f.Caption, Path: f.Path})
 				}
+				sawPictures = sawPictures || len(files) > 0
 				if note != "" {
 					lastVerify.PictureNote = note
 				}
@@ -529,12 +540,34 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 			continue
 		}
 
-		phase(orchestrator.Verifying)
-		v, err := w.Gates.Verify(ctx, ws)
-		if err != nil {
-			return failed(VerifyError, err)
+		var v VerifyResult
+		if reviewed != nil && exp.Head != "" && exp.Head == reviewedHead {
+			// The agent looked at its pictures and changed nothing: the
+			// checks already passed on exactly this commit.
+			v = *reviewed
+		} else {
+			phase(orchestrator.Verifying)
+			if v, err = w.Gates.Verify(ctx, ws); err != nil {
+				return failed(VerifyError, err)
+			}
 		}
 		verified = true
+		if v.Passed && reviewed == nil && !sawPictures && len(v.Screenshots) > 0 && turn < maxTurns {
+			if cp, ok := w.Gates.(CheckPictures); ok {
+				if files, _ := cp.GiveCheckPictures(ctx, ws, v.Screenshots); len(files) > 0 {
+					sawPictures = true
+					kept := v
+					reviewed, reviewedHead = &kept, exp.Head
+					lastVerify = &prompt.Verify{Passed: true, OutputTail: v.OutputTail}
+					for _, f := range files {
+						lastVerify.Pictures = append(lastVerify.Pictures, prompt.DesignPicture{Caption: f.Caption, Path: f.Path})
+					}
+					reason = prompt.ReasonReview
+					sink.Event(orchestrator.Event{Kind: "notification", Message: "The checks passed. The agent looks at the screenshots of its work before the pull request is opened."})
+					continue
+				}
+			}
+		}
 		if !v.Passed {
 			if turn >= maxTurns {
 				return orchestrator.Outcome{Kind: orchestrator.Rejected, Category: VerifyFailed,
