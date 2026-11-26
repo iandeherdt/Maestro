@@ -128,6 +128,23 @@ type Gates interface {
 	Design(ctx context.Context, is issue.Issue, ws workspace.Workspace, folder string) (*plan.Design, *Rejection, error)
 }
 
+// CurrentPictures is an optional part of the gates: pictures of the code as
+// it is, taken before a design agent starts (SPEC 27).
+type CurrentPictures interface {
+	Current(ctx context.Context, ws workspace.Workspace) CurrentState
+}
+
+// CurrentState is what Current took and where the agent finds it.
+type CurrentState struct {
+	Shots []Screenshot
+	Files []CurrentFile
+	// Note says in the service's words why there are fewer or none.
+	Note string
+}
+
+// CurrentFile is one picture of the current state as the agent sees it.
+type CurrentFile struct{ Caption, Path string }
+
 // Workspaces is the part of the workspace manager an attempt needs.
 type Workspaces interface {
 	Ensure(ctx context.Context, is issue.Issue) (workspace.Workspace, error)
@@ -522,9 +539,21 @@ func (w *Worker) design(ctx context.Context, a orchestrator.Attempt, set Setting
 	for i, t := range brief.Tasks {
 		tasks[i] = prompt.DesignTask{Title: t.Title, Description: t.Body}
 	}
+	// Pictures of the project as it is now, so the design starts from
+	// what is really there.
+	var current []prompt.DesignPicture
+	if cp, ok := w.Gates.(CurrentPictures); ok {
+		phase(orchestrator.Verifying)
+		for _, f := range cp.Current(ctx, ws).Files {
+			current = append(current, prompt.DesignPicture{Caption: f.Caption, Path: f.Path})
+		}
+		if ctx.Err() != nil {
+			return orchestrator.Outcome{Kind: orchestrator.Normal}
+		}
+	}
 	first := func() (string, error) {
 		return set.Prompt.Design(prompt.DesignInput{Issue: is, RepoName: cfg.Workspace.Repo, Kind: cfg.Design.Kind,
-			Folder: brief.Folder, Tasks: tasks, History: history})
+			Folder: brief.Folder, Tasks: tasks, History: history, Current: current})
 	}
 	maxTurns := int(cfg.Agent.MaxTurns)
 	sessionID, reason := "", ""

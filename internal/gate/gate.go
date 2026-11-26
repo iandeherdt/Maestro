@@ -51,6 +51,9 @@ type Gates struct {
 
 	mu    sync.Mutex
 	heads map[string]string // workspace key -> head of the last export
+	// current holds the pictures of the current state that a design
+	// attempt was given, by workspace key, for its pull request.
+	current map[string][]worker.Screenshot
 }
 
 var _ worker.Gates = (*Gates)(nil)

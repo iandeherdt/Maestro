@@ -67,7 +67,7 @@ func (l *local) git(args ...string) {
 	}
 }
 
-func (l *local) Run(ctx context.Context, req sandbox.Request, _ []byte) (sandbox.Result, error) {
+func (l *local) Run(ctx context.Context, req sandbox.Request, stdin []byte) (sandbox.Result, error) {
 	if req.Step != sandbox.StepVerify || req.NetworkProfile != sandbox.NetNone {
 		l.t.Errorf("step %s with network %q", req.Step, req.NetworkProfile)
 	}
@@ -76,6 +76,7 @@ func (l *local) Run(ctx context.Context, req sandbox.Request, _ []byte) (sandbox
 	cmd.Env = []string{"PATH=" + l.bin, "HOME=" + filepath.Dir(l.repo)}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
+	cmd.Stdin = bytes.NewReader(stdin)
 	err := cmd.Run()
 	res := sandbox.Result{Stdout: out.Bytes(), Stderr: errb.Bytes()}
 	if ee, ok := err.(*exec.ExitError); ok {

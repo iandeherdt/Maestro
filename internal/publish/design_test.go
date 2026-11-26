@@ -23,7 +23,7 @@ func TestDesignOpensAPullRequestThatClosesNothing(t *testing.T) {
 	l.change("design/GH-7/index.html", "<h1>Shop</h1>\n")
 	head := l.change("design/GH-7/README.md", "Colours.\n")
 	shots := []worker.Screenshot{{Caption: "design/GH-7/index.html", PNG: []byte("one")}}
-	d, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", shots, "")
+	d, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, shots, "")
 	if err != nil || rej != nil {
 		t.Fatalf("rejection %+v, error %v", rej, err)
 	}
@@ -50,11 +50,34 @@ func TestDesignOpensAPullRequestThatClosesNothing(t *testing.T) {
 	}
 }
 
+func TestDesignShowsTheCurrentStateBeforeTheDesign(t *testing.T) {
+	l := designLab(t)
+	l.change("design/GH-7/index.html", "<h1>Shop</h1>\n")
+	now := []worker.Screenshot{{Caption: "1-Title", PNG: []byte("before")}}
+	shots := []worker.Screenshot{{Caption: "design/GH-7/index.html", PNG: []byte("after")}}
+	if _, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", now, shots, ""); err != nil || rej != nil {
+		t.Fatalf("rejection %+v, error %v", rej, err)
+	}
+	text := l.hub.sent("POST /repos/ian/app/pulls")[0]["body"].(string)
+	iNow, iDesign := strings.Index(text, "## Now"), strings.Index(text, "## Design")
+	if iNow < 0 || iDesign < iNow || !strings.Contains(text, "![Now 1](") || !strings.Contains(text, "`1-Title`") ||
+		!strings.Contains(text, "![Picture 1](") || strings.Contains(text, "## Pictures") {
+		t.Fatalf("body:\n%s", text)
+	}
+	// Stored in one go, the current pictures first.
+	if blobs := l.hub.sent("POST /repos/ian/app/git/blobs"); len(blobs) != 2 {
+		t.Fatalf("%d pictures stored", len(blobs))
+	}
+	if !strings.Contains(text, "/1.png?raw=true)") || !strings.Contains(text, "/2.png?raw=true)") {
+		t.Fatalf("body:\n%s", text)
+	}
+}
+
 func TestDesignOutsideItsFolderIsRefused(t *testing.T) {
 	l := designLab(t)
 	l.change("design/GH-7/index.html", "<h1>Shop</h1>\n")
 	l.change("src/app.js", "x()\n")
-	d, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, "No pictures.")
+	d, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, nil, "No pictures.")
 	if err != nil || d != nil || rej == nil {
 		t.Fatalf("%+v %+v %v", d, rej, err)
 	}
@@ -67,7 +90,7 @@ func TestDesignOutsideItsFolderIsRefused(t *testing.T) {
 	// A folder of the same name but longer is outside too.
 	l = designLab(t)
 	l.change("design/GH-70/index.html", "x\n")
-	if _, rej, _ := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, ""); rej == nil {
+	if _, rej, _ := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, nil, ""); rej == nil {
 		t.Error("design/GH-70 counted as inside design/GH-7")
 	}
 }
@@ -75,7 +98,7 @@ func TestDesignOutsideItsFolderIsRefused(t *testing.T) {
 func TestDesignStillGoesThroughThePolicy(t *testing.T) {
 	l := designLab(t)
 	l.change("design/GH-7/.github/workflows/ci.yml", "on: push\n")
-	_, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, "")
+	_, rej, err := l.pub.PublishDesign(ctx, l.is, l.ws, "design/GH-7", nil, nil, "")
 	if err != nil || rej == nil || rej.Category != PolicyDenied {
 		t.Fatalf("%+v %v", rej, err)
 	}

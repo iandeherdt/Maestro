@@ -16,7 +16,9 @@ import (
 
 // DesignPublisher is the part of the publish gate a design needs.
 type DesignPublisher interface {
-	PublishDesign(ctx context.Context, is issue.Issue, ws workspace.Workspace, folder string, shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error)
+	// current are the pictures of the state before the design, shown
+	// next to it.
+	PublishDesign(ctx context.Context, is issue.Issue, ws workspace.Workspace, folder string, current, shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error)
 }
 
 // pagesOfScript lists the pages of a design: index.html first, then the
@@ -76,7 +78,7 @@ func (g *Gates) Design(ctx context.Context, is issue.Issue, ws workspace.Workspa
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
-	return dp.PublishDesign(ctx, is, ws, folder, shots, note)
+	return dp.PublishDesign(ctx, is, ws, folder, g.currentOf(ws.Key), shots, note)
 }
 
 var errDesignUnsupported = errors.New("the publish gate cannot publish designs")
