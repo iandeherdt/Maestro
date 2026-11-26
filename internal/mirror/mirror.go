@@ -861,3 +861,58 @@ func (m *Mirror) MergeBase(ctx context.Context, workspaceKey, branch, baseBranch
 	}
 	return BaseMerged, head, nil
 }
+
+// Branches lists the branches the mirror holds, as the last fetch found
+// them on the remote.
+func (m *Mirror) Branches(ctx context.Context) ([]string, error) {
+	out, err := m.git(ctx, nil, 0, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads/")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+}
+
+// WorkspaceKeys lists the workspaces the mirror keeps an imported or a
+// pushed head for.
+func (m *Mirror) WorkspaceKeys(ctx context.Context) ([]string, error) {
+	out, err := m.git(ctx, nil, 0, "for-each-ref", "--format=%(refname)", "refs/maestro/incoming/", "refs/maestro/pushed/")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var keys []string
+	for _, ref := range strings.Fields(string(out)) {
+		k := ref[strings.LastIndex(ref, "/")+1:]
+		if keyRE.MatchString(k) && !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+// ForgetWorkspace drops everything the mirror keeps for a workspace whose
+// ticket is finished: its imported head and the record of its last push.
+func (m *Mirror) ForgetWorkspace(ctx context.Context, workspaceKey string) error {
+	if !keyRE.MatchString(workspaceKey) || strings.Contains(workspaceKey, "..") {
+		return fmt.Errorf("invalid workspace key")
+	}
+	for _, ref := range []string{IncomingRef(workspaceKey), PushedRef(workspaceKey)} {
+		if _, err := m.git(ctx, nil, 0, "update-ref", "-d", ref); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Compact lets git pack the mirror and drop objects that nothing has
+// referred to for two weeks, when there is enough to do. Workspaces that
+// are being cloned from it meanwhile are not disturbed: what is still in
+// use is never that old.
+func (m *Mirror) Compact(ctx context.Context) error {
+	if _, err := os.Stat(filepath.Join(m.Dir, "HEAD")); err != nil {
+		return nil
+	}
+	_, err := m.git(ctx, nil, 0, "-c", "gc.auto=6700", "-c", "gc.autoDetach=false", "gc", "--auto", "--quiet")
+	return err
+}

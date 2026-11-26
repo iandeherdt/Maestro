@@ -326,6 +326,28 @@ remove deletes the skill again and says how to remove the tools.`,
 		see:     []string{"service", "update", "status"},
 	},
 	{
+		name: "cleanup", group: "Running the service",
+		usage:   "maestro cleanup [--dry-run]",
+		summary: "remove the branches, workspaces and old files that finished tickets left behind",
+		body: `Removes what is no longer needed. For a ticket that is done, closed or deleted: its
+workspace, its branch (only when no pull request from it is still open) and what
+the mirror keeps for it. Audit files untouched for 30 days, and the oldest ones
+while the audit folder is over 2 GiB. Sandbox images that a newer build replaced.
+
+Nothing of a ticket that is still open on the board, or that the service works
+on, is touched; a branch with an open pull request stays. A ticket whose pull
+request was closed without a merge keeps its branch until the ticket is closed,
+so moving it to Rework still works. The screenshots branch stays: pull requests
+show their pictures from it.
+
+The running service does this by itself a few minutes after it starts and then
+every 6 hours. When it runs, this command asks it to sweep now; otherwise the
+command does the work.
+
+  --dry-run   only list what would be removed`,
+		see: []string{"status", "doctor"},
+	},
+	{
 		name: "settings", group: "Watching and steering",
 		usage:   "maestro settings\nmaestro settings set NAME VALUE",
 		summary: "show and change the daily limits, models and other everyday settings",

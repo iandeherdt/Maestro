@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -931,5 +932,32 @@ func TestSetStateAcceptsReworkAndTheDesignState(t *testing.T) {
 	}
 	if err := a.SetState(ctx, is, "Todo"); tracker.CategoryOf(err) != tracker.WriteRejected {
 		t.Errorf("the approval state was written: %v", err)
+	}
+}
+
+func TestLookupIdentifier(t *testing.T) {
+	h := newHub(t)
+	h.add(1, owner, owner, "status:todo")
+	h.add(2, owner, owner, "status:todo").state = "closed"
+	h.add(3, owner, owner).isPR = true
+	a := adapter(t, h)
+
+	is, found, err := a.LookupIdentifier(ctx, "GH-1")
+	if err != nil || !found || is.State != "todo" {
+		t.Fatalf("GH-1: %+v %v %v", is, found, err)
+	}
+	is, found, err = a.LookupIdentifier(ctx, "GH-2")
+	if err != nil || !found || is.State != a.terminal {
+		t.Fatalf("GH-2: %+v %v %v", is, found, err)
+	}
+	for _, id := range []string{"GH-3", "GH-99"} {
+		if _, found, err := a.LookupIdentifier(ctx, id); err != nil || found {
+			t.Fatalf("%s: found %v, %v", id, found, err)
+		}
+	}
+	for _, id := range []string{"ENG-1", "GH-01", "GH-", "GH-x", "screenshots"} {
+		if _, _, err := a.LookupIdentifier(ctx, id); !errors.Is(err, tracker.ErrForeignIdentifier) {
+			t.Fatalf("%s: %v", id, err)
+		}
 	}
 }
