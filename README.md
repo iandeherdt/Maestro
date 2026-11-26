@@ -1299,19 +1299,26 @@ maestro unity activate --file Unity_lic.ulf
 ### The disk is full: "no space left on device"
 
 On a Mac, Docker keeps every image and its build cache in one virtual disk of a fixed size, which
-fills up without macOS noticing. The Unity image alone is about 8 GB, and every `maestro image`
-leaves build cache behind. A full disk breaks the sandbox image build, the checks, and any CI that
-runs on the same machine.
+fills up without macOS noticing. The Unity image alone is about 8 GB. A full disk breaks the
+sandbox image build, the checks, and any CI that runs on the same machine.
+
+The service keeps an eye on it by itself (see [Cleaning up](#cleaning-up-maestro-cleanup)): it
+checks the free space every 15 minutes, and below 20 GB it says so in its log and on Telegram and
+prunes the whole build cache. A ticket blocked meanwhile mentions the low disk. `maestro doctor`
+warns below 20 GB, and fails when the disk is so full that no container can start.
+
+To free room by hand:
 
 ```sh
 docker system df                    # what takes the room: images, containers, build cache
-docker builder prune -a             # remove all build cache; the next image build takes longer
-maestro cleanup                     # what finished tickets left behind, and replaced images
+maestro cleanup                     # what finished tickets left behind, replaced images, old build cache
+docker image prune                  # images without a name
+docker builder prune -a             # all build cache; the next image build takes longer
 ```
 
-If it fills up again, give Docker more room: Docker Desktop, Settings, Resources, Advanced, and
-raise the disk usage limit. Other engines have a setting of their own, such as
-`podman machine set --disk-size`.
+If it fills up again, give the engine more room. In Docker Desktop: Settings, Resources,
+Advanced, and raise the disk usage limit. OrbStack and Colima have a setting of their own, and so
+does Podman (`podman machine set --disk-size`).
 
 ### `maestro conventions apply` says it is not a checkout
 
