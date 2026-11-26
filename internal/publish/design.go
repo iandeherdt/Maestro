@@ -21,8 +21,11 @@ const DesignOutside = "design_outside_folder"
 // same import checks, diff policy and secret scan as for a ticket, and on
 // top of that a design may only add or change files in its own folder.
 // The pull request never closes the idea: merging it approves the design.
+//
+// current are pictures of the project before the design, taken from the
+// commit the design started from. They are shown above the design's own.
 func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws workspace.Workspace, folder string,
-	shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error) {
+	current, shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error) {
 	cfg := p.Config()
 	if err := target(cfg, ws); err != nil {
 		return nil, nil, err
@@ -73,9 +76,16 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 		flags = append(flags, flagLine{f.Rule, f.Path, f.Detail})
 	}
 	proof := Proof{Worker: cfg.Worker.Name, Commits: len(ad.imp.Commits), Files: len(ad.diff.Changes), ScreenshotNote: note}
-	if len(shots) > 0 {
-		if proof.Screenshots, err = h.storeShots(ctx, ws.Key, ad.imp.Head, shots); err != nil {
+	// The pictures before and after are stored together, the ones before
+	// first.
+	var now []shotLink
+	if all := append(append([]worker.Screenshot(nil), current...), shots...); len(all) > 0 {
+		links, err := h.storeShots(ctx, ws.Key, ad.imp.Head, all)
+		switch {
+		case err != nil && len(shots) > 0:
 			proof.ScreenshotNote = "The pictures were taken but could not be stored in the repository."
+		case err == nil:
+			now, proof.Screenshots = links[:len(current)], links[len(current):]
 		}
 	}
 	idea := ""
@@ -88,7 +98,7 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 			idea = trackerRepo + "#" + strconv.Itoa(n)
 		}
 	}
-	text := designBody(idea, folder, flags, proof)
+	text := designBody(idea, folder, flags, now, proof)
 	// Not a draft: there are no checks to wait for, the owner is next.
 	number, err := h.upsert(ctx, ws.Branch, cfg.Workspace.BaseBranch,
 		title("Design for "+is.Identifier, is.Title), text, false)
@@ -99,7 +109,7 @@ func (p *Publisher) PublishDesign(ctx context.Context, is issue.Issue, ws worksp
 }
 
 // designBody is the description of a design pull request.
-func designBody(idea, folder string, flags []flagLine, p Proof) string {
+func designBody(idea, folder string, flags []flagLine, now []shotLink, p Proof) string {
 	var b strings.Builder
 	if idea == "" {
 		idea = "the idea"
@@ -108,8 +118,19 @@ func designBody(idea, folder string, flags []flagLine, p Proof) string {
 	b.WriteString("- **To approve it**, merge this pull request and move the idea's card to Planned. The tasks of the plan are then created and told to follow this design.\n")
 	b.WriteString("- **To change it**, comment here, on the lines of the files or in a review. The design is made again with your comments.\n")
 	b.WriteString("- **To go on without it**, close this pull request and move the idea's card to Planned.\n")
+	if len(now) > 0 {
+		b.WriteString("\n## Now\n\nThe project as it is before this design, taken by the service with the project's screenshot setting. " +
+			"The design agent was given these pictures to start from.\n")
+		for i, s := range now {
+			fmt.Fprintf(&b, "\n%s\n\n![Now %d](%s)\n", code(s.caption), i+1, s.url)
+		}
+	}
 	if len(p.Screenshots) > 0 || p.ScreenshotNote != "" {
-		b.WriteString("\n## Pictures\n\n")
+		if len(now) > 0 {
+			b.WriteString("\n## Design\n\n")
+		} else {
+			b.WriteString("\n## Pictures\n\n")
+		}
 		if len(p.Screenshots) > 0 {
 			b.WriteString("Taken by the service from the commits in this pull request, without network. " +
 				"Open the files in a browser to see the rest, such as hover states and other screen sizes.\n")

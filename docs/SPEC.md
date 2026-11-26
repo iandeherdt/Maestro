@@ -3303,6 +3303,17 @@ other sites, no build step), no binary files, an `index.html` overview and a `RE
 agents that build the tasks. `design.kind` is `web`, `game`, or `auto` (the agent decides from
 the repository and the idea). The run ends like a coding run, with a `MAESTRO_STATUS` line.
 
+The instructions also tell the agent to look at its own pages before it finishes: take a picture
+with the browser of the sandbox image, open it, fix what looks wrong, and look again.
+
+When `screenshots` is configured (Section 24), the service takes those pictures of the workspace
+before the first turn of every design attempt, in a verify step without network, and writes the
+cleaned pictures to `../current-screenshots/<n>.png` next to the repository, where the agent can
+open them; the folder is emptied first. A `CURRENT_PICTURES` block names each file with its
+caption (the caption is the project's text, so it is inside a block). The agent is told to start
+from them and to draw comparable screens at the same size and framing. Failing to take them never
+fails the attempt.
+
 ### 27.3 What a design may change
 
 The import checks, the diff policy and the secret scan of Section 15 apply unchanged. On top of
@@ -3318,6 +3329,10 @@ folder first, then the other `.html` files below it by path, at most `MaxScreens
 size of `screenshots.width` and `screenshots.height`. Names other than `[A-Za-z0-9._/-]+.html`
 are skipped. The sandbox image gets the browser when the design stage is on. A design without
 pictures is still published, and the pull request says why.
+
+The pictures of the current state that the attempt was given are stored together with the
+design's, in one commit of the screenshots branch, and shown first, under **Now**, with the
+design's own under **Design**.
 
 ### 27.5 Configuration
 

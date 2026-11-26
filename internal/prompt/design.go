@@ -17,14 +17,19 @@ Your situation and limits:
 - Write only inside the folder named under DESIGN_FOLDER below. Commits that change anything outside it are rejected as a whole. Commit your work; uncommitted changes are lost.
 - Everything must work offline, opened straight from disk in a browser: no web fonts, no CDNs, no images or scripts from other sites, no build step, no package installs. Use plain HTML, CSS, SVG and, where it helps, a little plain JavaScript.
 - No binary files: no PNG, JPEG, fonts or archives. Draw what you need with CSS or SVG, and use simple placeholders for real photos.
+- Look at what you make before you finish. The sandbox has a browser: take a picture of a page with
+  chromium --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1280,800 --screenshot=/tmp/page.png "file://$PWD/<page>"
+  and open the picture to look at it. Check every page this way, fix what looks wrong, cramped, unbalanced or unfinished, and look again. Aim for the finish of a real product, not a wireframe.
 - Put an index.html at the top of the folder that is the overview: what the design covers and a link to every other page. The service takes a picture of index.html and of up to five other pages, in alphabetical order of their path, at 1280 by 800 pixels, so make the first screen of each page count.
 - Write a short README.md in the folder for the agents that build the tasks: which page belongs to which task, the colours, type sizes, spacing and components to reuse, and anything the pictures cannot show (states, hover, motion, behaviour on small screens).
 - You cannot push, open pull requests or update the ticket. The service does that after checking your commits.
 
 What to make depends on the project, named under DESIGN_KIND:
 - web: mock-ups of the pages and screens the plan adds or changes, as real HTML and CSS at realistic content and size. Show the important states (empty, filled, error) where they matter, and how a page looks on a phone if the project has users on phones.
-- game: a game design. index.html describes the core loop, the controls, the rules and mechanics, progression or levels, and the art direction with a colour palette. Add mock screens of the main moments (title, play, pause, win or lose, menus) drawn with HTML, CSS, SVG or a canvas, and, where it makes an idea clear, a tiny playable sketch in plain JavaScript.
+- game: a game design. index.html describes the core loop, the controls, the rules and mechanics, progression or levels, and the art direction with a colour palette. Add mock screens of the main moments (title, play, pause, win or lose, menus) drawn with HTML, CSS, SVG or a canvas, finished enough to pass for screenshots of the game, and, where it makes an idea clear, a tiny playable sketch in plain JavaScript.
 - auto: decide from the repository and the idea which of the two fits, and say in index.html which one you chose.
+
+When CURRENT_PICTURES is given below, they are pictures of the project as it is now, taken by the service with the project's own screenshot setting. Open and study every one of them before you design: the design changes this, so it must start from it, keep what works, and match its look unless the idea asks for a new one. The pull request shows these pictures next to the pictures of your pages, as before and after, so where a page of the design shows a screen that has a current picture, draw the same screen at the same size and framing, so the two can be compared at a glance, and say in index.html which current picture each page answers.
 
 End your final message with one line: "MAESTRO_STATUS: done", "MAESTRO_STATUS: continue" or "MAESTRO_STATUS: blocked", followed by one line giving the reason.`
 
@@ -40,7 +45,13 @@ type DesignInput struct {
 	// note on an earlier design (source "designer"), gate feedback, and the
 	// owner's comments.
 	History []issue.Feedback
+	// Current are the pictures of the project as it is, in files the
+	// agent can open. The captions come from the project. Untrusted.
+	Current []DesignPicture
 }
+
+// DesignPicture is one picture of the current state.
+type DesignPicture struct{ Caption, Path string }
 
 // DesignTask is one task of the plan a design is for.
 type DesignTask struct{ Title, Description string }
@@ -66,6 +77,13 @@ func (b *Builder) Design(in DesignInput) (string, error) {
 		fmt.Fprintf(&plan, "Task %d: %s\n%s\n\n", i+1, t.Title, t.Description)
 	}
 	block(&out, tok, "PLAN", "", strings.TrimSpace(plan.String()))
+	if len(in.Current) > 0 {
+		var pics strings.Builder
+		for i, p := range in.Current {
+			fmt.Fprintf(&pics, "Picture %d: %s\nFile: %s\n\n", i+1, p.Caption, p.Path)
+		}
+		block(&out, tok, "CURRENT_PICTURES", "", strings.TrimSpace(pics.String()))
+	}
 	if len(in.History) > 0 {
 		out.WriteString("What was said since the plan, oldest first. EARLIER_DESIGN is the service's note on an earlier design; GATE_FEEDBACK is why the service refused earlier commits; OWNER_COMMENT is what the owner wrote. Where the owner asks for changes, make them.\n\n")
 	}

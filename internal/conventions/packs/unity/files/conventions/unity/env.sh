@@ -71,3 +71,17 @@ unity() {
     LD_PRELOAD=$([ -f /usr/lib/game-ci/libsem_eintr_retry.so ] && echo /usr/lib/game-ci/libsem_eintr_retry.so) \
         xvfb-run -a -s "-screen 0 1024x768x24" "$UNITY_EDITOR/Unity" -batchmode -nographics -projectPath "$PWD" "$@"
 }
+
+# Runs the Editor with graphics, for pictures: batch mode, but it draws. On
+# Linux on a virtual screen of the size given first (WIDTHxHEIGHT), with
+# software OpenGL.
+unity_screen() {
+    size=$1
+    shift
+    if [ "$(uname)" = Darwin ] && ! command -v xvfb-run >/dev/null 2>&1; then
+        "$UNITY_EDITOR/Unity" -batchmode -projectPath "$PWD" "$@"
+        return
+    fi
+    LIBGL_ALWAYS_SOFTWARE=1 LD_PRELOAD=$([ -f /usr/lib/game-ci/libsem_eintr_retry.so ] && echo /usr/lib/game-ci/libsem_eintr_retry.so) \
+        xvfb-run -a -s "-screen 0 ${size}x24" "$UNITY_EDITOR/Unity" -batchmode -force-glcore -projectPath "$PWD" "$@"
+}

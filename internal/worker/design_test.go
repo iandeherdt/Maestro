@@ -8,6 +8,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/issue"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
 	"github.com/iandeherdt/Maestro/internal/plan"
+	"github.com/iandeherdt/Maestro/internal/workspace"
 )
 
 type fakeDesignBrief struct {
@@ -105,5 +106,42 @@ func TestDesignRunNoChanges(t *testing.T) {
 	out := r.run(orchestrator.Attempt{Design: true})
 	if out.Kind != orchestrator.Failed || out.Category != NoChanges {
 		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// withCurrent is the gates with pictures of the current state.
+type withCurrent struct {
+	Gates
+	keys []string
+}
+
+func (g *withCurrent) Current(_ context.Context, ws workspace.Workspace) CurrentState {
+	g.keys = append(g.keys, ws.Key)
+	return CurrentState{Files: []CurrentFile{{Caption: "1-Title", Path: "../current-screenshots/1.png"}}}
+}
+
+func TestDesignRunGetsPicturesOfTheCurrentState(t *testing.T) {
+	r := designRig(t, script{text: "Done.\nMAESTRO_STATUS: done"})
+	g := &withCurrent{Gates: r.w.Gates}
+	r.w.Gates = g
+	if out := r.run(orchestrator.Attempt{Design: true}); out.Kind != orchestrator.Designed {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(g.keys) != 1 || g.keys[0] != "GH-1-design" {
+		t.Fatalf("current pictures taken for %q", g.keys)
+	}
+	p := r.f.prompts[0].Prompt
+	for _, want := range []string{"<<<CURRENT_PICTURES", "Picture 1: 1-Title\nFile: ../current-screenshots/1.png", "Open and study every one of them"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+}
+
+func TestDesignRunWithoutCurrentPicturesSaysNothingOfThem(t *testing.T) {
+	r := designRig(t, script{text: "Done.\nMAESTRO_STATUS: done"})
+	r.run(orchestrator.Attempt{Design: true})
+	if strings.Contains(r.f.prompts[0].Prompt, "<<<CURRENT_PICTURES") {
+		t.Error("a block of current pictures without any")
 	}
 }

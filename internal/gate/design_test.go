@@ -16,17 +16,18 @@ import (
 )
 
 type designPub struct {
-	shots  []worker.Screenshot
-	note   string
-	folder string
+	current []worker.Screenshot
+	shots   []worker.Screenshot
+	note    string
+	folder  string
 }
 
 func (p *designPub) Publish(context.Context, issue.Issue, workspace.Workspace, worker.VerifyResult) (*orchestrator.PublishRecord, *worker.Rejection, error) {
 	return nil, nil, nil
 }
 
-func (p *designPub) PublishDesign(_ context.Context, _ issue.Issue, _ workspace.Workspace, folder string, shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error) {
-	p.shots, p.note, p.folder = shots, note, folder
+func (p *designPub) PublishDesign(_ context.Context, _ issue.Issue, _ workspace.Workspace, folder string, current, shots []worker.Screenshot, note string) (*plan.Design, *worker.Rejection, error) {
+	p.current, p.shots, p.note, p.folder = current, shots, note, folder
 	return &plan.Design{PRNumber: 3, Pictures: len(shots)}, nil, nil
 }
 

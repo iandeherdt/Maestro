@@ -473,6 +473,13 @@ is optional: skip it and move the card to **Planned** as before.
    - **Rather not?** Close the pull request and move the card to **Planned**. The tasks are
      created without a design.
 
+**Before and after.** When the repository has a [screenshots setting](#screenshots-on-the-pull-request)
+(`pages` for a website, `command` for a game), the service first takes those pictures of the
+project as it is now and gives them to the design agent, so it designs from what is really there.
+The design's pull request then shows them under **Now**, above the pictures of the design. The
+agent also looks at its own pages in the sandbox's browser while it works and polishes them before
+it finishes.
+
 While the design's pull request is open, a card in Planned waits for it and says so. The design
 agent is held to the same rules as any other agent, and may only add files inside its folder.
 It needs the browser in the sandbox image for the pictures: run `maestro image` once after you
@@ -881,6 +888,22 @@ with git, such as one from github.com, is refused by the checks' proxy, and `mae
 it. Embed such a package (copy its folder into `Packages/` and drop its line from
 `Packages/manifest.json`), or add its host to `sandbox.network.allow_hooks`. The second is
 weaker: code the agent wrote can then reach that host during the checks, which have the licence.
+
+For pictures of the game on every pull request, and as the "now" pictures of a design:
+
+```yaml
+screenshots:
+  command: sh conventions/unity/previews.sh
+  timeout_ms: 900000
+```
+
+`previews.sh` plays each scene of the build for two seconds and draws what every camera sees,
+overlay canvases included, at 1280 by 720 (at most 6 scenes). To pick the scenes or the size, put
+them in front of the command: `SHOT_SCENES=Assets/Scenes/Title.unity:Assets/Scenes/Level1.unity
+SHOT_WIDTH=1920 SHOT_HEIGHT=1080 sh conventions/unity/previews.sh`. The pictures are drawn with
+software OpenGL in the sandbox, so effects that need a real graphics card can look different.
+Run `maestro image` again after you upgrade, for the OpenGL drivers. Not yet run with a real
+licence.
 
 Not yet run against Unity's servers: the activation, the package download in `prepare.sh` and the
 tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the
