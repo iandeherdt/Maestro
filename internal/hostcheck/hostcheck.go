@@ -188,7 +188,7 @@ func (r *Runner) run(ctx context.Context, editor, key, head, script string, shot
 	if err := r.checkout(ctx, filepath.Join(service, "git"), repo, key, head); err != nil {
 		return Result{}, nil, fmt.Errorf("the change could not be checked out for the Unity checks: %w", err)
 	}
-	shim, fakeHome, err := shims(service, dir, editor, version, home)
+	shim, fakeHome, err := shims(service, dir, editor, version, home, shots == 0)
 	if err != nil {
 		return Result{}, nil, err
 	}
@@ -470,7 +470,8 @@ func (r *Runner) checkout(ctx context.Context, gitDir, repo, key, head string) e
 
 // shims lets the pack's scripts, written for the Linux Editor in the
 // image, run the Editor of this Mac unchanged: env.sh finds "Unity" and
-// "version" under UNITY_PATH, xvfb-run only runs the rest of its command,
+// "version" under UNITY_PATH, xvfb-run (not for pictures) only runs the
+// rest of its command,
 // and the home directory has a sign that a licence is there (licence() in
 // env.sh looks for one). Its Library is the user's, where Unity Hub keeps
 // the licence the Editor uses.
@@ -479,7 +480,7 @@ func (r *Runner) checkout(ctx context.Context, gitDir, repo, key, head string) e
 // each time. The home directory is in dir, because programs write there;
 // what the service itself writes in it is made anew too, so that a link a
 // check left cannot lead the write elsewhere.
-func shims(service, dir, editor, version, home string) (shim, fakeHome string, err error) {
+func shims(service, dir, editor, version, home string, xvfb bool) (shim, fakeHome string, err error) {
 	shim = filepath.Join(service, "shim")
 	fakeHome = filepath.Join(dir, "home")
 	if err := os.RemoveAll(shim); err != nil {
@@ -506,6 +507,13 @@ while [ $# -gt 0 ]; do
 done
 exec "$@"
 `,
+	}
+	if !xvfb {
+		// The pictures need the Mac's own graphics. Without an xvfb-run,
+		// env.sh of every version starts the Editor the Mac's way; with
+		// one, an older env.sh asks for OpenGL, which Unity on a Mac no
+		// longer has.
+		delete(files, "bin/xvfb-run")
 	}
 	for name, text := range files {
 		p := filepath.Join(shim, name)
