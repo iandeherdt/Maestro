@@ -205,6 +205,9 @@ type spec struct {
 	handoff string // host directory, or ""
 	licence bool   // mount UnityLicenceDir
 	env     map[string]string
+	// terminal gives the container a terminal: an interactive session
+	// of the owner, never a step of the service.
+	terminal bool
 }
 
 func (b *Box) check() error {
@@ -247,12 +250,16 @@ func (b *Box) baseEnv(profile string) map[string]string {
 func (b *Box) runArgs(name string, s spec) []string {
 	args := []string{"run", "--rm", "--interactive", "--name", name,
 		"--label", "maestro.worker=" + b.Worker, "--label", "maestro.step=" + string(s.step),
+		"--label", "maestro.workspace=" + s.key,
 		"--user", AgentUID + ":" + AgentUID,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--hostname", "sandbox", "--init",
 		"--entrypoint", "",
 		"--mount", "type=volume,src=" + b.Volume(s.key) + ",dst=" + workDir,
 		"--workdir", s.workdir,
+	}
+	if s.terminal {
+		args = append(args, "--tty")
 	}
 	args = append(args, b.engineFlags()...)
 	if b.Memory != "" {

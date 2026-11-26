@@ -71,6 +71,11 @@ type install struct {
 	mirrorDir, handoffDir, allowDir, auditDir string
 }
 
+// conversations are the owner's talks with the agent (`maestro talk`).
+func (in *install) conversations() claude.Conversations {
+	return claude.Conversations{Dir: filepath.Join(in.cfg.Budget.StateDir, "talk")}
+}
+
 // problem is an error whose text is written for the person at the terminal.
 type problem struct{ text string }
 
@@ -774,8 +779,9 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
 			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} },
 			Trace: turnTraces(cur.config, trace.New(version, log))},
-		Gates: gates,
-		Notes: pub,
+		Gates:         gates,
+		Notes:         pub,
+		Conversations: in.conversations(),
 	}
 	// The planning stage needs a board. The names of its states are read
 	// at start; changing them takes a restart.

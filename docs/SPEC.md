@@ -1497,6 +1497,32 @@ An image whose binary has no `probe` command was built by an older release; the 
 refuses to start and asks for `maestro image`. Not covered yet: a process left running after a
 step ends, and a step that exceeds `TasksMax` or `MemoryMax`.
 
+### 11.10 Owner Sessions
+
+The owner may open an interactive session in the container backend from this machine's terminal:
+`maestro shell` (a shell) and `maestro talk` (Claude Code). Nothing that runs in the sandbox can
+ask for one. A session is a container started by the same code as a step, with the same user,
+capabilities, `no-new-privileges`, limits and networks, plus a terminal. Its view is one of:
+
+- checks: the workspace, the hooks network and the Unity licence, as hook and verify steps have;
+- agent: the workspace, the agent network, the Claude volume and the owner's skills and agent
+  files, as the agent step has.
+
+A session never gets the mirror, the hand-off directory or anything else of the host. Without a
+ticket, the workspace is a scratch volume that is removed afterwards. With a ticket whose step
+runs now, `maestro shell` joins that container with `exec` as the sandbox user, and gets nothing
+the step does not have. Every container now carries the label `maestro.workspace`.
+
+`maestro talk` runs the `claude` executable without print mode, with the agent's settings
+sources, empty MCP configuration and disallowed tools, and resumes the last session of the
+workspace: the owner's own pending conversation, or else the last `session_id` of a whole JSON
+line in the workspace's audit file. It refuses while the service works on the ticket. When it ends,
+the session id is written to `<state_dir>/talk/<workspace key>.talk`, mode 0600. The first turn of
+the ticket's next run, planning or coding, resumes that session with a note that the owner and the
+agent talked there, and the file is removed once a turn has used it. If the session is unknown,
+the run starts afresh as in Section 10.2. Changes made in a session reach a pull request only
+through the export, policy and verify gates, as the agent's do.
+
 ## 12. Issue Tracker Integration Contract
 
 The tracker boundary is a portable read kernel for scheduling plus a small, fixed set of writes

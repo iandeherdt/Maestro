@@ -237,6 +237,68 @@ Example:
 		see: []string{"status"},
 	},
 	{
+		name: "shell", group: "Watching and steering",
+		usage:   "maestro shell [TICKET] [--agent]",
+		summary: "open a shell in the sandbox, in a ticket's workspace",
+		body: `Opens a shell in the sandbox, on this terminal, to see for yourself why a
+ticket is stuck: whether a tool is installed, whether Unity finds its licence,
+what the build says. It runs with the same isolation as the service's steps:
+as the sandbox user, without capabilities, with nothing of this machine
+mounted, and with the network of the proxy only.
+
+With TICKET (such as GH-12, 12 or ENG-7), the shell starts in the ticket's
+workspace, in /workspace/repo. When a step of the ticket runs now, the shell
+joins that step's container, so you see its processes and files as they
+change; leaving does not stop it. Otherwise a new container is started with
+what the repository's checks get: the hooks network and the Unity licence, and
+no Claude Code login. What you change in the workspace becomes part of the
+ticket's work and goes through the same checks before a pull request.
+
+Without TICKET, the shell is in a new, empty sandbox from the image, which is
+removed when you leave. Use it to check what the image has.
+
+Works with the container sandbox only.
+
+Flags:
+  --agent   the agent's view instead: its Claude Code login and network, and
+            no Unity licence (always a new container)
+
+Examples:
+  maestro shell 12
+  maestro shell
+  maestro shell ENG-7 --agent`,
+		see: []string{"talk", "status"},
+	},
+	{
+		name: "talk", group: "Watching and steering",
+		usage:   "maestro talk TICKET [--new]",
+		summary: "talk with the agent about a ticket, in the sandbox",
+		body: `Opens Claude Code on this terminal, in the ticket's workspace in the sandbox,
+and continues the agent's last conversation on the ticket. Use it to talk an
+idea through before it is planned, to ask the agent why it did something, or
+to help it past a problem it reported.
+
+It has the agent's login, network and restrictions: no hooks or MCP servers
+of the repository, and the same tools taken away. It does not start while
+the service works on the ticket.
+
+When you leave, the conversation is kept, and the next run on the ticket
+continues it: for an idea, the plan it posts takes what you agreed into
+account. Move the card as usual to start that run. Changes made in the
+workspace go through the same checks before they reach a pull request.
+
+Works with the container sandbox only.
+
+Flags:
+  --new   start a new conversation instead of continuing the agent's; it
+          sees the repository but not the ticket
+
+Examples:
+  maestro talk 12
+  maestro talk ENG-7 --new`,
+		see: []string{"shell", "status"},
+	},
+	{
 		name: "assistant", group: "Watching and steering",
 		usage:   "maestro assistant\nmaestro assistant remove",
 		summary: "let Claude Code on this machine ask about and pause the service",

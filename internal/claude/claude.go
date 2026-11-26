@@ -124,6 +124,38 @@ func Args(c config.Claude, sessionID string, resume bool) []string {
 	return append(argv, "--session-id", sessionID)
 }
 
+// InteractiveArgs builds the argument vector of the owner's own
+// conversation with the agent on a terminal (`maestro talk`). It keeps
+// what keeps the agent apart from the repository: no hooks or MCP servers
+// of the repository, and the same tools taken away. With resume the
+// session is continued, otherwise a new one with that id is started.
+func InteractiveArgs(c config.Claude, sessionID string, resume bool) ([]string, error) {
+	if !sessionRE.MatchString(sessionID) {
+		return nil, errors.New("the session id is not a UUID")
+	}
+	argv := []string{c.Command,
+		"--permission-mode", c.PermissionMode,
+		"--setting-sources", "user",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+	}
+	if len(c.DisallowedTools) > 0 {
+		argv = append(argv, "--disallowedTools", strings.Join(c.DisallowedTools, ","))
+	}
+	if c.Model != "" {
+		argv = append(argv, "--model", c.Model)
+	}
+	if resume {
+		return append(argv, "--resume", sessionID), nil
+	}
+	return append(argv, "--session-id", sessionID), nil
+}
+
+// NewSessionID makes the id of a new session.
+func NewSessionID() (string, error) { return newUUID() }
+
+// ValidSessionID reports whether s has the shape of a session id.
+func ValidSessionID(s string) bool { return sessionRE.MatchString(s) }
+
 type usageJSON struct {
 	Input      int64 `json:"input_tokens"`
 	Output     int64 `json:"output_tokens"`
