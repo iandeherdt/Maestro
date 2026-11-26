@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,7 @@ type fakeLinear struct {
 
 type fIssue struct {
 	li        lnIssue
+	parent    string
 	history   []historyEntry
 	blockedBy []struct {
 		id, identifier, stateType string
@@ -230,8 +232,22 @@ func (f *fakeLinear) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.writes = append(f.writes, "comment:update")
 		data = map[string]any{"commentUpdate": map[string]any{"success": true}}
+	case strings.Contains(q, "children("):
+		var nodes []any
+		for _, id := range sortedIDs(f.issues) {
+			if f.issues[id].parent == v["id"] {
+				nodes = append(nodes, map[string]string{"id": id})
+			}
+		}
+		data = map[string]any{"issue": page("children", nodes)}
 	case strings.Contains(q, "issue(id"):
 		fi := f.issues[v["id"].(string)]
+		// Linear takes an identifier, such as ENG-1, in place of the id.
+		for _, x := range f.issues {
+			if fi == nil && strings.EqualFold(x.li.Identifier, v["id"].(string)) {
+				fi = x
+			}
+		}
 		if fi == nil {
 			json.NewEncoder(w).Encode(map[string]any{"data": nil, "errors": []any{map[string]any{"message": "Entity not found: Issue"}}})
 			return
@@ -444,6 +460,18 @@ func TestFeedbackOnlyFromAllowlistedPeople(t *testing.T) {
 	}
 }
 
+func TestSubIssueIDs(t *testing.T) {
+	f, a := setup(t)
+	f.add(1, ian, "Planned")
+	f.add(2, ian, "Todo").parent = "id-1"
+	f.add(3, ian, "Done").parent = "id-1"
+	f.add(4, ian, "Todo")
+	ids, err := a.SubIssueIDs(context.Background(), issue.Issue{ID: "id-1", Identifier: "ENG-1"})
+	if err != nil || strings.Join(ids, ",") != "id-2,id-3" {
+		t.Fatalf("got %v, %v", ids, err)
+	}
+}
+
 func TestFetchByIDsDropsGoneAndMovedIssues(t *testing.T) {
 	f, a := setup(t)
 	f.add(1, ian, "Todo", "run:linux")
@@ -582,5 +610,27 @@ func TestPlaceTaskMakesAMissingWorkerLabel(t *testing.T) {
 	}
 	if _, err := a.Workers(ctx); err != nil {
 		t.Errorf("workers: %v", err)
+	}
+}
+
+func TestLookupIdentifier(t *testing.T) {
+	ctx := context.Background()
+	f, a := setup(t)
+	f.add(1, ian, "Done")
+	f.add(2, ian, "Todo")
+	other := f.add(3, ian, "Todo")
+	other.li.Team.Key = "OPS"
+
+	is, found, err := a.LookupIdentifier(ctx, "ENG-1")
+	if err != nil || !found || is.State != "Done" || is.ID != "id-1" {
+		t.Fatalf("ENG-1: %+v %v %v", is, found, err)
+	}
+	if _, found, err := a.LookupIdentifier(ctx, "ENG-9"); err != nil || found {
+		t.Fatalf("ENG-9: found %v, %v", found, err)
+	}
+	for _, id := range []string{"ENG-3", "GH-1", "OPS-3", "screenshots", "ENG-01"} {
+		if _, _, err := a.LookupIdentifier(ctx, id); !errors.Is(err, tracker.ErrForeignIdentifier) {
+			t.Fatalf("%s: %v", id, err)
+		}
 	}
 }

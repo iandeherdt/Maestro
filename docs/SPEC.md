@@ -946,6 +946,32 @@ Termination MUST kill the whole sandbox unit, not only the main process.
 3. Remove hand-off bundles older than 24 hours.
 4. If the terminal-issues fetch fails, log a warning and continue.
 
+#### 8.6.1 Cleanup sweep (extension)
+
+The service sweeps five minutes after it starts and then every six hours; `maestro cleanup`
+asks a running service for a sweep now, or does it itself when none runs (`--dry-run` only
+reports). A sweep starts from what the service holds, not from the board, because a GitHub
+label board does not list closed issues:
+
+- the remote branches under `publish.branch_prefix`, as the mirror last fetched them, except
+  the screenshots branch (Section 24.3), which pull requests show their pictures from;
+- the workspaces of this worker (container backend: its `maestro-<worker>-ws-*` volumes);
+- the workspace keys the mirror keeps an imported or pushed head for.
+
+Each key is read back as a ticket identifier and looked up on the board, in any state. A key made
+from an identifier with characters a key cannot hold, a name that is not one of the board's
+identifiers, a ticket that cannot be read, and a ticket the service is running, retrying or
+waiting on checks for are left alone. A ticket in a terminal state, or one the board no longer
+has, loses its workspace; its branch, unless a pull request from that branch is open; and,
+unless the branch stays, the mirror's refs for it. A ticket in any other state keeps
+everything: a pull request closed without a merge leaves its branch until the ticket is closed,
+so Rework can continue on it. When the board says that most of the looked-up tickets (at least
+three) do not exist, the sweep takes that for lost access and leaves those tickets' things alone.
+
+The sweep also applies the audit log's retention (Section 16.2), removes sandbox images that a
+newer build left without a name, and lets git compact the mirror (`gc --auto`). It never deletes
+the base branch, a branch outside the prefix, or anything else on the code host.
+
 ### 8.7 Budgets, Pause and Quota
 
 The Budget Record is one JSON file at `<budget.state_dir>/budget.json`, written atomically (write
@@ -2273,7 +2299,9 @@ Per attempt, under `<budget.state_dir>/audit/<workspace_key>/<started_at>/`, own
 
 - `prompt.txt` (exact prompt), `stream.jsonl` (raw agent stream), `stderr.txt`
 - `verify.txt`, `policy.json` (rule results), `publish.json` (branch, head, pull request)
-- Retention: 30 days or 2 GiB, whichever is reached first.
+- Retention: 30 days or 2 GiB, whichever is reached first. The implementation keeps one
+  `<workspace_key>.jsonl` per ticket; the cleanup sweep (Section 8.6.1) removes files untouched
+  for 30 days, then the oldest while the folder is over 2 GiB, never one of a ticket in work.
 
 ### 16.3 Sinks
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iandeherdt/Maestro/internal/budget"
+	"github.com/iandeherdt/Maestro/internal/cleanup"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
 )
 
@@ -279,5 +280,43 @@ func TestPageShowsTheFeedNewestFirst(t *testing.T) {
 	}
 	if !strings.Contains(body, `http-equiv="refresh"`) {
 		t.Error("the page does not refresh itself")
+	}
+}
+
+func TestCleanup(t *testing.T) {
+	st := state()
+	var asked []bool
+	srv := &Server{state: st, Cleanup: func(_ context.Context, dry bool) cleanup.Report {
+		asked = append(asked, dry)
+		return cleanup.Report{DryRun: dry, Removed: []cleanup.Item{{Kind: "branch", Name: "maestro/GH-1", Reason: "done"}}}
+	}}
+	call := func(method, path string, hdr bool) (*http.Response, string) {
+		req := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, nil)
+		if hdr {
+			req.Header.Set(LocalHeader, "1")
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		body, _ := io.ReadAll(rec.Result().Body)
+		return rec.Result(), string(body)
+	}
+	if res, _ := call("POST", "/api/v1/cleanup", false); res.StatusCode != 403 {
+		t.Fatalf("without the header: %d", res.StatusCode)
+	}
+	if res, _ := call("GET", "/api/v1/cleanup", true); res.StatusCode != 405 {
+		t.Fatalf("GET: %d", res.StatusCode)
+	}
+	res, body := call("POST", "/api/v1/cleanup?dry_run=1", true)
+	if res.StatusCode != 200 || !strings.Contains(body, `"dry_run": true`) || !strings.Contains(body, "maestro/GH-1") {
+		t.Fatalf("dry run: %d %s", res.StatusCode, body)
+	}
+	if res, _ := call("POST", "/api/v1/cleanup", true); res.StatusCode != 200 {
+		t.Fatalf("sweep: %d", res.StatusCode)
+	}
+	if len(asked) != 2 || !asked[0] || asked[1] {
+		t.Fatalf("asked %v", asked)
+	}
+	if res, _ := do(t, st, "POST", "/api/v1/cleanup", map[string]string{LocalHeader: "1"}); res.StatusCode != 501 {
+		t.Fatalf("without a cleaner: %d", res.StatusCode)
 	}
 }

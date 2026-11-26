@@ -34,10 +34,13 @@ type Fake struct {
 	// Planning: the board's workers, the owner's comments, and a script of
 	// failures for the planner writes, consumed call by call ("" = succeed).
 	WorkerNames []string
-	Comments    []tracker.Feedback
-	PlanFail    []string
-	planCalls   int
-	created     int
+	// Subs are the sub-issues of a ticket by its ID, beyond the tasks
+	// PlaceTask records.
+	Subs      map[string][]string
+	Comments  []tracker.Feedback
+	PlanFail  []string
+	planCalls int
+	created   int
 }
 
 func New(issues ...issue.Issue) *Fake {
@@ -244,6 +247,13 @@ func (f *Fake) CreateTask(_ context.Context, t tracker.Task) (tracker.TaskRef, e
 	ref := tracker.TaskRef{ID: "task-" + string(rune('0'+f.created)), Identifier: "T-" + string(rune('0'+f.created)), NativeID: int64(f.created)}
 	f.writes = append(f.writes, Write{"create", ref.ID, t.Title + "\n" + t.Body})
 	return ref, nil
+}
+
+// SubIssueIDs returns the sub-issues set in Subs for the parent.
+func (f *Fake) SubIssueIDs(_ context.Context, parent issue.Issue) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.Subs[parent.ID]...), nil
 }
 
 func (f *Fake) PlaceTask(_ context.Context, parent issue.Issue, ref tracker.TaskRef, worker, state string) error {
