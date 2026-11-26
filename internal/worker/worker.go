@@ -191,6 +191,33 @@ type Worker struct {
 	// Notes is optional. Without it comments on a pull request do not
 	// reach the agent.
 	Notes PullRequestNotes
+	// Conversations is optional. With it, the first turn of a run
+	// continues the conversation the owner had with the agent on a
+	// terminal (`maestro talk`), when there is one.
+	Conversations Conversations
+}
+
+// Conversations are the owner's own sessions with the agent that no run has
+// continued yet.
+type Conversations interface {
+	// Pending is the session id of the conversation on a workspace, or "".
+	Pending(workspaceKey string) string
+	// Done forgets it once a run has continued it.
+	Done(workspaceKey string)
+}
+
+// talkedNote starts the first prompt of a run that continues the owner's
+// own conversation with the agent.
+const talkedNote = "The owner and you talked about this ticket in this conversation, on a terminal. " +
+	"What you agreed there counts as the owner's wishes for this ticket. Now carry on with the task below.\n\n"
+
+// conversation is the session a run starts in: the owner's pending
+// conversation, or "" for a new one.
+func (w *Worker) conversation(key string) string {
+	if w.Conversations == nil {
+		return ""
+	}
+	return w.Conversations.Pending(key)
 }
 
 type handle struct {
@@ -294,7 +321,8 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	}
 
 	maxTurns := int(cfg.Agent.MaxTurns)
-	sessionID, reason := "", ""
+	sessionID, reason := w.conversation(ws.Key), ""
+	talked := sessionID != ""
 	sessionReset := false
 	var lastVerify *prompt.Verify
 	verified := false // the check ran once this attempt
@@ -313,6 +341,9 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		var text string
 		if turn == 1 {
 			text, err = first()
+			if talked {
+				text = talkedNote + text
+			}
 		} else {
 			text, err = set.Prompt.Continuation(turn, maxTurns, reason, lastVerify)
 		}
@@ -342,6 +373,10 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 			return agentOutcome(err)
 		}
 		sessionID = res.SessionID
+		if talked {
+			talked = false
+			w.Conversations.Done(ws.Key)
+		}
 
 		// Is this still work we should be doing?
 		refreshed, err := w.Tracker.FetchIssuesByIDs(ctx, []string{is.ID})
@@ -452,7 +487,8 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 		return set.Prompt.Planning(prompt.PlanInput{Issue: is, RepoName: cfg.Workspace.Repo, Workers: brief.Workers, History: brief.History})
 	}
 	maxTurns := int(cfg.Agent.MaxTurns)
-	sessionID, problem := "", ""
+	sessionID, problem := w.conversation(ws.Key), ""
+	talked := sessionID != ""
 	sessionReset := false
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
@@ -462,6 +498,9 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 		if turn == 1 {
 			if text, err = first(); err != nil {
 				return failed(prompt.RenderError, err)
+			}
+			if talked {
+				text = talkedNote + text
 			}
 		} else {
 			text = set.Prompt.PlanningRetry(turn, maxTurns, problem)
@@ -485,6 +524,10 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 			return agentOutcome(err)
 		}
 		sessionID = res.SessionID
+		if talked {
+			talked = false
+			w.Conversations.Done(ws.Key)
+		}
 
 		// Is this still an idea the owner wants planned, with the same text?
 		refreshed, err := w.Tracker.FetchIssuesByIDs(ctx, []string{is.ID})
@@ -556,7 +599,8 @@ func (w *Worker) design(ctx context.Context, a orchestrator.Attempt, set Setting
 			Folder: brief.Folder, Tasks: tasks, History: history, Current: current})
 	}
 	maxTurns := int(cfg.Agent.MaxTurns)
-	sessionID, reason := "", ""
+	sessionID, reason := w.conversation(ws.Key), ""
+	talked := sessionID != ""
 	sessionReset := false
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
@@ -566,6 +610,9 @@ func (w *Worker) design(ctx context.Context, a orchestrator.Attempt, set Setting
 		var text string
 		if turn == 1 {
 			text, err = first()
+			if talked {
+				text = talkedNote + text
+			}
 		} else {
 			text, err = set.Prompt.Continuation(turn, maxTurns, reason, nil)
 		}
