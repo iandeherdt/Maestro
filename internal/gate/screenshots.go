@@ -127,6 +127,10 @@ func (g *Gates) shoot(ctx context.Context, key string, cfg config.Screenshots) (
 		g.step(tctx, key, collectTime, "sh", "-c", tidyScript)
 	}()
 
+	if len(cfg.Pages) == 0 && g.Host != nil && g.Config().Unity.Editor != "" {
+		return g.shootHere(ctx, key, cfg)
+	}
+
 	argv := []string{"sh", "-c", commandScript, "sh", cfg.Command}
 	if len(cfg.Pages) > 0 {
 		argv = append([]string{"sh", "-c", pagesScript, "sh",
@@ -140,14 +144,8 @@ func (g *Gates) shoot(ctx context.Context, key string, cfg config.Screenshots) (
 		return nil, fmt.Sprintf("No screenshots: taking them did not finish within %s, or the sandbox could not be started.", timeout)
 	case res.ExitStatus != 0:
 		note := "No screenshots: " + reason(cfg, res)
-		if len(cfg.Pages) == 0 && g.Log != nil {
-			// The command's output is text from the sandbox, written by
-			// code the agent may have changed, so it does not go into the
-			// pull request. The operator reads it in the service's log.
-			g.Log.Warn("screenshots.command failed", "workspace", key, "status", res.ExitStatus,
-				"output", outputTail(res.Stderr, res.Stdout))
-			note += " Its last lines are in the service log of worker " + code(g.Config().Worker.Name) +
-				": search it for `screenshots.command failed`."
+		if len(cfg.Pages) == 0 {
+			note += g.logFailure(key, res.ExitStatus, outputTail(res.Stderr, res.Stdout))
 		}
 		return nil, note
 	}
@@ -188,20 +186,98 @@ func (g *Gates) shoot(ctx context.Context, key string, cfg config.Screenshots) (
 			left = append(left, fmt.Sprintf("%q is larger than %d KB", caption, maxShotBytes>>10))
 			continue
 		}
-		clean, ok := repaint(lines[2])
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[2]))
+		clean, ok := repaint(raw)
+		if err != nil || !ok {
+			left = append(left, fmt.Sprintf("%q is not a PNG picture of a usable size", caption))
+			continue
+		}
+		shots = append(shots, worker.Screenshot{Caption: caption, PNG: clean})
+	}
+	return shots, leftNote(shots, left)
+}
+
+func leftNote(shots []worker.Screenshot, left []string) string {
+	if len(left) > 0 {
+		return "Left out: " + strings.Join(left, "; ") + "."
+	} else if len(shots) == 0 {
+		return "No screenshots: the command wrote no PNG file into $SCREENSHOT_DIR."
+	}
+	return ""
+}
+
+// logFailure puts the last lines of a screenshot command that failed in
+// the service's log and says so for the pull request. The lines are text
+// from code the agent may have changed, so they do not go into the pull
+// request. The operator reads them in the log.
+func (g *Gates) logFailure(key string, status int, lines string) string {
+	if g.Log == nil {
+		return ""
+	}
+	g.Log.Warn("screenshots.command failed", "workspace", key, "status", status, "output", lines)
+	return " Its last lines are in the service log of worker " + code(g.Config().Worker.Name) +
+		": search it for `screenshots.command failed`."
+}
+
+// shootHere runs the screenshots command on this machine, with the Unity
+// Editor of unity.editor, against the commit the export step produced:
+// the Editor for Linux in the sandbox crashes where it runs emulated,
+// which is how it runs on a Mac with Apple silicon.
+func (g *Gates) shootHere(ctx context.Context, key string, cfg config.Screenshots) ([]worker.Screenshot, string) {
+	g.mu.Lock()
+	head := g.heads[key]
+	g.mu.Unlock()
+	if head == "" {
+		var err error
+		if head, _, err = g.export(ctx, key); err != nil {
+			return nil, "No screenshots: the work could not be exported for Unity on this machine."
+		}
+	}
+	timeout := time.Duration(cfg.TimeoutMS) * time.Millisecond
+	sctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	res, pics, err := g.Host.Shots(sctx, g.Config().Unity.Editor, key, head, cfg.Command, maxShotBytes)
+	switch {
+	case ctx.Err() != nil:
+		return nil, ""
+	case sctx.Err() != nil:
+		return nil, fmt.Sprintf("No screenshots: taking them did not finish within %s.", timeout)
+	case err != nil:
+		if g.Log != nil {
+			g.Log.Warn("screenshots on this machine", "workspace", key, "error", err)
+		}
+		return nil, "No screenshots: Unity on this machine could not be started for them. The reason is in the service log of worker " +
+			code(g.Config().Worker.Name) + ": search it for `screenshots on this machine`."
+	case res.ExitStatus != 0:
+		return nil, fmt.Sprintf("No screenshots: screenshots.command exited with status %d.", res.ExitStatus) +
+			g.logFailure(key, res.ExitStatus, outputTail(nil, res.Output))
+	}
+	var shots []worker.Screenshot
+	var left []string
+	for i, p := range pics {
+		if len(shots) == config.MaxScreenshots {
+			left = append(left, fmt.Sprintf("only the first %d are shown", config.MaxScreenshots))
+			break
+		}
+		caption := strings.TrimSpace(captionRE.ReplaceAllString(strings.TrimSuffix(p.Name, ".png"), ""))
+		if r := []rune(caption); len(r) > 60 {
+			caption = string(r[:60])
+		}
+		if caption == "" {
+			caption = "screenshot " + strconv.Itoa(i+1)
+		}
+		if p.TooBig {
+			left = append(left, fmt.Sprintf("%q is larger than %d KB", caption, maxShotBytes>>10))
+			continue
+		}
+		clean, ok := repaint(p.Data)
 		if !ok {
 			left = append(left, fmt.Sprintf("%q is not a PNG picture of a usable size", caption))
 			continue
 		}
 		shots = append(shots, worker.Screenshot{Caption: caption, PNG: clean})
 	}
-	note := ""
-	if len(left) > 0 {
-		note = "Left out: " + strings.Join(left, "; ") + "."
-	} else if len(shots) == 0 {
-		note = "No screenshots: the command wrote no PNG file into $SCREENSHOT_DIR."
-	}
-	return shots, note
+	return shots, leftNote(shots, left)
 }
 
 // reason turns a failed step into words. The output of the step is not
@@ -261,9 +337,8 @@ func lastLine(b []byte) string {
 
 // repaint decodes a PNG and encodes it again. Text chunks, trailing data
 // and anything else that is not a pixel does not survive that.
-func repaint(b64 string) ([]byte, bool) {
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
-	if err != nil || len(raw) > maxShotBytes {
+func repaint(raw []byte) ([]byte, bool) {
+	if len(raw) > maxShotBytes {
 		return nil, false
 	}
 	// The size is read first, so that a small file that claims to be a

@@ -1002,8 +1002,10 @@ screenshots:
 `previews.sh` plays each scene of the build for two seconds and draws what every camera sees,
 overlay canvases included, at 1280 by 720 (at most 6 scenes). To pick the scenes or the size, put
 them in front of the command: `SHOT_SCENES=Assets/Scenes/Title.unity:Assets/Scenes/Level1.unity
-SHOT_WIDTH=1920 SHOT_HEIGHT=1080 sh conventions/unity/previews.sh`. The pictures are drawn with
-software OpenGL in the sandbox, so effects that need a real graphics card can look different.
+SHOT_WIDTH=1920 SHOT_HEIGHT=1080 sh conventions/unity/previews.sh`. In the sandbox the pictures
+are drawn with software OpenGL, so effects that need a real graphics card can look different. With
+`unity.editor` set (a Mac with Apple silicon), the command runs with the Editor of the Mac, in the
+same fence as the Unity checks, and draws with the Mac's own graphics.
 Run `maestro image` again after you upgrade, for the OpenGL drivers; the new scripts reach the
 repository by themselves, in the service's pull request that updates the packs. Not yet run with a
 real licence.

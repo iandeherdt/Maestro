@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
+	"github.com/iandeherdt/Maestro/internal/hostcheck"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -175,12 +177,9 @@ func TestRepaintRefusesWhatIsNotASmallPicture(t *testing.T) {
 	// The header claims 60000 x 60000.
 	copy(huge[16:24], []byte{0, 0, 0xea, 0x60, 0, 0, 0xea, 0x60})
 	for name, raw := range map[string][]byte{"text": []byte("hello"), "empty": nil, "claims to be huge": huge} {
-		if _, ok := repaint(base64.StdEncoding.EncodeToString(raw)); ok {
+		if _, ok := repaint(raw); ok {
 			t.Errorf("%s was accepted", name)
 		}
-	}
-	if _, ok := repaint("not base64!"); ok {
-		t.Error("text that is not base64 was accepted")
 	}
 }
 
@@ -256,5 +255,49 @@ func TestAFailedScreenshotCommandIsExplainedInTheLog(t *testing.T) {
 	// The command's text never reaches the note, which goes into the pull request.
 	if strings.Contains(note, "Unity") {
 		t.Fatal("the command's output is in the note")
+	}
+}
+
+// With unity.editor, the command runs on this machine, with the Unity
+// Editor there: the one for Linux in the sandbox crashes when it is
+// emulated. What it wrote is drawn again, as from the sandbox.
+func TestUnityScreenshotsRunWithTheEditorOfThisMachine(t *testing.T) {
+	l := newLocal(t)
+	var logged bytes.Buffer
+	cfg := &config.Config{Screenshots: config.Screenshots{Command: "sh conventions/unity/previews.sh", TimeoutMS: 60000},
+		Unity: config.Unity{Editor: "/x/Unity"}}
+	cfg.Worker.Name = "mini"
+	h := &fakeHost{pics: []hostcheck.Picture{
+		{Name: "1-Main.png", Data: picture(40, 30)},
+		{Name: "2-Level.png", TooBig: true},
+		{Name: "3-Bad.png", Data: []byte("words")},
+	}}
+	g := &Gates{Config: func() *config.Config { return cfg }, Launcher: l, Host: h,
+		Log: slog.New(slog.NewTextHandler(&logged, nil)), heads: map[string]string{"GH-1": headA}}
+	shots, note := g.screenshots(ctx, "GH-1")
+	if len(shots) != 1 || shots[0].Caption != "1-Main" {
+		t.Fatalf("shots %+v", shots)
+	}
+	if _, err := png.Decode(bytes.NewReader(shots[0].PNG)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(note, `"2-Level" is larger`) || !strings.Contains(note, `"3-Bad" is not a PNG`) {
+		t.Fatalf("note %q", note)
+	}
+	if len(h.calls) != 1 || h.calls[0] != "shots|/x/Unity|GH-1|"+headA+"|sh conventions/unity/previews.sh" {
+		t.Fatalf("calls %v", h.calls)
+	}
+
+	// A failed command: its lines go to the log, not to the note.
+	h.pics, h.res = nil, hostcheck.Result{ExitStatus: 1, Output: []byte("Unity: no licence for you")}
+	shots, note = g.screenshots(ctx, "GH-1")
+	if len(shots) != 0 || !strings.Contains(note, "exited with status 1") || strings.Contains(note, "licence") ||
+		!strings.Contains(logged.String(), "no licence for you") {
+		t.Fatalf("note %q, log %s", note, logged.String())
+	}
+	// A problem of this machine.
+	h.res, h.err = hostcheck.Result{}, errors.New("Unity Hub has no licence")
+	if _, note = g.screenshots(ctx, "GH-1"); !strings.Contains(note, "could not be started") {
+		t.Fatalf("note %q", note)
 	}
 }

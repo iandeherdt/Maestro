@@ -45,6 +45,7 @@ while [ $# -gt 0 ]; do
     case $1 in
         -testResults) echo '<test-run id="2" total="1" passed="1">' > "$2"; shift ;;
         -logFile) echo 'log' > "$2"; shift ;;
+        -executeMethod) cp "$(dirname "$0")/shot.png" "$SCREENSHOT_DIR/1-Main.png"; echo 'MaestroShots: 1 picture(s) taken' >> "$(dirname "$0")/calls" ;;
     esac
     shift
 done
@@ -140,6 +141,44 @@ func TestTheUnityPacksScriptsRunWithTheEditorOfThisMachine(t *testing.T) {
 	// Another commit than the exported one is refused.
 	if _, err := r.Unity(context.Background(), editor, "GH-1", base, script); err == nil {
 		t.Error("a commit that is not in the bundle was accepted")
+	}
+
+	// The pictures: the pack's previews.sh with this Editor, and the PNG
+	// files it wrote come back.
+	png := []byte("\x89PNG\r\n\x1a\nnot really")
+	os.WriteFile(filepath.Join(filepath.Dir(editor), "shot.png"), png, 0o644)
+	res, pics, err := r.Shots(context.Background(), editor, "GH-1", head, "sh conventions/unity/previews.sh", 1<<20)
+	if err != nil || res.ExitStatus != 0 {
+		t.Fatalf("%+v, %v\n%s", res, err, res.Output)
+	}
+	if len(pics) != 1 || pics[0].Name != "1-Main.png" || string(pics[0].Data) != string(png) {
+		t.Fatalf("pictures %+v", pics)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "Assets", "MaestroShots")); err == nil {
+		t.Error("the picture taker was left in the project")
+	}
+	// Only plain files with one name, in name order; a large one without
+	// its data; the folder is emptied before and after.
+	secret := filepath.Join(tmp, "secret.png")
+	os.WriteFile(secret, png, 0o600)
+	shotScript := `d="$SCREENSHOT_DIR"; printf a > "$d/b.png"; printf bb > "$d/a.png"; printf x > "$d/c.txt"
+ln -s ` + secret + ` "$d/link.png"; ln ` + secret + ` "$d/hard.png" 2>/dev/null; head -c 3000 /dev/zero > "$d/z.png"`
+	_, pics, err = r.Shots(context.Background(), editor, "GH-1", head, shotScript, 2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range pics {
+		got = append(got, p.Name+"="+string(p.Data)+map[bool]string{true: "(too big)"}[p.TooBig])
+	}
+	if strings.Join(got, " ") != "a.png=bb b.png=a z.png=(too big)" {
+		t.Fatalf("pictures %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "checks", "GH-1", "work", ShotDir)); err == nil {
+		t.Error("the pictures folder was kept")
+	}
+	if _, _, err := r.Shots(context.Background(), editor, "GH-1", head, shotScript, 0); err == nil {
+		t.Error("no size limit was accepted")
 	}
 
 	// Problems of this machine are errors, with words.

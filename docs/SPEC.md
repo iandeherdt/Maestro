@@ -3272,6 +3272,14 @@ verify step: as the sandbox user, without the agent's login, and always without 
   PNG per page. For an address it first waits, up to 90 seconds, until something answers there.
 - With `screenshots.command`: the step runs the command with `SCREENSHOT_DIR` set. Every `*.png`
   file directly in that directory is a picture.
+- With `screenshots.command` and `unity.editor`: the command does not run in the sandbox, whose
+  Unity Editor for Linux crashes when it runs emulated, but on this machine, in the same fence
+  and the same check folder as the Unity checks, on the exported commit. `SCREENSHOT_DIR` is a
+  folder in the check folder that is emptied before and removed after. The service reads back
+  only plain `*.png` files with a single name, at most 32, each up to the size limit of 24.2, and
+  draws every one again as in 24.2. When the Editor or Hub's licence is missing, the pull request
+  says that Unity could not be started, and the reason goes to the service's log as
+  `screenshots on this machine`.
 
 The directory for the pictures is next to the repository in the workspace, so a picture is never
 committed. The step empties it first, because the agent can write there as well. Afterwards the

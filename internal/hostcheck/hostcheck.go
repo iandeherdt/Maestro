@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -116,28 +117,61 @@ func (r *Runner) homeDir() (string, error) {
 // not of the change: the Editor or the licence is missing, or the commit
 // could not be checked out.
 func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (Result, error) {
+	res, _, err := r.run(ctx, editor, key, head, script, 0)
+	return res, err
+}
+
+// Picture is a PNG file that a screenshot command left. Data is empty when
+// the file was larger than the limit.
+type Picture struct {
+	Name   string
+	Data   []byte
+	TooBig bool
+}
+
+// ShotDir is the folder, in a check's own folder, where a screenshot
+// command run on this machine writes its pictures ($SCREENSHOT_DIR).
+const ShotDir = "screenshots"
+
+// Shots runs command, the project's screenshots command, against the
+// commit head of a workspace, with editor, in the same fence as the
+// checks, and returns the PNG files it wrote into $SCREENSHOT_DIR, in the
+// order of their names. A file over maxBytes comes back without its data.
+// The pictures are what the code the agent wrote produced: the caller
+// decodes and draws them again before they go anywhere.
+func (r *Runner) Shots(ctx context.Context, editor, key, head, command string, maxBytes int) (Result, []Picture, error) {
+	if maxBytes <= 0 {
+		return Result{}, nil, errors.New("no size limit for the pictures")
+	}
+	return r.run(ctx, editor, key, head, command, maxBytes)
+}
+
+// run runs script in a check's folder. With shots above 0 it also gives
+// the script $SCREENSHOT_DIR and reads the pictures back, each up to shots
+// bytes.
+func (r *Runner) run(ctx context.Context, editor, key, head, script string, shots int) (Result, []Picture, error) {
 	switch {
 	case !keyRE.MatchString(key) || strings.Contains(key, ".."):
-		return Result{}, errors.New("invalid workspace key")
+		return Result{}, nil, errors.New("invalid workspace key")
 	case !shaRE.MatchString(head):
-		return Result{}, errors.New("invalid commit")
+		return Result{}, nil, errors.New("invalid commit")
 	case !filepath.IsAbs(editor) || strings.ContainsAny(editor, "\"$`\\\n"):
-		return Result{}, errors.New("unity.editor is not a full path")
+		return Result{}, nil, errors.New("unity.editor is not a full path")
 	}
 	if st, err := os.Stat(editor); err != nil || st.IsDir() || st.Mode().Perm()&0o111 == 0 {
-		return Result{}, fmt.Errorf("the Unity Editor %s is not there. Install it with Unity Hub, "+
+		return Result{}, nil, fmt.Errorf("the Unity Editor %s is not there. Install it with Unity Hub, "+
 			"or run `maestro new` again to find the one this project needs", editor)
 	}
 	version := EditorVersion(editor)
 	if version == "" {
-		return Result{}, fmt.Errorf("the Unity version cannot be told from the path %s; unity.editor must be an Editor that Unity Hub installed", editor)
+		return Result{}, nil, fmt.Errorf("the Unity version cannot be told from the path %s; unity.editor must be an Editor that Unity Hub installed", editor)
 	}
 	home, err := r.homeDir()
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	if !HubLicence(home) {
-		return Result{}, errors.New("Unity Hub has no licence on this Mac. Open Unity Hub, sign in, " +
+		return Result{}, nil, errors.New("Unity Hub has no licence on this Mac. Open Unity Hub, sign in, " +
 			"and add a licence (Preferences, Licenses, Add, Get a free personal licence)")
 	}
 
@@ -149,21 +183,32 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 	dir, service := filepath.Join(top, "work"), filepath.Join(top, "service")
 	repo := filepath.Join(dir, "repo")
 	if err := layout(top, dir, service); err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	if err := r.checkout(ctx, filepath.Join(service, "git"), repo, key, head); err != nil {
-		return Result{}, fmt.Errorf("the change could not be checked out for the Unity checks: %w", err)
+		return Result{}, nil, fmt.Errorf("the change could not be checked out for the Unity checks: %w", err)
 	}
 	shim, fakeHome, err := shims(service, dir, editor, version, home)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
+	}
+	shotDir := filepath.Join(dir, ShotDir)
+	if shots > 0 {
+		// Emptied first: a check before this one could have left files.
+		if err := os.RemoveAll(shotDir); err != nil {
+			return Result{}, nil, err
+		}
+		if err := os.MkdirAll(shotDir, 0o700); err != nil {
+			return Result{}, nil, err
+		}
+		defer os.RemoveAll(shotDir)
 	}
 
 	// The proxy is the only way out. It listens on the loopback, which is
 	// all the sandbox lets through.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	p := &proxy.Proxy{Profile: "unity-checks", Log: r.Log, Allow: func() []string {
 		hosts := append([]string{}, UnityHosts...)
@@ -186,10 +231,10 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 		}
 		text, err := Profile(dir, home, r.Secret, []string{root}, service)
 		if err != nil {
-			return Result{}, err
+			return Result{}, nil, err
 		}
 		if err := os.WriteFile(profile, []byte(text), 0o600); err != nil {
-			return Result{}, err
+			return Result{}, nil, err
 		}
 		se := r.sandboxExec
 		if se == "" {
@@ -210,6 +255,9 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 		"HTTPS_PROXY=" + proxyURL, "HTTP_PROXY=" + proxyURL, "https_proxy=" + proxyURL, "http_proxy=" + proxyURL,
 		"NO_PROXY=localhost,127.0.0.1,::1", "no_proxy=localhost,127.0.0.1,::1",
 	}
+	if shots > 0 {
+		cmd.Env = append(cmd.Env, "SCREENSHOT_DIR="+shotDir)
+	}
 	out := &tailBuffer{max: MaxOutput}
 	cmd.Stdout, cmd.Stderr = out, out
 	// Unity starts helpers of its own; a stop ends all of them.
@@ -223,13 +271,75 @@ func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (R
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
-		return Result{Output: out.Bytes()}, nil
+		res := Result{Output: out.Bytes()}
+		if shots > 0 {
+			pics, err := pictures(shotDir, shots)
+			return res, pics, err
+		}
+		return res, nil, nil
 	case ctx.Err() != nil:
-		return Result{ExitStatus: -1, Output: out.Bytes()}, ctx.Err()
+		return Result{ExitStatus: -1, Output: out.Bytes()}, nil, ctx.Err()
 	case errors.As(err, &exit):
-		return Result{ExitStatus: exit.ExitCode(), Output: out.Bytes()}, nil
+		return Result{ExitStatus: exit.ExitCode(), Output: out.Bytes()}, nil, nil
 	}
-	return Result{}, err
+	return Result{}, nil, err
+}
+
+// maxPictures bounds how many files are read back.
+const maxPictures = 32
+
+// pictures reads the PNG files in dir, by name. Only plain files with one
+// name are read: a link, or a second name for a file elsewhere, could
+// lead the service to a file the check itself may not read.
+func pictures(dir string, max int) ([]Picture, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []Picture
+	for _, e := range entries { // sorted by name
+		if len(out) == maxPictures {
+			break
+		}
+		name := e.Name()
+		if !strings.HasSuffix(strings.ToLower(name), ".png") || !e.Type().IsRegular() {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			continue
+		}
+		st, err := f.Stat()
+		if err != nil || !st.Mode().IsRegular() || links(st) != 1 {
+			f.Close()
+			continue
+		}
+		if st.Size() > int64(max) {
+			f.Close()
+			out = append(out, Picture{Name: name, TooBig: true})
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(f, int64(max)+1))
+		f.Close()
+		if err != nil {
+			continue
+		}
+		if len(data) > max {
+			out = append(out, Picture{Name: name, TooBig: true})
+			continue
+		}
+		out = append(out, Picture{Name: name, Data: data})
+	}
+	return out, nil
+}
+
+// links is the number of names of a file; 1 when it cannot be told.
+func links(st os.FileInfo) uint64 {
+	if s, ok := st.Sys().(*syscall.Stat_t); ok {
+		return uint64(s.Nlink)
+	}
+	return 1
 }
 
 // Forget removes the folder of a workspace that was removed.

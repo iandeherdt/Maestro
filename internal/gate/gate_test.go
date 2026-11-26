@@ -195,6 +195,7 @@ func TestTailKeepsValidText(t *testing.T) {
 
 type fakeHost struct {
 	calls  []string
+	pics   []hostcheck.Picture
 	res    hostcheck.Result
 	err    error
 	forgot []string
@@ -203,6 +204,11 @@ type fakeHost struct {
 func (h *fakeHost) Unity(_ context.Context, editor, key, head, script string) (hostcheck.Result, error) {
 	h.calls = append(h.calls, editor+"|"+key+"|"+head+"|"+script)
 	return h.res, h.err
+}
+
+func (h *fakeHost) Shots(_ context.Context, editor, key, head, command string, maxBytes int) (hostcheck.Result, []hostcheck.Picture, error) {
+	h.calls = append(h.calls, "shots|"+editor+"|"+key+"|"+head+"|"+command)
+	return h.res, h.pics, h.err
 }
 
 func (h *fakeHost) Forget(key string) { h.forgot = append(h.forgot, key) }

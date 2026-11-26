@@ -78,7 +78,9 @@ unity() {
 unity_screen() {
     size=$1
     shift
-    if [ "$(uname)" = Darwin ] && ! command -v xvfb-run >/dev/null 2>&1; then
+    if [ "$(uname)" = Darwin ]; then
+        # A Mac draws with its own graphics (Metal) in batch mode, without
+        # an X server, even where Maestro put an xvfb-run in the PATH.
         "$UNITY_EDITOR/Unity" -batchmode -projectPath "$PWD" "$@"
         return
     fi
