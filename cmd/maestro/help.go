@@ -143,7 +143,9 @@ do about it. It changes nothing. It looks at:
 
 It exits with status 1 when a problem stops the service, and 0 otherwise,
 also when there are only warnings. Run it after setup, after an update, and
-whenever something looks wrong.`,
+whenever something looks wrong. The README's Troubleshooting section covers
+what it cannot fix: a Unity licence, a pack's tools missing from the image, a
+full disk, which WORKFLOW.md is read, and where the service log is.`,
 		see: []string{"setup", "login", "status"},
 	},
 	{

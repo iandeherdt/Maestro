@@ -3037,7 +3037,7 @@ adapter with `state_source: project`.
    comment by an allowlisted commenter. Or the owner approves the plan by moving the card to
    `planned_state` (`Planned`).
 6. For a card in `Planned` that is dispatchable and routed to this worker, the orchestrator
-   creates the tasks of the latest plan (22.4). The idea's card stays in `Planned` until every one of those tasks is in a terminal state; the service then moves it to `done_state` with a comment.
+   creates the tasks of the latest plan (22.4). The idea's card stays in `Planned` until every one of those tasks is in a terminal state; the service then moves it to `done_state` with a comment. The idea's other sub-issues, such as ones the owner added by hand, must be terminal too. A task that can no longer be read counts as terminal, so the adapter looks up a task it has not seen since it started (after a restart) by its ID rather than leaving it out, which would make an open task look deleted.
 
 ### 22.2 Planning prompt and answer format
 
@@ -3235,7 +3235,11 @@ service puts the repository back as it was exported (`git reset --hard`, `git cl
 removes the directory: what a build left behind does not turn up in a later commit.
 
 Screenshots never fail the work. When the step fails, runs too long or yields nothing, the pull
-request says so in the service's own words. The output of the step is not quoted.
+request says so in the service's own words. The output of the step is not quoted: it comes from
+code the agent may have changed. When a `screenshots.command` fails, the service writes the last
+20 lines of its output (at most 2 KB, control characters removed) to its own log as a warning
+`screenshots.command failed`, with the workspace key and the exit status, and the pull request
+names the worker whose log to search for that line.
 
 ### 24.2 Taking them out of the sandbox
 

@@ -381,7 +381,10 @@ Things to know:
 - The pictures are stored in your repository on a branch called `maestro/screenshots`, because
   GitHub gives a service no other place for them. That branch holds nothing else and you can
   delete it whenever you like.
-- When a picture cannot be taken, the pull request is opened anyway and says why.
+- When a picture cannot be taken, the pull request is opened anyway and says why. When your own
+  `command` failed, its last lines are not put on the pull request (they come from code the agent
+  may have changed); they are in the service log, under `screenshots.command failed`. See
+  [The service log](#the-service-log).
 - If you have your own way to take pictures, for example a Playwright script, use
   `command: node shots.mjs` instead of `pages`. The command writes PNG files into the folder
   named by `$SCREENSHOT_DIR`.
@@ -427,6 +430,10 @@ of Todo (set its Worker first).
    order the plan gives: a task waits until the tasks it depends on are done.
 
 Before step 5 you can also ask for a design first, see the next section.
+
+The idea's card stays in **Planned** while its tasks are worked on, and moves to **Done** by
+itself, with a comment, once every task is finished: done or closed (a task you deleted counts as finished). Sub-issues
+you added to the idea by hand count too: the idea is not done while one of them is open.
 
 Every task of a plan goes to the machine the idea was given to: the planner is offered only
 that machine's Worker option, and a plan that names another machine is corrected. With several
@@ -648,6 +655,8 @@ look up names without network, or get a host past the proxy that is not on its l
 that works, the service does not start. Three more things are reported as warnings and do not
 stop it: whether the memory and process limits are in force, whether the engine answers name
 lookups on the proxied networks, and whether the agent's proxy reaches Claude.
+
+For problems it cannot fix, see [Troubleshooting](#troubleshooting).
 
 ### Cleaning up: `maestro cleanup`
 
@@ -1220,9 +1229,114 @@ say when it is not. `maestro gitlab` shows the token's state, `maestro gitlab to
 one and `maestro gitlab remove` removes it. The merge request opens as a draft (`Draft:` in the
 title) and is marked ready when the checks pass; reviews by the username you gave count.
 
+## Troubleshooting
+
+Start with `maestro doctor`: it names most problems and says what to do. These are the ones it
+cannot always fix for you, with what worked on real machines.
+
+### The service log
+
+Most failures leave a line in the service's log, and some, such as a failed screenshot command,
+are only there.
+
+- Linux and WSL: `journalctl --user -u maestro-<worker> -f`, where `<worker>` is the worker name
+  of the project (`maestro settings` shows the settings file it is in).
+- Mac: the file `service.log` in the state folder (`budget.state_dir` in the settings file).
+  `maestro service install` prints its full path.
+- Running by hand with `maestro run`: the terminal.
+
+`maestro status` and `maestro dashboard` show what runs now; the log says why something stopped.
+
+### Which `WORKFLOW.md` is used
+
+The settings file is the `WORKFLOW.md` of the project, and there is one per project:
+
+- The first project: `~/Library/Application Support/maestro/WORKFLOW.md` on a Mac,
+  `~/.config/maestro/WORKFLOW.md` on Linux.
+- Every further project: `projects/NAME/WORKFLOW.md` next to it.
+
+`maestro settings` (with `--project NAME` when the machine has several) prints which file it
+reads. Without `--project`, a `WORKFLOW.md` in the folder you run the command from is used before
+the one setup wrote, so a `WORKFLOW.md` in your game's checkout is not the service's settings
+file. A running service picks a change to its own file up by itself.
+
+### "Blender is missing", or another pack's tool is not there
+
+The tools of a rule pack (Blender, Godot, Unity's Editor, the .NET SDK, a browser for screenshots)
+live in the sandbox image, so switching a pack on is two steps:
+
+```sh
+maestro conventions enable blender
+maestro image                       # builds the image again with the pack's tools
+```
+
+`maestro doctor` says "The settings turn on the pack ..., whose tools the image does not have"
+when the second step was missed. Build the image again after `maestro update` as well, and after
+you add `screenshots:` to the settings. For `maestro conventions check` on your own Mac, set
+`BLENDER` to the program, for example
+`BLENDER=/Applications/Blender.app/Contents/MacOS/Blender maestro conventions check`.
+
+### Unity has no licence
+
+The checks fail with "there is no Unity licence, so Unity cannot open the project or run its
+tests".
+
+```sh
+maestro unity                       # whether this machine has a licence for the checks
+maestro unity activate              # sign in to Unity in your browser, Personal licence
+maestro unity activate --password   # or with email and password (no two-step verification)
+maestro unity activate --file Unity_lic.ulf
+```
+
+- The licence Unity Hub keeps on your Mac or PC is bound to that machine and does not work in the
+  sandbox. Activate one for Maestro with the commands above.
+- On a Mac with Apple Silicon, Unity's checks run with the Editor that Unity Hub installed, and use
+  Unity Hub's own licence: sign in to Unity Hub and activate a licence there.
+- A project needs the `unity` pack switched on to get the licence; it is never given to the agent
+  itself. `maestro shell 12` opens a shell as the checks see it, licence included, so you can look;
+  `maestro shell 12 --agent` has no licence on purpose.
+
+### The disk is full: "no space left on device"
+
+On a Mac, Docker keeps every image and its build cache in one virtual disk of a fixed size, which
+fills up without macOS noticing. The Unity image alone is about 8 GB, and every `maestro image`
+leaves build cache behind. A full disk breaks the sandbox image build, the checks, and any CI that
+runs on the same machine.
+
+```sh
+docker system df                    # what takes the room: images, containers, build cache
+docker builder prune -a             # remove all build cache; the next image build takes longer
+maestro cleanup                     # what finished tickets left behind, and replaced images
+```
+
+If it fills up again, give Docker more room: Docker Desktop, Settings, Resources, Advanced, and
+raise the disk usage limit. Other engines have a setting of their own, such as
+`podman machine set --disk-size`.
+
+### `maestro conventions apply` says it is not a checkout
+
+`apply` writes the pack's files into a Git checkout of the project, so run it inside one:
+
+```sh
+git clone <the project's address> && cd <the project>
+maestro conventions apply unity
+```
+
+You only need it to add a pack. After an update of Maestro the service brings newer pack files to
+the repository by itself, in its pull request **Update the rule packs**; only changed CI workflows
+still need `maestro conventions apply <pack> --replace` in a checkout (the pull request says
+which).
+
+### No screenshots on the pull request
+
+The pull request says why. When your `screenshots.command` failed, search the service log for
+`screenshots.command failed`: its last lines are there. `maestro shell 12` opens a shell in the
+ticket's workspace, where you can run the command yourself. For a Unity project, the image needs
+its OpenGL drivers: run `maestro image` again after an upgrade.
+
 ## Project status
 
-Last updated 2026-11-23, at release 0.5.18.
+Last updated 2026-11-26.
 
 | Part | State |
 |---|---|
@@ -1272,6 +1386,13 @@ Last updated 2026-11-23, at release 0.5.18.
 | Native Mac sandbox, for work that needs macOS itself (Xcode, Unity) | Not started |
 | Linear board (`tracker.kind: linear`, `maestro linear key`) | Written, in release 0.5.18, with `maestro setup` for Linear (it creates the missing states) and planning (tasks as sub-issues), and tested against a fake Linear server. Not yet run against Linear itself. |
 | Code hosts other than GitHub (GitLab, Gitea, Forgejo) | Written: `workspace.host: gitlab` with `maestro setup --host gitlab` and `maestro gitlab`, and `workspace.host: gitea` (also for Forgejo) with `maestro setup --host gitea` and `maestro gitea`. Tested against a fake GitLab and a fake Gitea; not yet run against either. |
+| Token caps per attempt (30 million) and per ticket (100 million), `maestro settings set budget.*` (#116) | Done. The caps were raised from 10 million per attempt after Blender art tickets kept hitting it. |
+| Unity screenshots (`conventions/unity/previews.sh`) and "now" pictures for a design (#117) | Written, with tests against stand-ins for the sandbox and GitHub. `previews.sh` has not yet run with a real licence. |
+| Pull request **Update the rule packs** (#118) | Written, with tests against stand-ins. |
+| An idea stays open until all its sub-issues are done (#119) | Done, after an idea was moved to Done on a restart while its tasks were open. Tested against stand-ins for GitHub and Linear. |
+| `maestro shell`, `maestro talk` (#120) | Written, with tests against stand-ins. Container sandbox only. |
+| `maestro cleanup` and the sweep every 6 hours (#121) | Written, with tests against stand-ins for the board, the code host and the container engine. |
+| Telegram notices and talking to an agent (`maestro telegram`, #122) | Written, with tests against a stand-in for Telegram's API. |
 
 ## Documentation
 
