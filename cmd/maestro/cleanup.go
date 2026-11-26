@@ -103,6 +103,7 @@ func (s *sweeper) deps() cleanup.Deps {
 			}
 			return out, err
 		}
+		d.PruneBuildCache = s.dbox.PruneBuildCache
 		d.RemoveImage = func(ctx context.Context, id string) error {
 			err := s.dbox.RemoveImage(ctx, id)
 			if errors.Is(err, dockerbox.ErrImageInUse) {

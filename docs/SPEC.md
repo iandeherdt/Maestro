@@ -969,7 +969,9 @@ so Rework can continue on it. When the board says that most of the looked-up tic
 three) do not exist, the sweep takes that for lost access and leaves those tickets' things alone.
 
 The sweep also applies the audit log's retention (Section 16.2), removes sandbox images that a
-newer build left without a name, and lets git compact the mirror (`gc --auto`). It never deletes
+newer build left without a name, prunes the container engine's build cache that went unused for
+a week (Docker only: `docker builder prune --filter until=168h`; a dry run leaves it out, and a
+prune that freed nothing is not reported), and lets git compact the mirror (`gc --auto`). It never deletes
 the base branch, a branch outside the prefix, or anything else on the code host.
 
 ### 8.7 Budgets, Pause and Quota

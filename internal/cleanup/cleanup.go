@@ -93,6 +93,9 @@ type Deps struct {
 
 	StaleImages func(ctx context.Context) ([]Image, error)
 	RemoveImage func(ctx context.Context, id string) error
+	// PruneBuildCache removes the container engine's build cache that
+	// went unused for a week, and answers how much that freed, as text.
+	PruneBuildCache func(ctx context.Context) (freed string, err error)
 
 	Now func() time.Time
 	Log *slog.Logger
@@ -100,7 +103,7 @@ type Deps struct {
 
 // Item is one thing removed, or one that would be in a dry run.
 type Item struct {
-	Kind   string `json:"kind"` // branch, workspace, mirror, audit, image
+	Kind   string `json:"kind"` // branch, workspace, mirror, audit, image, cache
 	Name   string `json:"name"`
 	Reason string `json:"reason"`
 	Bytes  int64  `json:"bytes,omitempty"`
@@ -161,6 +164,21 @@ func Run(ctx context.Context, d Deps, dry bool) Report {
 					it.Error = err.Error()
 				}
 			}
+			r.Removed = append(r.Removed, it)
+		}
+	}
+	// The engine cannot say beforehand how much a prune would free, so a
+	// dry run leaves the build cache out, and a prune that freed nothing
+	// is not reported.
+	if d.PruneBuildCache != nil && !dry {
+		it := Item{Kind: "cache", Name: "container build cache", Reason: "not used for a week"}
+		freed, err := d.PruneBuildCache(ctx)
+		switch {
+		case err != nil:
+			it.Error = err.Error()
+			r.Removed = append(r.Removed, it)
+		case freed != "" && strings.TrimLeft(freed, "0.") != "B":
+			it.Name += " (" + freed + ")"
 			r.Removed = append(r.Removed, it)
 		}
 	}

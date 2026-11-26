@@ -655,7 +655,13 @@ The service cleans up after itself. When a pull request is merged, its branch an
 at once. A few minutes after the start and then every 6 hours it also removes what other finished
 tickets left behind: for a ticket that is done, closed or deleted on the board, its workspace,
 its branch (unless a pull request from it is still open) and what the mirror keeps for it. It
-keeps the audit log to 30 days and 2 GiB, and removes sandbox images that a newer build replaced.
+keeps the audit log to 30 days and 2 GiB, removes sandbox images that a newer build replaced,
+and prunes Docker's build cache that was not used for a week.
+
+On a Mac the container engine keeps images in its own virtual disk, which fills up without the
+Mac noticing. A large image such as Unity's then fails with "no space left on device", and so does
+CI that runs on the same machine. `maestro doctor` warns when less than 20 GB is free there;
+`docker system df` shows what takes the room.
 
 Nothing of a ticket that is still open is touched, so a ticket whose pull request was closed
 without a merge keeps its branch until you close the ticket, and moving it to Rework still works.
