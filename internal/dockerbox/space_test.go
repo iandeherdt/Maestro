@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestParseDF(t *testing.T) {
@@ -38,16 +39,35 @@ esac`)
 	if free, err := b.FreeSpace(context.Background()); err != nil || free != 10*1024 {
 		t.Fatalf("free %d %v", free, err)
 	}
-	if freed, err := b.PruneBuildCache(context.Background()); err != nil || freed != "1.2GB" {
-		t.Fatalf("freed %q %v", freed, err)
+	if freed, err := b.PruneBuildCache(context.Background(), 7*24*time.Hour); err != nil || freed != 2*1_200_000_000 {
+		t.Fatalf("freed %d %v", freed, err)
+	}
+	if _, err := b.PruneBuildCache(context.Background(), 0); err != nil {
+		t.Fatal(err)
 	}
 	args, _ := os.ReadFile(log)
-	want := "run --rm --network none --entrypoint df maestro-sandbox:1 -Pk /\nbuilder prune --force --filter until=168h\n"
+	want := "run --rm --network none --entrypoint df maestro-sandbox:1 -Pk /\nbuilder prune --force\nbuilder prune --force --all --filter until=168h\n" +
+		"builder prune --force\nbuilder prune --force --all\n"
 	if string(args) != want {
 		t.Errorf("args:\n%s", args)
 	}
 	b.Podman = true
-	if freed, err := b.PruneBuildCache(context.Background()); err != nil || freed != "" {
-		t.Errorf("podman: %q %v", freed, err)
+	if freed, err := b.PruneBuildCache(context.Background(), 0); err != nil || freed != 0 {
+		t.Errorf("podman: %d %v", freed, err)
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	for in, want := range map[string]int64{"17.8GB": 17_800_000_000, "512kB": 512_000, "0B": 0, "3MB": 3_000_000, "": 0, "GB": 0, "1.5XB": 0} {
+		if got := parseSize(in); got != want {
+			t.Errorf("%q: %d", in, got)
+		}
+	}
+}
+
+func TestFreeSpaceOnAFullDisk(t *testing.T) {
+	b, _ := scriptDocker(t, `echo 'write /var/lib/docker/x: no space left on device' >&2; exit 125`)
+	if _, err := b.FreeSpace(context.Background()); err != ErrNoSpace {
+		t.Fatalf("err %v", err)
 	}
 }

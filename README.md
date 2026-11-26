@@ -656,12 +656,15 @@ at once. A few minutes after the start and then every 6 hours it also removes wh
 tickets left behind: for a ticket that is done, closed or deleted on the board, its workspace,
 its branch (unless a pull request from it is still open) and what the mirror keeps for it. It
 keeps the audit log to 30 days and 2 GiB, removes sandbox images that a newer build replaced,
-and prunes Docker's build cache that was not used for a week.
+and prunes Docker's build cache that no build used for a week. `maestro image` removes the image
+it replaced and the build cache it did not use, right after a build.
 
 On a Mac the container engine keeps images in its own virtual disk, which fills up without the
 Mac noticing. A large image such as Unity's then fails with "no space left on device", and so does
-CI that runs on the same machine. `maestro doctor` warns when less than 20 GB is free there;
-`docker system df` shows what takes the room.
+CI that runs on the same machine. The service reads the free space there every 15 minutes. Below
+20 GB it says so in its log and on Telegram, prunes the whole build cache at once, and a ticket
+blocked meanwhile says so too. `maestro doctor` warns about it as well; `docker system df` shows
+what takes the room.
 
 Nothing of a ticket that is still open is touched, so a ticket whose pull request was closed
 without a merge keeps its branch until you close the ticket, and moving it to Rework still works.

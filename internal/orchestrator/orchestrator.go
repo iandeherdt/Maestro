@@ -69,8 +69,12 @@ type Deps struct {
 	// them, such as a chat on their phone. It must not block. Text after
 	// the first line may come from the agent.
 	Notify func(is issue.Issue, text string)
-	Clock  Clock
-	Log    *slog.Logger
+	// DiskNote, when set, says why work on this machine may fail for lack
+	// of disk space, or nothing while there is room. A blocked ticket
+	// carries it, as the service's own text.
+	DiskNote func() string
+	Clock    Clock
+	Log      *slog.Logger
 }
 
 type runEntry struct {
@@ -1538,6 +1542,11 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 	text := o.blockLead(reason)
 	if link != "" {
 		text += " The checks and their logs: " + link
+	}
+	if o.d.DiskNote != nil {
+		if n := o.d.DiskNote(); n != "" {
+			text += " " + n
+		}
 	}
 	text += " Move the card back to an active state to retry with a fresh budget."
 	o.comment(ctx, is, text, detail)

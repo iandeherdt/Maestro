@@ -93,9 +93,9 @@ type Deps struct {
 
 	StaleImages func(ctx context.Context) ([]Image, error)
 	RemoveImage func(ctx context.Context, id string) error
-	// PruneBuildCache removes the container engine's build cache that
-	// went unused for a week, and answers how much that freed, as text.
-	PruneBuildCache func(ctx context.Context) (freed string, err error)
+	// PruneBuildCache removes the container engine's build cache that no
+	// recent build used, and answers how many bytes that freed.
+	PruneBuildCache func(ctx context.Context) (freed int64, err error)
 
 	Now func() time.Time
 	Log *slog.Logger
@@ -171,14 +171,13 @@ func Run(ctx context.Context, d Deps, dry bool) Report {
 	// dry run leaves the build cache out, and a prune that freed nothing
 	// is not reported.
 	if d.PruneBuildCache != nil && !dry {
-		it := Item{Kind: "cache", Name: "container build cache", Reason: "not used for a week"}
+		it := Item{Kind: "cache", Name: "container build cache", Reason: "not used by a recent build"}
 		freed, err := d.PruneBuildCache(ctx)
-		switch {
-		case err != nil:
+		if err != nil {
 			it.Error = err.Error()
-			r.Removed = append(r.Removed, it)
-		case freed != "" && strings.TrimLeft(freed, "0.") != "B":
-			it.Name += " (" + freed + ")"
+		}
+		it.Bytes = freed
+		if err != nil || freed > 0 {
 			r.Removed = append(r.Removed, it)
 		}
 	}

@@ -448,6 +448,7 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	fmt.Fprintln(stdout, "\nThe image is ready.")
+	tidyAfterBuild(ctx, in.dbox, stdout)
 	fmt.Fprintf(stdout, "Next: %s    (sign Claude Code in inside the sandbox, once)\n", mention("maestro login"))
 	return 0
 }
@@ -810,9 +811,14 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if chat != nil {
 		notify = func(is issue.Issue, text string) { chat.Notify(is.Identifier, text) }
 	}
+	// Cleanup (SPEC 8.6, 16.2): what finished tickets left behind, the
+	// audit log's retention, replaced sandbox images and the build cache.
+	sw := &sweeper{cfg: cur.config, trk: trk, pub: pub, mir: mir, mirrorMu: &mirrorMu, spaces: removable,
+		dbox: in.dbox, auditDir: in.auditDir, log: log}
 	orch := orchestrator.New(cur.config(), orchestrator.Deps{
 		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Updater: pub, Plans: plans, Designs: designs, Log: log,
-		Notify: notify,
+		Notify:   notify,
+		DiskNote: sw.disk.note,
 		Preflight: func() (*config.Config, error) {
 			l, err := in.source.Check()
 			if l == nil {
@@ -836,10 +842,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if err != nil {
 		return err
 	}
-	// Cleanup (SPEC 8.6, 16.2): what finished tickets left behind, the
-	// audit log's retention and replaced sandbox images.
-	sw := &sweeper{cfg: cur.config, trk: trk, pub: pub, mir: mir, mirrorMu: &mirrorMu, spaces: removable,
-		dbox: in.dbox, auditDir: in.auditDir, busy: busyIn(orch), log: log}
+	sw.busy = busyIn(orch)
 	srv.Cleanup = sw.sweep
 	go srv.Serve()
 	defer srv.Shutdown(context.Background())
@@ -891,6 +894,11 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 		fmt.Fprintln(stdout, "Telegram: notices go to your linked chat; reply there to talk to an agent.")
 	}
 	go sw.keepClean(ctx)
+	var tellDisk func(string)
+	if chat != nil {
+		tellDisk = func(text string) { chat.Notify("", text) }
+	}
+	go sw.watchDisk(ctx, tellDisk)
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
 	return nil

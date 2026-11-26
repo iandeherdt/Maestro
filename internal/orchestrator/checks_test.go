@@ -402,3 +402,22 @@ func TestABlockForFailedChecksNamesThemAndLinksToTheirLogs(t *testing.T) {
 		t.Errorf("log %q", out)
 	}
 }
+
+func TestABlockSaysWhenTheDiskIsNearlyFull(t *testing.T) {
+	e, c := published(t)
+	note := "The container engine on this machine is nearly out of disk space (3 GB free)."
+	e.o.d.DiskNote = func() string { return note }
+	e.b.IncFailure("id-1")
+	e.b.IncFailure("id-1")
+	c.status = CheckStatus{State: ChecksFailed, Detail: "1 required check(s) failed on the pull request: build"}
+	e.tick()
+	var post string
+	for _, w := range e.tr.Writes() {
+		if w.Op == "post" {
+			post = w.Value
+		}
+	}
+	if lead, _, _ := strings.Cut(post, "```"); !strings.Contains(lead, note) {
+		t.Errorf("the disk is not mentioned:\n%s", post)
+	}
+}

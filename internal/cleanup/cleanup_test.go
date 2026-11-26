@@ -194,16 +194,16 @@ func TestMostlyGoneLooksLikeLostAccess(t *testing.T) {
 
 func TestBuildCacheIsPrunedAndReportedWhenItFreedSomething(t *testing.T) {
 	calls := 0
-	freed := "2.3GB"
-	d := Deps{PruneBuildCache: func(context.Context) (string, error) { calls++; return freed, nil }}
+	freed := int64(2_300_000_000)
+	d := Deps{PruneBuildCache: func(context.Context) (int64, error) { calls++; return freed, nil }}
 	if r := Run(context.Background(), d, true); calls != 0 || len(r.Removed) != 0 {
 		t.Fatalf("a dry run pruned: %d %+v", calls, r.Removed)
 	}
 	r := Run(context.Background(), d, false)
-	if calls != 1 || len(r.Removed) != 1 || r.Removed[0].Name != "container build cache (2.3GB)" {
+	if calls != 1 || len(r.Removed) != 1 || r.Removed[0].Bytes != freed {
 		t.Fatalf("%+v", r.Removed)
 	}
-	freed = "0B"
+	freed = 0
 	if r := Run(context.Background(), d, false); len(r.Removed) != 0 {
 		t.Fatalf("an empty prune was reported: %+v", r.Removed)
 	}
