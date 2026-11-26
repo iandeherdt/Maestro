@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -158,6 +160,9 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		return
 	}
+	if r.URL.Path == "/graphql" && r.Method == http.MethodPost && h.nodeQuery(w, r) {
+		return
+	}
 	if r.URL.Path == "/graphql" && r.Method == http.MethodPost && h.board != nil {
 		h.graphql(w, r)
 		return
@@ -239,6 +244,12 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 		var items []any
 		for _, e := range fi.events {
 			items = append(items, e)
+		}
+		h.page(w, r, items)
+	case parts[2] == "sub_issues" && r.Method == http.MethodGet:
+		items := []any{}
+		for _, c := range fi.children {
+			items = append(items, h.wire(h.issues[c]))
 		}
 		h.page(w, r, items)
 	case parts[2] == "sub_issues" && r.Method == http.MethodPost:
@@ -538,6 +549,70 @@ func TestFetchByIDs(t *testing.T) {
 	}
 	if out, err := a.FetchIssuesByIDs(ctx, nil); err != nil || len(out) != 0 || h.count("GET") == 0 {
 		t.Fatalf("empty input: %v %v", out, err)
+	}
+}
+
+// nodeQuery answers a lookup of an issue by its node ID. It reports
+// whether the request was one.
+func (h *hub) nodeQuery(w http.ResponseWriter, r *http.Request) bool {
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var in struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}
+	json.Unmarshal(body, &in)
+	if !strings.Contains(in.Query, "node(id:") {
+		return false
+	}
+	h.requests = append(h.requests, "NODE")
+	id, _ := in.Variables["id"].(string)
+	for _, fi := range h.issues {
+		if fi.nodeID == id {
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"node": map[string]any{
+				"__typename": "Issue", "number": fi.number, "repository": map[string]string{"nameWithOwner": owner + "/app"}}}})
+			return true
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"node": nil},
+		"errors": []map[string]string{{"type": "NOT_FOUND", "message": "Could not resolve to a node"}}})
+	return true
+}
+
+// After a restart the adapter has not seen the tasks of a plan yet. They
+// must still be read, not reported as deleted.
+func TestFetchByIDsAfterRestart(t *testing.T) {
+	h := newHub(t)
+	h.add(1, "ian", "ian", "status:Backlog", "run:linux")
+	h.add(2, "ian", "ian", "status:Todo", "run:linux")
+	h.issues[2].state = "closed"
+	got, err := adapter(t, h).FetchIssuesByIDs(ctx, []string{"I_node1", "I_node2", "I_gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := byIdent(got)
+	if len(got) != 2 || m["GH-1"].State != "Backlog" || m["GH-2"].State != "Done" || h.count("NODE") != 3 {
+		t.Fatalf("got %+v, %d lookups", m, h.count("NODE"))
+	}
+}
+
+func TestSubIssueIDs(t *testing.T) {
+	h := newHub(t)
+	h.add(1, "ian", "ian", "status:Planned")
+	h.add(2, "ian", "ian", "status:Todo", "run:linux")
+	h.add(3, "ian", "ian", "status:Done", "run:linux")
+	h.issues[1].children = []int{2, 3}
+	a := adapter(t, h)
+	ids, err := a.SubIssueIDs(ctx, issue.Issue{ID: "I_node1", Identifier: "GH-1"})
+	if err != nil || strings.Join(ids, ",") != "I_node2,I_node3" {
+		t.Fatalf("got %v, %v", ids, err)
+	}
+	// The sub-issues are read without a node lookup.
+	if got, err := a.FetchIssuesByIDs(ctx, ids); err != nil || len(got) != 2 || h.count("NODE") != 0 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if ids, err := a.SubIssueIDs(ctx, issue.Issue{ID: "I_node9", Identifier: "GH-9"}); err != nil || len(ids) != 0 {
+		t.Fatalf("unknown parent: %v, %v", ids, err)
 	}
 }
 
@@ -857,5 +932,32 @@ func TestSetStateAcceptsReworkAndTheDesignState(t *testing.T) {
 	}
 	if err := a.SetState(ctx, is, "Todo"); tracker.CategoryOf(err) != tracker.WriteRejected {
 		t.Errorf("the approval state was written: %v", err)
+	}
+}
+
+func TestLookupIdentifier(t *testing.T) {
+	h := newHub(t)
+	h.add(1, owner, owner, "status:todo")
+	h.add(2, owner, owner, "status:todo").state = "closed"
+	h.add(3, owner, owner).isPR = true
+	a := adapter(t, h)
+
+	is, found, err := a.LookupIdentifier(ctx, "GH-1")
+	if err != nil || !found || is.State != "todo" {
+		t.Fatalf("GH-1: %+v %v %v", is, found, err)
+	}
+	is, found, err = a.LookupIdentifier(ctx, "GH-2")
+	if err != nil || !found || is.State != a.terminal {
+		t.Fatalf("GH-2: %+v %v %v", is, found, err)
+	}
+	for _, id := range []string{"GH-3", "GH-99"} {
+		if _, found, err := a.LookupIdentifier(ctx, id); err != nil || found {
+			t.Fatalf("%s: found %v, %v", id, found, err)
+		}
+	}
+	for _, id := range []string{"ENG-1", "GH-01", "GH-", "GH-x", "screenshots"} {
+		if _, _, err := a.LookupIdentifier(ctx, id); !errors.Is(err, tracker.ErrForeignIdentifier) {
+			t.Fatalf("%s: %v", id, err)
+		}
 	}
 }

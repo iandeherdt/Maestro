@@ -532,6 +532,32 @@ maestro unblock GH-12       # or just: maestro unblock 12
 The command moves the card to Rework, not Todo: Todo is your approval, and the service never
 writes it.
 
+### Looking inside the sandbox: `maestro shell` and `maestro talk`
+
+When a ticket is stuck on something only the sandbox can show (a tool that is not installed, a
+licence Unity does not find), look for yourself:
+
+```sh
+maestro shell 12            # a shell in the ticket's workspace, as its checks see it
+maestro shell               # a shell in a new, empty sandbox, to see what the image has
+maestro shell 12 --agent    # the agent's view: its login and network, no Unity licence
+```
+
+While a step of the ticket runs, `maestro shell 12` joins that step's container, so you see what
+the agent is doing as it happens; leaving does not stop it.
+
+To talk with the agent itself, for instance to work an idea out together before it is planned:
+
+```sh
+maestro talk 12             # Claude Code on this terminal, continuing the agent's conversation
+```
+
+It runs in the ticket's workspace with the agent's login, network and restrictions, and does not
+start while the service works on the ticket. When you leave, the next run on the ticket (move the
+card as usual) continues the same conversation, so the plan it posts takes what you agreed into
+account. Both commands need the container sandbox. Nothing of this machine is mounted, and what
+you change in the workspace goes through the same checks as the agent's work.
+
 ### Watching the agents: `maestro dashboard`
 
 `maestro dashboard` opens the service's status page in the browser. It refreshes every few
@@ -598,6 +624,21 @@ look up names without network, or get a host past the proxy that is not on its l
 that works, the service does not start. Three more things are reported as warnings and do not
 stop it: whether the memory and process limits are in force, whether the engine answers name
 lookups on the proxied networks, and whether the agent's proxy reaches Claude.
+
+### Cleaning up: `maestro cleanup`
+
+The service cleans up after itself. When a pull request is merged, its branch and workspace go
+at once. A few minutes after the start and then every 6 hours it also removes what other finished
+tickets left behind: for a ticket that is done, closed or deleted on the board, its workspace,
+its branch (unless a pull request from it is still open) and what the mirror keeps for it. It
+keeps the audit log to 30 days and 2 GiB, and removes sandbox images that a newer build replaced.
+
+Nothing of a ticket that is still open is touched, so a ticket whose pull request was closed
+without a merge keeps its branch until you close the ticket, and moving it to Rework still works.
+The screenshots branch stays, because pull requests show their pictures from it.
+
+`maestro cleanup --dry-run` lists what would go, and `maestro cleanup` removes it now. When the
+service runs, the command asks it to do the sweep; otherwise the command does it itself.
 
 ## Several projects on one machine
 

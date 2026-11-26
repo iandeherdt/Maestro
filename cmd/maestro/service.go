@@ -71,6 +71,11 @@ type install struct {
 	mirrorDir, handoffDir, allowDir, auditDir string
 }
 
+// conversations are the owner's talks with the agent (`maestro talk`).
+func (in *install) conversations() claude.Conversations {
+	return claude.Conversations{Dir: filepath.Join(in.cfg.Budget.StateDir, "talk")}
+}
+
 // problem is an error whose text is written for the person at the terminal.
 type problem struct{ text string }
 
@@ -764,18 +769,20 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	gates := &gate.Gates{Config: cur.config, Launcher: in.box, Publisher: pub, Host: host, Log: log}
 	// What is pushed is the commit the export step named and verify ran on.
 	pub.ExportedHead = gates.ExportedHead
+	removable := &synced{Manager: spaces, sync: syncMirror, log: log, host: host}
 	wk := &worker.Worker{
 		Settings: func() worker.Settings {
 			l := cur.p.Load()
 			return worker.Settings{Config: l.Config, Prompt: l.Prompt}
 		},
 		Tracker:    trk,
-		Workspaces: &synced{Manager: spaces, sync: syncMirror, log: log, host: host},
+		Workspaces: removable,
 		Runner: &claude.Runner{Config: cur.config, Launcher: in.box,
 			Audit: func(key string) io.Writer { return audit{filepath.Join(in.auditDir, key+".jsonl")} },
 			Trace: turnTraces(cur.config, trace.New(version, log))},
-		Gates: gates,
-		Notes: pub,
+		Gates:         gates,
+		Notes:         pub,
+		Conversations: in.conversations(),
 	}
 	// The planning stage needs a board. The names of its states are read
 	// at start; changing them takes a restart.
@@ -820,6 +827,11 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if err != nil {
 		return err
 	}
+	// Cleanup (SPEC 8.6, 16.2): what finished tickets left behind, the
+	// audit log's retention and replaced sandbox images.
+	sw := &sweeper{cfg: cur.config, trk: trk, pub: pub, mir: mir, mirrorMu: &mirrorMu, spaces: removable,
+		dbox: in.dbox, auditDir: in.auditDir, busy: busyIn(orch), log: log}
+	srv.Cleanup = sw.sweep
 	go srv.Serve()
 	defer srv.Shutdown(context.Background())
 	if err := writeServiceInfo(cfg.Budget.StateDir, srv.Addr()); err != nil {
@@ -861,6 +873,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
 	go keepPacksCurrent(ctx, pub, log)
+	go sw.keepClean(ctx)
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
 	return nil

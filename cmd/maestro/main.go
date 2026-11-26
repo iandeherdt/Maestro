@@ -78,10 +78,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runBackground(args[1:], os.Stdin, stdout, stderr)
 		case "login":
 			return runLogin(args[1:], os.Stdin, stdout, stderr)
+		case "shell":
+			return runShell(args[1:], os.Stdin, stdout, stderr)
+		case "talk":
+			return runTalk(args[1:], os.Stdin, stdout, stderr)
 		case "conventions":
 			return runConventions(args[1:], stdout, stderr)
 		case "restart":
 			return runRestart(args[1:], stdout, stderr)
+		case "cleanup":
+			return runCleanup(args[1:], stdout, stderr)
 		case "settings":
 			return runSettings(args[1:], stdout, stderr)
 		case "skills":

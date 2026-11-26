@@ -157,4 +157,27 @@ func (p *Publisher) DeleteBranch(ctx context.Context, is issue.Issue) error {
 	return nil
 }
 
+// OpenChange reports whether any pull request from the ticket's branch is
+// still open, whoever opened it. Cleanup keeps such a branch.
+func (p *Publisher) OpenChange(ctx context.Context, is issue.Issue) (bool, error) {
+	h, err := p.host()
+	if err != nil {
+		return false, err
+	}
+	_, branch, err := p.branchOf(is)
+	if err != nil {
+		return false, err
+	}
+	list, err := h.changes(ctx, branch)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range list {
+		if c.State == changeOpen {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 var _ orchestrator.Reviews = (*Publisher)(nil)
