@@ -599,6 +599,21 @@ that works, the service does not start. Three more things are reported as warnin
 stop it: whether the memory and process limits are in force, whether the engine answers name
 lookups on the proxied networks, and whether the agent's proxy reaches Claude.
 
+### Cleaning up: `maestro cleanup`
+
+The service cleans up after itself. When a pull request is merged, its branch and workspace go
+at once. A few minutes after the start and then every 6 hours it also removes what other finished
+tickets left behind: for a ticket that is done, closed or deleted on the board, its workspace,
+its branch (unless a pull request from it is still open) and what the mirror keeps for it. It
+keeps the audit log to 30 days and 2 GiB, and removes sandbox images that a newer build replaced.
+
+Nothing of a ticket that is still open is touched, so a ticket whose pull request was closed
+without a merge keeps its branch until you close the ticket, and moving it to Rework still works.
+The screenshots branch stays, because pull requests show their pictures from it.
+
+`maestro cleanup --dry-run` lists what would go, and `maestro cleanup` removes it now. When the
+service runs, the command asks it to do the sweep; otherwise the command does it itself.
+
 ## Several projects on one machine
 
 One machine can run agents for several projects, for example a web app and a Unity game. Each

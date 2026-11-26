@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -232,6 +233,12 @@ func (f *fakeLinear) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		data = map[string]any{"commentUpdate": map[string]any{"success": true}}
 	case strings.Contains(q, "issue(id"):
 		fi := f.issues[v["id"].(string)]
+		// Linear takes an identifier, such as ENG-1, in place of the id.
+		for _, x := range f.issues {
+			if fi == nil && strings.EqualFold(x.li.Identifier, v["id"].(string)) {
+				fi = x
+			}
+		}
 		if fi == nil {
 			json.NewEncoder(w).Encode(map[string]any{"data": nil, "errors": []any{map[string]any{"message": "Entity not found: Issue"}}})
 			return
@@ -582,5 +589,27 @@ func TestPlaceTaskMakesAMissingWorkerLabel(t *testing.T) {
 	}
 	if _, err := a.Workers(ctx); err != nil {
 		t.Errorf("workers: %v", err)
+	}
+}
+
+func TestLookupIdentifier(t *testing.T) {
+	ctx := context.Background()
+	f, a := setup(t)
+	f.add(1, ian, "Done")
+	f.add(2, ian, "Todo")
+	other := f.add(3, ian, "Todo")
+	other.li.Team.Key = "OPS"
+
+	is, found, err := a.LookupIdentifier(ctx, "ENG-1")
+	if err != nil || !found || is.State != "Done" || is.ID != "id-1" {
+		t.Fatalf("ENG-1: %+v %v %v", is, found, err)
+	}
+	if _, found, err := a.LookupIdentifier(ctx, "ENG-9"); err != nil || found {
+		t.Fatalf("ENG-9: found %v, %v", found, err)
+	}
+	for _, id := range []string{"ENG-3", "GH-1", "OPS-3", "screenshots", "ENG-01"} {
+		if _, _, err := a.LookupIdentifier(ctx, id); !errors.Is(err, tracker.ErrForeignIdentifier) {
+			t.Fatalf("%s: %v", id, err)
+		}
 	}
 }

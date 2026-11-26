@@ -39,6 +39,11 @@ const notRunning = "Maestro is not running on this machine. Start it with: maest
 // reach calls the running service. Only a loopback address from the
 // service's own file is ever contacted.
 func reach(ctx context.Context, stateDir, method, path string, body io.Reader, out any) error {
+	return reachFor(ctx, 10*time.Second, stateDir, method, path, body, out)
+}
+
+// reachFor is reach for a request that may take longer.
+func reachFor(ctx context.Context, timeout time.Duration, stateDir, method, path string, body io.Reader, out any) error {
 	raw, err := os.ReadFile(filepath.Join(stateDir, serviceFile))
 	if err != nil {
 		return explain(notRunning)
@@ -56,7 +61,7 @@ func reach(ctx context.Context, stateDir, method, path string, body io.Reader, o
 		return err
 	}
 	req.Header.Set(httpapi.LocalHeader, "1")
-	hc := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	hc := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, err := hc.Do(req)
 	if err != nil {
 		// A file left behind by a service that was killed.

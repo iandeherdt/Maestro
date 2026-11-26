@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iandeherdt/Maestro/internal/cleanup"
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
 )
 
@@ -42,6 +43,9 @@ type Server struct {
 	state State
 	ln    net.Listener
 	srv   *http.Server
+	// Cleanup runs one cleanup sweep (`maestro cleanup`). Nil answers
+	// that the service does not clean up.
+	Cleanup func(ctx context.Context, dry bool) cleanup.Report
 }
 
 // Listen binds 127.0.0.1 on the given port. Port 0 picks a free port.
@@ -84,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/pause", s.apiPause)
 	mux.HandleFunc("/api/v1/resume", s.apiResume)
 	mux.HandleFunc("/api/v1/unblock", s.apiUnblock)
+	mux.HandleFunc("/api/v1/cleanup", s.apiCleanup)
 	mux.HandleFunc("/api/v1/", s.apiIssue)
 	return guard(mux)
 }
@@ -324,6 +329,28 @@ func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 	}
 	s.state.Resume()
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+}
+
+// cleanupTimeout bounds one sweep asked for over the API. Each finished
+// ticket costs a few requests to the board and the code host.
+const cleanupTimeout = 10 * time.Minute
+
+// apiCleanup runs a cleanup sweep and answers with its report. With
+// ?dry_run=1 nothing is removed.
+func (s *Server) apiCleanup(w http.ResponseWriter, r *http.Request) {
+	if !local(w, r) {
+		return
+	}
+	if s.Cleanup == nil {
+		writeError(w, http.StatusNotImplemented, "cleanup_unavailable", "this service does not clean up")
+		return
+	}
+	// A sweep takes longer than the server's usual write timeout.
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(cleanupTimeout + 30*time.Second))
+	ctx, cancel := context.WithTimeout(r.Context(), cleanupTimeout)
+	defer cancel()
+	dry := r.URL.Query().Get("dry_run") == "1"
+	writeJSON(w, http.StatusOK, s.Cleanup(ctx, dry))
 }
 
 // apiUnblock gives an issue a fresh failure budget and, when it is

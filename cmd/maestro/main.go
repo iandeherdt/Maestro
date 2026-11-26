@@ -82,6 +82,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runConventions(args[1:], stdout, stderr)
 		case "restart":
 			return runRestart(args[1:], stdout, stderr)
+		case "cleanup":
+			return runCleanup(args[1:], stdout, stderr)
 		case "settings":
 			return runSettings(args[1:], stdout, stderr)
 		case "skills":

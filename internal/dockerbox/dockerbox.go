@@ -594,3 +594,57 @@ func (b *Box) export(ctx context.Context, s spec) (sandbox.Result, error) {
 	}
 	return res, nil
 }
+
+// WorkspaceKeys lists the workspaces of this worker that exist.
+func (b *Box) WorkspaceKeys(ctx context.Context) ([]string, error) {
+	out, err := b.cli(ctx, "volume", "ls", "--quiet", "--filter", "label=maestro.worker="+b.Worker)
+	if err != nil {
+		return nil, err
+	}
+	prefix := b.Volume("")
+	var keys []string
+	for _, name := range strings.Fields(out) {
+		if k, ok := strings.CutPrefix(name, prefix); ok && k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+// StaleImage is a sandbox image without a name: a build of the sandbox
+// image that a newer build replaced.
+type StaleImage struct{ ID, Size string }
+
+// StaleImages lists the sandbox images, of any Maestro project on this
+// machine, that lost their name to a newer build.
+func (b *Box) StaleImages(ctx context.Context) ([]StaleImage, error) {
+	out, err := b.cli(ctx, "image", "ls", "--no-trunc", "--filter", "dangling=true", "--filter", "label=maestro.conventions",
+		"--format", "{{.ID}}\t{{.Size}}")
+	if err != nil {
+		return nil, err
+	}
+	var imgs []StaleImage
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		id, sz, _ := strings.Cut(strings.TrimSpace(line), "\t")
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		imgs = append(imgs, StaleImage{ID: id, Size: strings.TrimSpace(sz)})
+	}
+	return imgs, nil
+}
+
+// ErrImageInUse is RemoveImage's answer for an image a container still
+// uses. The image stays.
+var ErrImageInUse = errors.New("a container still uses the image")
+
+// RemoveImage deletes an image that no container uses.
+func (b *Box) RemoveImage(ctx context.Context, id string) error {
+	_, err := b.cli(ctx, "image", "rm", id)
+	if err != nil && (strings.Contains(err.Error(), "being used") || strings.Contains(err.Error(), "in use")) {
+		return ErrImageInUse
+	}
+	return err
+}

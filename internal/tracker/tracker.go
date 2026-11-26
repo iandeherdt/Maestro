@@ -168,3 +168,16 @@ func FenceMax(text string, limit int) string {
 	fence := strings.Repeat("`", max(3, longest+1))
 	return fence + "text\n" + body + "\n" + fence
 }
+
+// ErrForeignIdentifier is a Lookup's answer for a name that cannot be an
+// identifier of its board, such as a GitHub number asked of Linear.
+var ErrForeignIdentifier = errors.New("not an identifier of this board")
+
+// Lookup is implemented by adapters that can read one ticket by its
+// identifier, whatever state it is in, including closed. It is used to
+// tell whether what the service keeps for a ticket is still needed.
+type Lookup interface {
+	// LookupIdentifier reads the ticket. found is false when the board has
+	// no such ticket in scope (any more).
+	LookupIdentifier(ctx context.Context, identifier string) (is issue.Issue, found bool, err error)
+}
