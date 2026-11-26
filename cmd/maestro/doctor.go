@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iandeherdt/Maestro/internal/cleanup"
 	"github.com/iandeherdt/Maestro/internal/conventions"
 	"github.com/iandeherdt/Maestro/internal/dockerbox"
 	"github.com/iandeherdt/Maestro/internal/ghapp"
@@ -137,6 +139,7 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 		if why := imageOutdated(ctx, in); why != "" {
 			d.warn("the sandbox image is current", why+" Build it again with: "+mention("maestro image"))
 		}
+		d.diskSpace(ctx, in)
 	}
 
 	// The self-test and the login need the proxies. A running service has
@@ -198,6 +201,31 @@ func (d *doctor) run(ctx context.Context, dir, explicit string) int {
 		return 1
 	}
 	return 0
+}
+
+// diskSpace warns when the container engine's disk is nearly full. On a
+// Mac that is the engine's virtual machine, which fills up without the Mac
+// noticing; images then fail to unpack with "no space left on device".
+func (d *doctor) diskSpace(ctx context.Context, in *install) {
+	free, err := in.dbox.FreeSpace(ctx)
+	switch {
+	case errors.Is(err, dockerbox.ErrNoSpace):
+		d.fail("the container engine has room for images", "Its disk is full: a container could not even start. "+
+			"See what takes the room with: "+mention("docker system df")+". Free it with: "+mention("maestro cleanup")+
+			" and "+mention("docker builder prune -a")+".")
+	case err != nil:
+		d.warn("the container engine has room for images", "Free space could not be read: "+errText(err))
+	case free < dockerbox.LowDisk:
+		d.warn("the container engine has room for images",
+			fmt.Sprintf("Only %s is free where the engine keeps images and containers. Large images, such as Unity's, "+
+				"then fail with \"no space left on device\", and so does CI that runs on this machine. "+
+				"See what takes the room with: %s. Free it with: %s, then %s and %s. "+
+				"On a Mac, the engine's disk size is a setting of Docker Desktop, OrbStack or Colima.",
+				cleanup.Size(free), mention("docker system df"), mention("maestro cleanup"),
+				mention("docker image prune"), mention("docker builder prune -a")))
+	default:
+		d.ok("the container engine has room for images (" + cleanup.Size(free) + " free)")
+	}
 }
 
 func engineName(in *install) string {

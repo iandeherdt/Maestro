@@ -70,6 +70,10 @@ func (p *Publisher) gitLab(path string) (*gitLab, error) {
 
 func (g *gitLab) gitURL() string { return g.web + "/" + g.path + ".git" }
 
+func (g *gitLab) checksPage(number int) string {
+	return g.web + "/" + g.path + "/-/merge_requests/" + strconv.Itoa(number) + "/pipelines"
+}
+
 // id returns the project's number.
 func (g *gitLab) id(ctx context.Context) (int64, string, error) {
 	var p struct {

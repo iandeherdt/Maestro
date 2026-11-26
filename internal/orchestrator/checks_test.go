@@ -1,8 +1,10 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -361,5 +363,61 @@ func TestASecondConflictIsNotARepeatedFailure(t *testing.T) {
 	conflictAt(e, c, "bcdefabcdefabcdefabcdefabcdefabcdefabcdef")
 	if lastState(e) != "Blocked" {
 		t.Fatalf("the same commit conflicting twice did not block: %s", lastState(e))
+	}
+}
+
+func TestABlockForFailedChecksNamesThemAndLinksToTheirLogs(t *testing.T) {
+	e, c := published(t)
+	var logged bytes.Buffer
+	e.o.d.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	e.b.IncFailure("id-1")
+	e.b.IncFailure("id-1")
+	link := "https://github.com/ian/app/pull/7/checks"
+	c.status = CheckStatus{State: ChecksFailed, Link: link,
+		Detail:   "1 required check(s) failed on the pull request: unity-editmode-tests",
+		Feedback: []issue.Feedback{{Source: "ci", Body: "The check unity-editmode-tests failed. Its report: PlayerMovesTest failed"}}}
+	e.tick()
+	if lastState(e) != "Blocked" {
+		t.Fatalf("state %s", lastState(e))
+	}
+	var post string
+	for _, w := range e.tr.Writes() {
+		if w.Op == "post" {
+			post = w.Value
+		}
+	}
+	lead, fenced, _ := strings.Cut(post, "```")
+	if !strings.Contains(lead, "The checks and their logs: "+link) {
+		t.Errorf("the link is not in the note's own text:\n%s", post)
+	}
+	if !strings.Contains(fenced, "unity-editmode-tests") || strings.Contains(lead, "unity-editmode-tests") {
+		t.Errorf("the check's name is not quoted below the note:\n%s", post)
+	}
+	// The check's report is the repository's text: the agent gets it and
+	// the log keeps it, the ticket does not.
+	if strings.Contains(post, "PlayerMovesTest") {
+		t.Errorf("the check's report is in the ticket:\n%s", post)
+	}
+	if out := logged.String(); !strings.Contains(out, "required checks failed") || !strings.Contains(out, "PlayerMovesTest") {
+		t.Errorf("log %q", out)
+	}
+}
+
+func TestABlockSaysWhenTheDiskIsNearlyFull(t *testing.T) {
+	e, c := published(t)
+	note := "The container engine on this machine is nearly out of disk space (3 GB free)."
+	e.o.d.DiskNote = func() string { return note }
+	e.b.IncFailure("id-1")
+	e.b.IncFailure("id-1")
+	c.status = CheckStatus{State: ChecksFailed, Detail: "1 required check(s) failed on the pull request: build"}
+	e.tick()
+	var post string
+	for _, w := range e.tr.Writes() {
+		if w.Op == "post" {
+			post = w.Value
+		}
+	}
+	if lead, _, _ := strings.Cut(post, "```"); !strings.Contains(lead, note) {
+		t.Errorf("the disk is not mentioned:\n%s", post)
 	}
 }

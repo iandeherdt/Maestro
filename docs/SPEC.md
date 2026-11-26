@@ -969,8 +969,17 @@ so Rework can continue on it. When the board says that most of the looked-up tic
 three) do not exist, the sweep takes that for lost access and leaves those tickets' things alone.
 
 The sweep also applies the audit log's retention (Section 16.2), removes sandbox images that a
-newer build left without a name, and lets git compact the mirror (`gc --auto`). It never deletes
+newer build left without a name, prunes the container engine's build cache (Docker only: the
+cache no build refers to, and the rest that went unused for a week, or all of it while the disk
+is nearly full; a dry run leaves it out, and a prune that freed nothing is not reported), and lets git compact the mirror (`gc --auto`). It never deletes
 the base branch, a branch outside the prefix, or anything else on the code host.
+
+Disk space (container backend): every 15 minutes the service reads the free space where the
+engine keeps images (`df` in a throwaway sandbox container without network). Below 20 GB it logs
+a warning, tells the owner once (Telegram), and prunes the whole build cache; a ticket blocked
+while the disk is low says so in the blocked note. `maestro image` removes the image it replaced
+and the build cache unused for a day after a successful build. `maestro doctor` warns below
+20 GB and fails when no container can start for lack of space.
 
 ### 8.7 Budgets, Pause and Quota
 
@@ -2154,6 +2163,11 @@ For each Publish Record, every `publish.checks_poll_interval_ms`:
    next poll.
 6. Any required check failed: pass each failed check's name and report to the agent as feedback
    with source `ci`, and schedule a `gate` retry with category `checks_failed`.
+   The failure's detail names the failed checks (cleaned, at most ten), and the status carries
+   a link to the pull request's checks page, built from the settings and the pull request's
+   number. When the ticket is blocked, the note shows the link in its own text and the names as
+   quoted text; the checks' reports go to the agent and to the service log (`required checks
+   failed`), never to the ticket.
 7. Deadline passed, including when the checks could not be read until then: set the issue to the
    blocked state with `checks_timeout`. The blocked comment says that the checks did not finish
    in time, not that attempts failed, and lists the checks still waited for, each `not started`

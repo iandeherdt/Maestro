@@ -69,8 +69,12 @@ type Deps struct {
 	// them, such as a chat on their phone. It must not block. Text after
 	// the first line may come from the agent.
 	Notify func(is issue.Issue, text string)
-	Clock  Clock
-	Log    *slog.Logger
+	// DiskNote, when set, says why work on this machine may fail for lack
+	// of disk space, or nothing while there is room. A blocked ticket
+	// carries it, as the service's own text.
+	DiskNote func() string
+	Clock    Clock
+	Log      *slog.Logger
 }
 
 type runEntry struct {
@@ -764,7 +768,7 @@ func (o *Orchestrator) onRetryTimer(ctx context.Context, id string) {
 			o.release(id)
 			return
 		}
-		o.block(ctx, is, r.blockReason, r.Error, r.writeFailures)
+		o.block(ctx, is, r.blockReason, r.Error, r.blockLink, r.writeFailures)
 		return
 	}
 	if !o.eligible(is) {
@@ -875,7 +879,7 @@ func (o *Orchestrator) stopOverTokens(ctx context.Context, id string, gen uint64
 	}
 	o.d.Log.Warn("token limit reached, stopping the attempt", "issue", e.issue.Identifier, "detail", detail)
 	o.terminate(ctx, id, false, "token limit")
-	o.block(ctx, e.issue, "token_limit", detail, 0)
+	o.block(ctx, e.issue, "token_limit", detail, "", 0)
 }
 
 // onWorkerExit applies an attempt's outcome (SPEC 19.6). A report from an
@@ -903,7 +907,7 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 	case Normal:
 		o.completed[id] = true
 		if over := o.overTicketTokens(id, 0); over != "" {
-			o.block(ctx, is, "token_limit", over, 0)
+			o.block(ctx, is, "token_limit", over, "", 0)
 			return
 		}
 		o.schedule(&RetryEntry{IssueID: id, Identifier: is.Identifier, Attempt: 1, Kind: KindContinuation})
@@ -932,10 +936,14 @@ func (o *Orchestrator) onWorkerExit(ctx context.Context, id string, gen uint64, 
 
 // failed counts a failure attempt, then retries or blocks.
 func (o *Orchestrator) failed(ctx context.Context, e *runEntry, kind, category, message string, feedback []issue.Feedback) {
-	o.failIssue(ctx, e.issue, e.attempt, kind, category, message, feedback)
+	o.failIssue(ctx, e.issue, e.attempt, kind, category, message, "", feedback)
 }
 
-func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt int, kind, category, message string, feedback []issue.Feedback) {
+// failIssue counts a failure of the ticket, then retries or blocks. The
+// link, when set, is a page of the code host where a person reads more,
+// such as the checks of the pull request. The service builds it, so it is
+// shown as a link and not as quoted text.
+func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt int, kind, category, message, link string, feedback []issue.Feedback) {
 	n := o.d.Budget.IncFailure(is.ID)
 	detail := blockDetail(message, feedback)
 	sig := failureSignature(category, detail)
@@ -946,14 +954,14 @@ func (o *Orchestrator) failIssue(ctx context.Context, is issue.Issue, attempt in
 	o.d.Log.Warn("attempt failed", "issue", is.Identifier, "attempt", attempt, "category", category, "detail", message)
 	switch {
 	case n >= o.cfg.Budget.MaxFailureAttempts:
-		o.block(ctx, is, category, detail, 0)
+		o.block(ctx, is, category, detail, link, 0)
 		return
 	case repeated:
-		o.block(ctx, is, repeatedPrefix+category, detail, 0)
+		o.block(ctx, is, repeatedPrefix+category, detail, link, 0)
 		return
 	}
 	if over := o.overTicketTokens(is.ID, 0); over != "" {
-		o.block(ctx, is, "token_limit", over+"\n\nLast error: "+detail, 0)
+		o.block(ctx, is, "token_limit", over+"\n\nLast error: "+detail, link, 0)
 		return
 	}
 	o.schedule(&RetryEntry{IssueID: is.ID, Identifier: is.Identifier, Attempt: attempt + 1,
@@ -1218,7 +1226,7 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, is issue.Issue, rec 
 		head = head[:12]
 	}
 	o.failIssue(ctx, is, attempt, KindGate, "merge_conflict",
-		fmt.Sprintf("Pull request #%d conflicts with its base branch at commit %s.", rec.PRNumber, head),
+		fmt.Sprintf("Pull request #%d conflicts with its base branch at commit %s.", rec.PRNumber, head), "",
 		[]issue.Feedback{{Source: "ci", Body: conflictFeedback}})
 }
 
@@ -1300,7 +1308,7 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 			o.d.Log.Warn("checks could not be read, will retry", "issue", rec.Identifier, "error", err)
 			if o.now().After(rec.ChecksDeadline) {
 				o.dropAwaiting(id)
-				o.block(ctx, is, "checks_timeout", "", 0)
+				o.block(ctx, is, "checks_timeout", "", "", 0)
 			}
 			continue
 		}
@@ -1323,21 +1331,31 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 		case ChecksFailed:
 			attempt := o.awaitAttempt[id]
 			o.dropAwaiting(id)
-			o.failIssue(ctx, is, attempt, KindGate, "checks_failed", st.Detail, st.Feedback)
+			// The reports are the checks' own text, from code the agent
+			// may have changed, so they go to the agent and to the log,
+			// not to the ticket. The ticket names the checks and links
+			// to their logs.
+			reports := make([]string, 0, len(st.Feedback))
+			for _, f := range st.Feedback {
+				reports = append(reports, f.Body)
+			}
+			o.d.Log.Warn("required checks failed", "issue", rec.Identifier, "pr", rec.PRNumber,
+				"checks", st.Detail, "link", st.Link, "reports", strings.Join(reports, "\n"))
+			o.failIssue(ctx, is, attempt, KindGate, "checks_failed", st.Detail, st.Link, st.Feedback)
 		case ChecksForeignPush:
 			// Someone else pushed to the branch. What was verified is not
 			// what is there now, so the service stops and a person decides.
 			o.dropAwaiting(id)
-			o.block(ctx, is, "foreign_push", "", 0)
+			o.block(ctx, is, "foreign_push", "", "", 0)
 		case ChecksClosed:
 			o.dropAwaiting(id)
-			o.block(ctx, is, "pull_request_closed", "", 0)
+			o.block(ctx, is, "pull_request_closed", "", "", 0)
 		case ChecksConflict:
 			o.resolveConflict(ctx, is, rec)
 		default:
 			if o.now().After(rec.ChecksDeadline) {
 				o.dropAwaiting(id)
-				o.block(ctx, is, "checks_timeout", st.Detail, 0)
+				o.block(ctx, is, "checks_timeout", st.Detail, st.Link, 0)
 				continue
 			}
 			// Waiting is right while CI runs, but a repository without CI
@@ -1513,15 +1531,24 @@ func (o *Orchestrator) hasActiveState(state string) bool {
 
 // block moves the issue to the blocked state and releases the claim. If the
 // write fails the claim is held and the write is retried.
-func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail string, writeFailures int) {
+func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail, link string, writeFailures int) {
 	if err := o.d.Tracker.SetState(ctx, is, o.cfg.Tracker.BlockedState); err != nil {
-		o.trackerRetry(is, &RetryEntry{blockReason: reason, writeFailures: writeFailures + 1,
+		o.trackerRetry(is, &RetryEntry{blockReason: reason, blockLink: link, writeFailures: writeFailures + 1,
 			Error: "tracker write failed: " + err.Error()})
 		return
 	}
 	o.d.Budget.MarkBlocked(is.ID, o.now())
 	o.persist()
-	text := o.blockLead(reason) + " Move the card back to an active state to retry with a fresh budget."
+	text := o.blockLead(reason)
+	if link != "" {
+		text += " The checks and their logs: " + link
+	}
+	if o.d.DiskNote != nil {
+		if n := o.d.DiskNote(); n != "" {
+			text += " " + n
+		}
+	}
+	text += " Move the card back to an active state to retry with a fresh budget."
 	o.comment(ctx, is, text, detail)
 	note := text
 	if detail != "" {

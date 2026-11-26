@@ -2,6 +2,7 @@ package publish
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -38,6 +39,9 @@ func (f *fakeHost) change(_ context.Context, n int) (change, error) {
 func (f *fakeHost) changes(context.Context, string) ([]change, error) { return f.list, nil }
 func (f *fakeHost) checks(context.Context, string) (map[string]check, bool, error) {
 	return f.results, true, nil
+}
+func (f *fakeHost) checksPage(n int) string {
+	return fmt.Sprintf("https://example.test/ian/app/pull/%d/checks", n)
 }
 func (f *fakeHost) markReady(context.Context, change) error { f.readied++; return nil }
 func (f *fakeHost) reviews(context.Context, int) ([]prReview, bool, error) {
@@ -116,6 +120,11 @@ func TestSharedRulesOnAnyHost(t *testing.T) {
 	f.results = map[string]check{"build": {resPassed, ""}, "lint": {resFailed, "two warnings"}}
 	if cs, _ := p.Check(ctx, rec); cs.State != orchestrator.ChecksFailed || len(cs.Feedback) != 1 {
 		t.Errorf("failed check: %+v", cs)
+	}
+	// The block names the failed check, and links to the checks page.
+	if cs, _ := p.Check(ctx, rec); cs.Detail != "1 required check(s) failed on the pull request: lint" ||
+		cs.Link != "https://example.test/ian/app/pull/5/checks" {
+		t.Errorf("failed check: %q %q", cs.Detail, cs.Link)
 	}
 	f.results = map[string]check{}
 	if cs, _ := p.Check(ctx, rec); cs.State != orchestrator.ChecksPending {

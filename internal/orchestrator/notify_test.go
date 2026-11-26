@@ -57,7 +57,7 @@ func TestTheOwnerIsToldOfQuestionsAndPlans(t *testing.T) {
 
 func TestTheOwnerIsToldOfABlockedTicket(t *testing.T) {
 	e, _, n := notifyEnv(t, todo(1))
-	e.o.block(e.ctx, e.tr.Get("id-1"), "", strings.Repeat("x", 3000)+"the last line", 0)
+	e.o.block(e.ctx, e.tr.Get("id-1"), "", strings.Repeat("x", 3000)+"the last line", "", 0)
 	got := n.all()
 	if !strings.Contains(got, "Blocked") && !strings.Contains(got, "blocked") {
 		t.Fatalf("notices:\n%s", got)

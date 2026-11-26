@@ -44,7 +44,120 @@ type sweeper struct {
 	auditDir string
 	busy     func(identifier string) bool
 	log      *slog.Logger
-	mu       sync.Mutex
+	// disk is the latest reading of the engine's free space.
+	disk diskState
+	mu   sync.Mutex
+}
+
+// cacheKeep is how long the build cache of a build stays when the disk is
+// not nearly full.
+const cacheKeep = 7 * 24 * time.Hour
+
+// diskEvery is how often the service reads the engine's free space.
+const diskEvery = 15 * time.Minute
+
+// diskState is the latest reading of the container engine's free space.
+type diskState struct {
+	mu    sync.Mutex
+	known bool
+	free  int64
+}
+
+func (d *diskState) set(free int64) (wasLow bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	wasLow = d.known && d.free < dockerbox.LowDisk
+	d.known, d.free = true, free
+	return wasLow
+}
+
+func (d *diskState) low() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.known && d.free < dockerbox.LowDisk
+}
+
+// note is what a blocked ticket says about the disk: nothing while there
+// is room, so that a note about it always means something.
+func (d *diskState) note() string {
+	if !d.low() {
+		return ""
+	}
+	d.mu.Lock()
+	free := d.free
+	d.mu.Unlock()
+	return lowDiskText(free)
+}
+
+// lowDiskText says that the engine's disk is nearly full, and what to do.
+func lowDiskText(free int64) string {
+	return fmt.Sprintf("The container engine on this machine is nearly out of disk space (%s free), so builds, "+
+		"the sandbox and CI that runs here fail with \"no space left on device\". "+
+		"`docker system df` shows what takes the room; `maestro cleanup` and `docker builder prune -a` free it.",
+		cleanup.Size(free))
+}
+
+// watchDisk reads the engine's free space now and then. When it gets low,
+// the service says so once, in the log and to the owner, and the build
+// cache goes at once; it says so again only after there was room again.
+func (s *sweeper) watchDisk(ctx context.Context, tell func(string)) {
+	if s.dbox == nil {
+		return
+	}
+	t := time.NewTimer(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		t.Reset(diskEvery)
+		c, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		free, err := s.dbox.FreeSpace(c)
+		cancel()
+		if err != nil && !errors.Is(err, dockerbox.ErrNoSpace) {
+			s.log.Debug("free disk space not read", "error", err)
+			continue
+		}
+		wasLow := s.disk.set(free)
+		if free >= dockerbox.LowDisk || wasLow {
+			continue
+		}
+		s.log.Warn("the container engine is nearly out of disk space", "free", cleanup.Size(free))
+		if tell != nil {
+			tell(lowDiskText(free))
+		}
+		c, cancel = context.WithTimeout(ctx, 30*time.Minute)
+		if freed, err := s.dbox.PruneBuildCache(c, 0); err != nil {
+			s.log.Warn("build cache not pruned", "error", err)
+		} else if freed > 0 {
+			s.log.Info("build cache pruned", "freed", cleanup.Size(freed))
+		}
+		cancel()
+	}
+}
+
+// tidyAfterBuild removes what a new sandbox image replaced: the old image,
+// and the build cache that the new build did not use within a day. Each
+// rebuild otherwise leaves gigabytes behind, which on a Mac fill the
+// engine's disk until images fail to unpack.
+func tidyAfterBuild(ctx context.Context, box *dockerbox.Box, out io.Writer) {
+	var freed int64
+	if imgs, err := box.StaleImages(ctx); err == nil {
+		for _, img := range imgs {
+			_ = box.RemoveImage(ctx, img.ID)
+		}
+	}
+	n, err := box.PruneBuildCache(ctx, 24*time.Hour)
+	freed += n
+	if err != nil {
+		fmt.Fprintf(out, "The old build cache could not be removed: %s\n", plain(err.Error(), 300))
+		return
+	}
+	if freed > 0 {
+		fmt.Fprintf(out, "Removed %s of build cache that the new image does not need.\n", cleanup.Size(freed))
+	}
 }
 
 func (s *sweeper) deps() cleanup.Deps {
@@ -102,6 +215,15 @@ func (s *sweeper) deps() cleanup.Deps {
 				out = append(out, cleanup.Image{ID: img.ID, Name: name})
 			}
 			return out, err
+		}
+		d.PruneBuildCache = func(ctx context.Context) (int64, error) {
+			// Normally the cache of the last week stays, so rebuilds are
+			// quick. With the disk nearly full, all of it goes.
+			keep := cacheKeep
+			if s.disk.low() {
+				keep = 0
+			}
+			return s.dbox.PruneBuildCache(ctx, keep)
 		}
 		d.RemoveImage = func(ctx context.Context, id string) error {
 			err := s.dbox.RemoveImage(ctx, id)
@@ -283,7 +405,7 @@ func writeCleanup(w io.Writer, r cleanup.Report) {
 			fmt.Fprintln(w, line)
 		}
 		if freed > 0 {
-			fmt.Fprintf(w, "That is %s of audit files.\n", cleanup.Size(freed))
+			fmt.Fprintf(w, "That frees %s.\n", cleanup.Size(freed))
 		}
 	}
 	if len(r.Kept) > 0 {

@@ -181,6 +181,10 @@ func (p *Publisher) gitHub(owner, repo string) (*gitHub, error) {
 
 func (g *gitHub) gitURL() string { return g.web + "/" + g.owner + "/" + g.repo + ".git" }
 
+func (g *gitHub) checksPage(number int) string {
+	return g.web + "/" + g.owner + "/" + g.repo + "/pull/" + strconv.Itoa(number) + "/checks"
+}
+
 type pull struct {
 	Number int    `json:"number"`
 	State  string `json:"state"`

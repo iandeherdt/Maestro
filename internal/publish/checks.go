@@ -71,7 +71,7 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 	switch {
 	case len(failedNames) > 0:
 		st := orchestrator.CheckStatus{State: orchestrator.ChecksFailed,
-			Detail: fmt.Sprintf("%d required check(s) failed", len(failedNames))}
+			Detail: failedDetail(failedNames), Link: webLink(h.checksPage(rec.PRNumber))}
 		for _, n := range failedNames {
 			body := "The check " + clean(n, 100) + " failed."
 			if d := clean(strings.ReplaceAll(results[n].detail, "\n", " "), 1500); d != "" {
@@ -91,9 +91,34 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 			detail += ":\n" + strings.Join(waitingFor, "\n")
 		}
 		return orchestrator.CheckStatus{State: orchestrator.ChecksPending,
-			Detail: detail, NoneReported: len(results) == 0}, nil
+			Detail: detail, NoneReported: len(results) == 0, Link: webLink(h.checksPage(rec.PRNumber))}, nil
 	}
 	return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
+}
+
+// failedDetail names the checks that failed, so that a blocked ticket
+// says which check to look at. The names come from the repository's
+// workflows: they are cleaned here, and shown as quoted text.
+func failedDetail(names []string) string {
+	const shown = 10
+	list := make([]string, 0, min(len(names), shown))
+	for _, n := range names[:min(len(names), shown)] {
+		list = append(list, clean(n, 100))
+	}
+	text := fmt.Sprintf("%d required check(s) failed on the pull request: %s", len(names), strings.Join(list, ", "))
+	if len(names) > shown {
+		text += fmt.Sprintf(" and %d more", len(names)-shown)
+	}
+	return text
+}
+
+// webLink is u when it is a web address, and empty otherwise, such as for
+// a repository that is a local directory in tests.
+func webLink(u string) string {
+	if strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
+		return u
+	}
+	return ""
 }
 
 // MarkReady takes the pull request out of draft. A pull request that is
