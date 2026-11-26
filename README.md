@@ -758,6 +758,14 @@ maestro conventions enable typescript    # on every machine that runs agents for
 maestro image                            # once more, when the pack needs tools in the sandbox
 ```
 
+**After an update of Maestro** you do not copy anything by hand. When a newer version has other
+files for a pack that is switched on, the service opens a pull request **Update the rule packs**
+on the branch `maestro/packs` with exactly those files, a minute after it starts and then every
+six hours. Merge it to use them, or close it to keep yours: it is not opened again until a later
+version changes the files once more. CI workflows are the exception, because the service's App
+may not change them on purpose: the pull request lists any that differ, and
+`maestro conventions apply <pack> --replace` in a checkout brings them in.
+
 The rules end up in the repository as `conventions/<pack>/RULES.md`, so the agent can read what
 is expected and run the same checks while it works. Thresholds such as the coverage minimum are
 at the top of `conventions/<pack>/verify.sh`.
@@ -902,8 +910,9 @@ overlay canvases included, at 1280 by 720 (at most 6 scenes). To pick the scenes
 them in front of the command: `SHOT_SCENES=Assets/Scenes/Title.unity:Assets/Scenes/Level1.unity
 SHOT_WIDTH=1920 SHOT_HEIGHT=1080 sh conventions/unity/previews.sh`. The pictures are drawn with
 software OpenGL in the sandbox, so effects that need a real graphics card can look different.
-Run `maestro image` again after you upgrade, for the OpenGL drivers. Not yet run with a real
-licence.
+Run `maestro image` again after you upgrade, for the OpenGL drivers; the new scripts reach the
+repository by themselves, in the service's pull request that updates the packs. Not yet run with a
+real licence.
 
 Not yet run against Unity's servers: the activation, the package download in `prepare.sh` and the
 tests with a real licence. Git LFS is not supported yet: files kept in LFS arrive in the

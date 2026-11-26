@@ -81,7 +81,7 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 		if head == "" {
 			head = "maestro/GH-7-abc"
 		}
-		if r.URL.Query().Get("head") != "ian:"+head || r.URL.Query().Get("state") != "open" {
+		if r.URL.Query().Get("head") != "ian:"+head || (r.URL.Query().Get("state") != "open" && r.URL.Query().Get("state") != "all") {
 			w.WriteHeader(422)
 			return
 		}
