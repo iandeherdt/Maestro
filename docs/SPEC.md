@@ -3091,6 +3091,20 @@ that is switched on but not applied fails with an explanation.
 - `maestro conventions enable|disable <pack> [--file PATH]` edits the one line in the settings
   file. The changed file is validated with the startup code before it replaces the old one.
 
+### 23.4a Keeping the packs current
+
+The pack files are part of the binary, so an update of Maestro can change them. A minute after
+it starts, and every six hours after, the service fetches the base branch and compares, for every
+switched-on pack whose `RULES.md` the base branch has (a pack never applied there is skipped),
+each pack file with the repository's copy, and the pack's `.gitignore` lines with `.gitignore`.
+When they differ it writes exactly those files on top of the base branch in the mirror, without
+a working tree, as one commit by the bot identity dated like the base's head (the same files on
+the same base always give the same commit), pushes it to `<branch_prefix>packs` and opens or
+updates a pull request that names the files. Nothing else changes. A pull request the owner
+closed with the same head is not opened again. Files under `.github/workflows/` are never
+written, because the App has no right to change workflows; the pull request lists those that
+differ, with the command that brings them in by hand.
+
 ### 23.5 Limits
 
 - The agent's own network profile does not include package registries, so an agent cannot add a

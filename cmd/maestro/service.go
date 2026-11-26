@@ -860,9 +860,39 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	fmt.Fprintf(stdout, "From another terminal: %s, %s, %s.\n", mention("maestro status"), mention("maestro pause"), mention("maestro resume"))
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
+	go keepPacksCurrent(ctx, pub, log)
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
 	return nil
+}
+
+// keepPacksCurrent opens the pull request that brings the repository's
+// rule pack files up to this version, shortly after the start and then a
+// few times a day, so that an update of Maestro reaches the repository
+// without anyone copying files by hand.
+func keepPacksCurrent(ctx context.Context, pub *publish.Publisher, log *slog.Logger) {
+	t := time.NewTimer(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		u, err := pub.UpdatePacks(ctx)
+		switch {
+		case err != nil:
+			log.Warn("the rule pack files of the repository could not be brought up to date", "error", err)
+		case u.PRNumber > 0:
+			log.Info("opened a pull request with the newer rule pack files", "pr", u.PRNumber, "packs", u.Packs, "files", len(u.Files))
+		case u.Declined:
+			log.Info("the pull request with the newer rule pack files was closed; it is not opened again for the same files")
+		}
+		if len(u.ByHand) > 0 {
+			log.Warn("newer CI workflow files of the rule packs must be copied by hand: maestro conventions apply PACK --replace", "files", u.ByHand)
+		}
+		t.Reset(6 * time.Hour)
+	}
 }
 
 // oldProbe says what to do when the sandbox's maestro cannot run the
