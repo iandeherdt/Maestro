@@ -157,6 +157,11 @@ func TestTheUnityPacksScriptsRunWithTheEditorOfThisMachine(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, "Assets", "MaestroShots")); err == nil {
 		t.Error("the picture taker was left in the project")
 	}
+	// For pictures there is no xvfb-run shim, so that an env.sh of any
+	// version starts the Editor with the Mac's own graphics.
+	if _, err := os.Stat(filepath.Join(tmp, "checks", "GH-1", "service", "shim", "bin", "xvfb-run")); err == nil {
+		t.Error("the pictures got the xvfb-run shim")
+	}
 	// Only plain files with one name, in name order; a large one without
 	// its data; the folder is emptied before and after.
 	secret := filepath.Join(tmp, "secret.png")
