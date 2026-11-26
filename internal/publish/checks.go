@@ -91,7 +91,7 @@ func (p *Publisher) Check(ctx context.Context, rec orchestrator.PublishRecord) (
 			detail += ":\n" + strings.Join(waitingFor, "\n")
 		}
 		return orchestrator.CheckStatus{State: orchestrator.ChecksPending,
-			Detail: detail, NoneReported: len(results) == 0}, nil
+			Detail: detail, NoneReported: len(results) == 0, Link: webLink(h.checksPage(rec.PRNumber))}, nil
 	}
 	return orchestrator.CheckStatus{State: orchestrator.ChecksPassed}, nil
 }
