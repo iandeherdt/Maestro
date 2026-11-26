@@ -876,7 +876,7 @@ cannot skip; pick the ones that fit the project.
 
 | Pack | For | Needs a licence | The agent can |
 |---|---|---|---|
-| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks |
+| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks, which the agent can ask for while it works (`MAESTRO_STATUS: check`) and get the output and the screenshots back |
 | `godot` | A Godot 4 project in GDScript | No | write GDScript, scenes and resources as text, run Godot, the linter and the tests itself |
 | `blender` | 3D models made by Python scripts | No | write a generator, build it, look at its render |
 | `klad` | 2D art painted with klad | No | paint through klad's commands, export, look at the picture |

@@ -9,6 +9,7 @@ import (
 
 	"github.com/iandeherdt/Maestro/internal/config"
 	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/worker"
 	"github.com/iandeherdt/Maestro/internal/workspace"
 )
 
@@ -71,5 +72,24 @@ func TestCurrentPicturesThatFailCarryTheNote(t *testing.T) {
 	cur := g.Current(ctx, workspace.Workspace{Key: "GH-1-design"})
 	if len(cur.Files) != 0 || cur.Note == "" {
 		t.Fatalf("%+v", cur)
+	}
+}
+
+func TestThePicturesOfACheckAreGivenToTheAgent(t *testing.T) {
+	l := newLocal(t)
+	g := l.gates(config.Screenshots{})
+	dir := filepath.Join(filepath.Dir(l.repo), CheckDir)
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "old.png"), []byte("x"), 0o644)
+	shots := []worker.Screenshot{{Caption: "1-Main", PNG: picture(4, 4)}, {Caption: "2-Level", PNG: picture(5, 5)}}
+	files, note := g.GiveCheckPictures(ctx, workspace.Workspace{Key: "GH-1"}, shots)
+	if note != "" || len(files) != 2 || files[1] != (worker.CurrentFile{Caption: "2-Level", Path: "../" + CheckDir + "/2.png"}) {
+		t.Fatalf("%+v, %q", files, note)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "2.png")); !bytes.Equal(got, shots[1].PNG) {
+		t.Fatal("the picture was not written")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old.png")); !os.IsNotExist(err) {
+		t.Fatal("an old file is still there")
 	}
 }

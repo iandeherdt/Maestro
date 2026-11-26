@@ -137,6 +137,15 @@ type CurrentPictures interface {
 	Current(ctx context.Context, ws workspace.Workspace) CurrentState
 }
 
+// CheckPictures is an optional part of the gates: it puts the pictures of
+// a check the agent asked for where the agent can open them (SPEC 13.6).
+type CheckPictures interface {
+	GiveCheckPictures(ctx context.Context, ws workspace.Workspace, shots []Screenshot) ([]CurrentFile, string)
+}
+
+// MaxChecks is how many checks the agent may ask for in one attempt.
+const MaxChecks = 8
+
 // CurrentState is what Current took and where the agent finds it.
 type CurrentState struct {
 	Shots []Screenshot
@@ -297,10 +306,10 @@ func failed(category string, err error) orchestrator.Outcome {
 	return out
 }
 
-var statusRE = regexp.MustCompile(`(?m)^[ \t]*MAESTRO_STATUS:[ \t]*(done|continue|blocked)[ \t]*\r?$`)
+var statusRE = regexp.MustCompile(`(?m)^[ \t]*MAESTRO_STATUS:[ \t]*(done|continue|blocked|check)[ \t]*\r?$`)
 
 // DeclaredStatus reads the agent's status from its final message: the last
-// line of the form "MAESTRO_STATUS: done|continue|blocked". No such line
+// line of the form "MAESTRO_STATUS: done|continue|blocked|check". No such line
 // means done.
 func DeclaredStatus(resultText string) string {
 	m := statusRE.FindAllStringSubmatch(resultText, -1)
@@ -376,6 +385,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	sessionReset := false
 	var lastVerify *prompt.Verify
 	verified := false // the check ran once this attempt
+	checks := 0       // checks the agent asked for
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
 			return orchestrator.Outcome{Kind: orchestrator.Normal}
@@ -473,6 +483,36 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 			sink.Event(orchestrator.Event{Kind: "notification", Message: "The agent stopped without seeing the check fail. The check ran and its output goes back to the agent."})
 			reason = prompt.ReasonVerifyFailed
 			lastVerify = &prompt.Verify{ExitStatus: v.ExitStatus, OutputTail: v.OutputTail}
+			continue
+		}
+		if status == "check" && turn < maxTurns {
+			// The agent asks for the checks it cannot run where it works
+			// (SPEC 13.6): the service runs them, as before publishing, and
+			// the output and the pictures go back in the next turn. Nothing
+			// is published.
+			if checks >= MaxChecks {
+				reason, lastVerify = prompt.ReasonCheckLimit, nil
+				continue
+			}
+			checks++
+			verified = true
+			phase(orchestrator.Verifying)
+			sink.Event(orchestrator.Event{Kind: "notification", Message: "The agent asked for the checks. They run on its committed work, and the result goes back to it."})
+			v, err := w.Gates.Verify(ctx, ws)
+			if err != nil {
+				return failed(VerifyError, err)
+			}
+			lastVerify = &prompt.Verify{ExitStatus: v.ExitStatus, OutputTail: v.OutputTail, Passed: v.Passed, PictureNote: v.ScreenshotNote}
+			if cp, ok := w.Gates.(CheckPictures); ok && len(v.Screenshots) > 0 {
+				files, note := cp.GiveCheckPictures(ctx, ws, v.Screenshots)
+				for _, f := range files {
+					lastVerify.Pictures = append(lastVerify.Pictures, prompt.DesignPicture{Caption: f.Caption, Path: f.Path})
+				}
+				if note != "" {
+					lastVerify.PictureNote = note
+				}
+			}
+			reason = prompt.ReasonCheck
 			continue
 		}
 		if exp.NoChanges || status == "continue" {

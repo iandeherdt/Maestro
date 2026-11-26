@@ -304,10 +304,11 @@ func TestDeclaredStatusParsing(t *testing.T) {
 		"no marker":                         "done",
 		"MAESTRO_STATUS: continue":          "continue",
 		"x\n  MAESTRO_STATUS: blocked  \ny": "blocked",
-		"MAESTRO_STATUS: continue\nlater\nMAESTRO_STATUS: done": "done",
-		"I would say MAESTRO_STATUS: blocked here":              "done", // not on its own line
-		"MAESTRO_STATUS: published":                             "done", // not a known value
-		"MAESTRO_STATUS: done\r\n":                              "done",
+		"Changed it.\nMAESTRO_STATUS: check\nI cannot run Unity.": "check",
+		"MAESTRO_STATUS: continue\nlater\nMAESTRO_STATUS: done":   "done",
+		"I would say MAESTRO_STATUS: blocked here":                "done", // not on its own line
+		"MAESTRO_STATUS: published":                               "done", // not a known value
+		"MAESTRO_STATUS: done\r\n":                                "done",
 	} {
 		if got := DeclaredStatus(text); got != want {
 			t.Errorf("%q: %s, want %s", text, got, want)
@@ -589,5 +590,73 @@ func TestCommentsOnThePullRequestReachTheAgent(t *testing.T) {
 	r.w.Notes = notes{err: errors.New("github is down")}
 	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Failed || out.Category != RefreshError || len(r.f.prompts) != 0 {
 		t.Fatalf("outcome = %+v, %d prompts", out, len(r.f.prompts))
+	}
+}
+
+// checkGates adds the pictures of a check to the fakes.
+type checkGates struct {
+	*fakes
+	given int
+}
+
+func (c *checkGates) Verify(ctx context.Context, ws workspace.Workspace) (VerifyResult, error) {
+	v, err := c.fakes.Verify(ctx, ws)
+	if v.Passed {
+		v.Screenshots = []Screenshot{{Caption: "1-Main", PNG: []byte("png")}}
+	}
+	return v, err
+}
+
+func (c *checkGates) GiveCheckPictures(_ context.Context, ws workspace.Workspace, shots []Screenshot) ([]CurrentFile, string) {
+	c.given++
+	return []CurrentFile{{Caption: shots[0].Caption, Path: "../check-screenshots/1.png"}}, ""
+}
+
+// The agent asks for the checks it cannot run where it works: they run,
+// nothing is published, and the output and the pictures go back to it.
+func TestTheAgentAsksForTheChecks(t *testing.T) {
+	r := newRig(t,
+		script{text: "Changed the shader.\nMAESTRO_STATUS: check\nI cannot run Unity here."},
+		script{text: "Fixed the test.\nMAESTRO_STATUS: check\nLet me see it.", verifyOK: true},
+		script{text: "Looks right.\nMAESTRO_STATUS: done", verifyOK: true})
+	r.cfg.Agent.MaxTurns = 5
+	g := &checkGates{fakes: r.f}
+	r.w.Gates = g
+	out := r.run(orchestrator.Attempt{})
+	if out.Kind != orchestrator.Published || r.f.publishes != 1 || r.f.verifies != 3 || g.given != 1 {
+		t.Fatalf("outcome %+v, publishes %d, verifies %d, given %d", out, r.f.publishes, r.f.verifies, g.given)
+	}
+	second, third := r.f.prompts[1].Prompt, r.f.prompts[2].Prompt
+	if !strings.Contains(second, "failed with exit status 1") || !strings.Contains(second, "FAIL TestLogin") || !strings.Contains(second, "Nothing was published") {
+		t.Fatalf("after a failed check:\n%s", second)
+	}
+	if !strings.Contains(third, "passed") || !strings.Contains(third, "- ../check-screenshots/1.png: 1-Main") {
+		t.Fatalf("after a passing check:\n%s", third)
+	}
+	if !strings.Contains(r.f.prompts[0].Prompt, `"MAESTRO_STATUS: check"`) {
+		t.Fatal("the first prompt does not tell the agent about checks")
+	}
+}
+
+// On the last turn a check is the end of the work: it is verified and
+// published as with done. Past the limit, the checks do not run again.
+func TestChecksOnTheLastTurnAndPastTheLimit(t *testing.T) {
+	r := newRig(t, script{text: "MAESTRO_STATUS: check"}, script{text: "MAESTRO_STATUS: check"}, script{text: "MAESTRO_STATUS: check", verifyOK: true})
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || r.f.verifies != 3 {
+		t.Fatalf("outcome %+v, verifies %d", out, r.f.verifies)
+	}
+
+	var turns []script
+	for i := 0; i < MaxChecks+1; i++ {
+		turns = append(turns, script{text: "MAESTRO_STATUS: check"})
+	}
+	turns = append(turns, script{text: "MAESTRO_STATUS: done", verifyOK: true})
+	r = newRig(t, turns...)
+	r.cfg.Agent.MaxTurns = int64(len(turns))
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || r.f.verifies != MaxChecks+1 {
+		t.Fatalf("outcome %+v, verifies %d", out, r.f.verifies)
+	}
+	if p := r.f.prompts[MaxChecks+1].Prompt; !strings.Contains(p, "did not run again") {
+		t.Fatalf("past the limit:\n%s", p)
 	}
 }
