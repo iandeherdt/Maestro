@@ -65,8 +65,12 @@ type Deps struct {
 	// nil. An error skips dispatch for that tick; reconciliation still
 	// runs, with the last good configuration.
 	Preflight func() (*config.Config, error)
-	Clock     Clock
-	Log       *slog.Logger
+	// Notify is optional. It tells the owner about a moment that needs
+	// them, such as a chat on their phone. It must not block. Text after
+	// the first line may come from the agent.
+	Notify func(is issue.Issue, text string)
+	Clock  Clock
+	Log    *slog.Logger
 }
 
 type runEntry struct {
@@ -644,6 +648,13 @@ func (o *Orchestrator) comment(ctx context.Context, is issue.Issue, fixed, untru
 	}
 }
 
+// tell sends a notice to the owner, when the service has a way to.
+func (o *Orchestrator) tell(is issue.Issue, text string) {
+	if o.d.Notify != nil {
+		o.d.Notify(is, text)
+	}
+}
+
 // ---- retries --------------------------------------------------------------
 
 func (o *Orchestrator) delay(r *RetryEntry) time.Duration {
@@ -982,10 +993,17 @@ func (o *Orchestrator) proposed(ctx context.Context, e *runEntry, p *plan.Plan) 
 	if len(p.Tasks) == 0 {
 		o.comment(ctx, is, "The planning agent has questions. They are in a comment below. Answer them, then move the card back to "+
 			o.cfg.Tracker.PlanningState+".", "")
+		o.tell(is, "The planning agent has questions:\n\n"+p.Questions)
 		return
 	}
 	o.comment(ctx, is, fmt.Sprintf("A plan with %d task(s) is in a comment below. Move the card to %s to approve it, or comment and move it back to %s.",
 		len(p.Tasks), o.cfg.Tracker.PlannedState, o.cfg.Tracker.PlanningState), "")
+	var b strings.Builder
+	fmt.Fprintf(&b, "A plan with %d task(s) is ready. Move the card to %s to approve it.\n", len(p.Tasks), o.cfg.Tracker.PlannedState)
+	for i, t := range p.Tasks {
+		fmt.Fprintf(&b, "\n%d. %s", i+1, t.Title)
+	}
+	o.tell(is, b.String())
 }
 
 // designing reports whether the issue is an idea to make a design for
@@ -1014,7 +1032,9 @@ func (o *Orchestrator) designed(ctx context.Context, e *runEntry, d *plan.Design
 		o.d.Log.Warn("design not recorded", "issue", is.Identifier, "error", err)
 		o.comment(ctx, is, fmt.Sprintf("The design is in pull request #%d, but this machine could not record it. Move the card back to %s to try again.",
 			d.PRNumber, o.cfg.Tracker.DesignState), "")
+		return
 	}
+	o.tell(is, fmt.Sprintf("The design is ready to look at in pull request #%d.", d.PRNumber))
 }
 
 // watchDesign looks at the design pull request of an idea that waits for
@@ -1131,6 +1151,7 @@ func (o *Orchestrator) finishIdea(ctx context.Context, is issue.Issue) {
 		return
 	}
 	o.comment(ctx, is, fmt.Sprintf("All %d task(s) of the plan are done, so this idea is done too.", n), "")
+	o.tell(is, fmt.Sprintf("All %d task(s) of the plan are done, so this idea is done too.", n))
 }
 
 // designDone tidies up after the tasks of a plan with a design were
@@ -1296,6 +1317,7 @@ func (o *Orchestrator) watchChecks(ctx context.Context) {
 			o.d.Budget.ClearIssue(id)
 			o.persist()
 			o.comment(ctx, is, fmt.Sprintf("Pull request #%d passed its required checks and is ready for review.", rec.PRNumber), "")
+			o.tell(is, fmt.Sprintf("Pull request #%d passed its checks and is ready for your review.", rec.PRNumber))
 			o.dropAwaiting(id)
 			o.release(id)
 		case ChecksFailed:
@@ -1387,6 +1409,7 @@ func (o *Orchestrator) watchHandoff(ctx context.Context) {
 			}
 			o.cleanup(ctx, is)
 			o.comment(ctx, is, fmt.Sprintf("Pull request #%d was merged.", st.PRNumber), "")
+			o.tell(is, fmt.Sprintf("Pull request #%d was merged.", st.PRNumber))
 			delete(o.closedNoted, is.ID)
 			o.baseMoved()
 		case ReviewClosed:
@@ -1500,6 +1523,14 @@ func (o *Orchestrator) block(ctx context.Context, is issue.Issue, reason, detail
 	o.persist()
 	text := o.blockLead(reason) + " Move the card back to an active state to retry with a fresh budget."
 	o.comment(ctx, is, text, detail)
+	note := text
+	if detail != "" {
+		if r := []rune(detail); len(r) > 1500 {
+			detail = string(r[len(r)-1500:])
+		}
+		note += "\n\n" + detail
+	}
+	o.tell(is, note)
 	// The status comment is edited in place, so it stays where it was
 	// first posted and the edit notifies no one. The reason also goes in a
 	// new comment, below the others, where the owner looks.

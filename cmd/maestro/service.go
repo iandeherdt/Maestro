@@ -747,6 +747,7 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	if err != nil {
 		return err
 	}
+	chat, chatToken := in.telegramBot(ctx, log)
 	pub := &publish.Publisher{
 		Config: cur.config, Mirror: mir, HandoffDir: in.handoffDir, Token: code.Token,
 		HeldSecrets: func() []string {
@@ -758,6 +759,9 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			}
 			if linearKey != "" {
 				held = append(held, linearKey)
+			}
+			if chatToken != "" {
+				held = append(held, chatToken)
 			}
 			return held
 		},
@@ -801,8 +805,13 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 			wk.Designing, designs = desk, desk
 		}
 	}
+	var notify func(issue.Issue, string)
+	if chat != nil {
+		notify = func(is issue.Issue, text string) { chat.Notify(is.Identifier, text) }
+	}
 	orch := orchestrator.New(cur.config(), orchestrator.Deps{
 		Tracker: trk, Worker: wk, Workspaces: spaces, Budget: store, Checks: pub, Reviews: pub, Updater: pub, Plans: plans, Designs: designs, Log: log,
+		Notify: notify,
 		Preflight: func() (*config.Config, error) {
 			l, err := in.source.Check()
 			if l == nil {
@@ -867,6 +876,14 @@ func serve(ctx context.Context, in *install, gh endpoints, log *slog.Logger, std
 	fmt.Fprintf(stdout, "Status page in a browser on this machine: http://%s/\n", srv.Addr())
 	fmt.Fprintln(stdout, "Stop with Ctrl-C. Running agents are stopped; their work so far stays in the workspace.")
 	go keepPacksCurrent(ctx, pub, log)
+	if chat != nil {
+		chat.Status = func() string { return telegramStatus(orch) }
+		if in.dbox != nil {
+			chat.Talk = &chatTalker{in: in, orch: orch}
+		}
+		go chat.Run(ctx)
+		fmt.Fprintln(stdout, "Telegram: notices go to your linked chat; reply there to talk to an agent.")
+	}
 	orch.Run(ctx)
 	fmt.Fprintln(stdout, "Stopped.")
 	return nil

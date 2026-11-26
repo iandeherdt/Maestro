@@ -1523,6 +1523,34 @@ agent talked there, and the file is removed once a turn has used it. If the sess
 the run starts afresh as in Section 10.2. Changes made in a session reach a pull request only
 through the export, policy and verify gates, as the agent's do.
 
+### 11.11 The Owner's Chat
+
+An installation may have a Telegram bot (`maestro telegram`). Its token is kept in
+`<setup dir>/telegram.token` and the linked chat in `<setup dir>/telegram.json`, both mode 0600.
+Linking takes a six-digit one-time code that the owner sends to the bot from a private chat; five
+messages without the code end the attempt. Storing a new token removes the link. The token is
+added to the secrets the publish scan refuses.
+
+The service long-polls `getUpdates`; it opens no port. It acts only on a message whose chat is
+private, whose chat id and sender id are the linked ones, and whose sender is not a bot; any other
+message is dropped without an answer and logged once per sender. Everything it sends is plain
+text without a parse mode or link previews.
+
+The orchestrator calls an optional, non-blocking `Notify` with the issue and a fixed sentence when
+a planning run asks questions (followed by the questions) or proposes a plan (followed by the task
+titles), a design is published, a pull request passes its checks, a ticket is blocked (followed by
+at most the last 1500 characters of the detail), a pull request is merged, and an idea is done.
+Text after the first sentence comes from the agent or a tool. Each message starts with the
+issue's identifier, so that a reply to it names the ticket; only the identifier at the start of a
+message sent by a bot counts.
+
+A message for a ticket runs one turn of `maestro talk` without a terminal: the same container
+and view as Section 11.10, `claude --print --output-format json` with the owner's text on stdin,
+at most 15 minutes, one turn at a time. It refuses while a container of the workspace runs or the
+service works on the ticket. The resulting session id is saved as the owner's pending conversation,
+which the ticket's next run resumes. The chat never changes the board: the planning state and the
+first active state stay the owner's to set.
+
 ## 12. Issue Tracker Integration Contract
 
 The tracker boundary is a portable read kernel for scheduling plus a small, fixed set of writes

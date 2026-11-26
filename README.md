@@ -558,6 +558,30 @@ card as usual) continues the same conversation, so the plan it posts takes what 
 account. Both commands need the container sandbox. Nothing of this machine is mounted, and what
 you change in the workspace goes through the same checks as the agent's work.
 
+### From your phone: `maestro telegram`
+
+Maestro can tell you in Telegram when something needs you, and let you talk to an agent from
+there, the way `maestro talk` does on a terminal:
+
+1. In Telegram, talk to [@BotFather](https://t.me/BotFather), send `/newbot` and pick a name.
+2. `maestro telegram token`, and paste the token BotFather gave you.
+3. `maestro telegram link`, and send the bot the code it shows (or open the link it prints).
+4. `maestro restart`.
+
+The bot then messages you when an idea has questions or a plan, a design or pull request is
+ready, a ticket is blocked, and when work is merged or an idea is done. Reply to one of its
+messages to talk to the agent of that ticket: one turn of Claude Code in the ticket's sandbox,
+continuing the agent's own conversation, with the agent's login, network and restrictions. The
+next run on the ticket continues that conversation, so for an idea, move the card back to
+planning once you have talked it through. `/talk GH-12 text` and `/new GH-12 text` start or
+restart a conversation, and `/status` shows what runs now.
+
+The bot answers the one private chat that sent the code, and ignores everyone else without a
+word. It never moves cards: approving stays on the board. The service polls Telegram, so nothing
+on this machine listens for connections, and the token stays in the setup folder, readable by
+you only; it never reaches the agent, and the secret scan refuses work that holds it. Each
+project needs its own bot. Talking needs the container sandbox; notices work with both.
+
 ### Watching the agents: `maestro dashboard`
 
 `maestro dashboard` opens the service's status page in the browser. It refreshes every few

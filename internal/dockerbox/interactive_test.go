@@ -132,3 +132,23 @@ func TestWorkspacesAndRunning(t *testing.T) {
 		t.Errorf("%+v", cs)
 	}
 }
+
+func TestBatchHasTheAgentsViewWithoutATerminal(t *testing.T) {
+	b, log := fakeDocker(t, "maestro-w1-ws-GH-12")
+	code, err := b.Batch(ctx, Session{Key: "GH-12", View: ViewAgent, Argv: []string{"claude", "--print"}},
+		strings.NewReader("hello"), new(strings.Builder), new(strings.Builder))
+	if err != nil || code != 0 {
+		t.Fatalf("code %d err %v", code, err)
+	}
+	run := runLine(t, log)
+	for _, bad := range []string{"--tty", "TERM=", "/unity-licence"} {
+		if strings.Contains(run, bad) {
+			t.Errorf("%q in %s", bad, run)
+		}
+	}
+	for _, want := range []string{"--interactive", "--user 10001:10001", "--cap-drop ALL", "--network maestro-w1-agent", "--label maestro.workspace=GH-12"} {
+		if !strings.Contains(run, want) {
+			t.Errorf("%q not in %s", want, run)
+		}
+	}
+}
