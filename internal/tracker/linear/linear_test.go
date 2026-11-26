@@ -34,6 +34,7 @@ type fakeLinear struct {
 
 type fIssue struct {
 	li        lnIssue
+	parent    string
 	history   []historyEntry
 	blockedBy []struct {
 		id, identifier, stateType string
@@ -230,6 +231,14 @@ func (f *fakeLinear) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.writes = append(f.writes, "comment:update")
 		data = map[string]any{"commentUpdate": map[string]any{"success": true}}
+	case strings.Contains(q, "children("):
+		var nodes []any
+		for _, id := range sortedIDs(f.issues) {
+			if f.issues[id].parent == v["id"] {
+				nodes = append(nodes, map[string]string{"id": id})
+			}
+		}
+		data = map[string]any{"issue": page("children", nodes)}
 	case strings.Contains(q, "issue(id"):
 		fi := f.issues[v["id"].(string)]
 		if fi == nil {
@@ -441,6 +450,18 @@ func TestFeedbackOnlyFromAllowlistedPeople(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Body != "please also" || got[0].Author != "ian@example.com" {
 		t.Errorf("feedback = %+v", got)
+	}
+}
+
+func TestSubIssueIDs(t *testing.T) {
+	f, a := setup(t)
+	f.add(1, ian, "Planned")
+	f.add(2, ian, "Todo").parent = "id-1"
+	f.add(3, ian, "Done").parent = "id-1"
+	f.add(4, ian, "Todo")
+	ids, err := a.SubIssueIDs(context.Background(), issue.Issue{ID: "id-1", Identifier: "ENG-1"})
+	if err != nil || strings.Join(ids, ",") != "id-2,id-3" {
+		t.Fatalf("got %v, %v", ids, err)
 	}
 }
 

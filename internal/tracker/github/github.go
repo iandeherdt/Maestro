@@ -389,8 +389,13 @@ func (a *Adapter) wroteRecently(number int) bool {
 	return true
 }
 
-// FetchIssuesByIDs returns current snapshots of issues this adapter has
-// returned before. An issue that no longer exists is omitted.
+// FetchIssuesByIDs returns current snapshots of issues. An issue that no
+// longer exists, or was moved to another repository, is omitted.
+//
+// An ID this adapter has not seen since it started is looked up by its
+// node ID. Leaving it out instead would report an open task as deleted
+// after every restart, and an idea whose tasks all looked deleted was
+// moved to Done while they were still open.
 func (a *Adapter) FetchIssuesByIDs(ctx context.Context, ids []string) ([]issue.Issue, error) {
 	var out []issue.Issue
 	for _, id := range ids {
@@ -398,7 +403,12 @@ func (a *Adapter) FetchIssuesByIDs(ctx context.Context, ids []string) ([]issue.I
 		n, ok := a.numbers[id]
 		a.mu.Unlock()
 		if !ok {
-			continue
+			var err error
+			if n, err = a.numberOfNode(ctx, id); errors.Is(err, errNotFound) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
 		}
 		gi, card, err := a.read(ctx, n)
 		if errors.Is(err, errNotFound) {
@@ -418,6 +428,33 @@ func (a *Adapter) FetchIssuesByIDs(ctx context.Context, ids []string) ([]issue.I
 		out = append(out, is)
 	}
 	return out, nil
+}
+
+const nodeQuery = `query($id: ID!) { node(id: $id) { __typename ... on Issue { number repository { nameWithOwner } } } }`
+
+// numberOfNode finds the number of an issue of this repository by its node
+// ID. errNotFound means there is no such issue here any more.
+func (a *Adapter) numberOfNode(ctx context.Context, id string) (int, error) {
+	if strings.TrimSpace(id) == "" {
+		return 0, errNotFound
+	}
+	var res struct {
+		Node *struct {
+			Typename   string `json:"__typename"`
+			Number     int    `json:"number"`
+			Repository struct {
+				NameWithOwner string `json:"nameWithOwner"`
+			} `json:"repository"`
+		} `json:"node"`
+	}
+	if err := a.c.graphql(ctx, nodeQuery, map[string]any{"id": id}, &res, false); err != nil {
+		return 0, err
+	}
+	nd := res.Node
+	if nd == nil || nd.Typename != "Issue" || nd.Number <= 0 || !strings.EqualFold(nd.Repository.NameWithOwner, a.owner+"/"+a.repo) {
+		return 0, errNotFound
+	}
+	return nd.Number, nil
 }
 
 // read returns the current record of one issue and, on a board, its card.

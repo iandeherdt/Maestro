@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -204,3 +205,33 @@ func (a *Adapter) UnmarkWorking(ctx context.Context, is issue.Issue, label strin
 }
 
 var _ tracker.Activity = (*Adapter)(nil)
+
+// SubIssueIDs lists the sub-issues of an issue. A repository without
+// sub-issues has none.
+func (a *Adapter) SubIssueIDs(ctx context.Context, parent issue.Issue) ([]string, error) {
+	pn, err := numberOf(parent)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	err = a.c.list(ctx, a.path("/issues/%d/sub_issues", pn), nil, func(page json.RawMessage) error {
+		var subs []ghIssue
+		if err := json.Unmarshal(page, &subs); err != nil {
+			return terr(tracker.Response, "sub-issue list is not an array")
+		}
+		for _, gi := range subs {
+			if gi.NodeID == "" || gi.Number <= 0 {
+				continue
+			}
+			a.mu.Lock()
+			a.numbers[gi.NodeID] = gi.Number
+			a.mu.Unlock()
+			ids = append(ids, gi.NodeID)
+		}
+		return nil
+	})
+	if errors.Is(err, errNotFound) {
+		return nil, nil
+	}
+	return ids, err
+}

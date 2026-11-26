@@ -113,6 +113,14 @@ type Planner interface {
 	AddBlocker(ctx context.Context, task, blocker TaskRef) error
 }
 
+// SubIssues is implemented by adapters that can list the sub-issues of a
+// ticket. An idea is finished only when these are done too, including
+// sub-issues the owner added by hand.
+type SubIssues interface {
+	// SubIssueIDs returns the IDs of the ticket's sub-issues, open or not.
+	SubIssueIDs(ctx context.Context, parent issue.Issue) ([]string, error)
+}
+
 // MaxUntrustedChars caps text from the agent or a tool inside a comment.
 const MaxUntrustedChars = 2000
 

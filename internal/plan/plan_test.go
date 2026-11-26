@@ -315,6 +315,30 @@ func TestFinishedOnceEveryTaskIsDone(t *testing.T) {
 	}
 }
 
+// A sub-issue the owner added to the idea by hand keeps it open too.
+func TestFinishedWaitsForEverySubIssue(t *testing.T) {
+	d, f := desk(t)
+	d.TerminalStates = []string{"Done"}
+	p, _ := Parse(twoTasks, workers)
+	if err := d.Propose(ctx, idea, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Materialize(ctx, idea); err != nil {
+		t.Fatal(err)
+	}
+	f.Put(issue.Issue{ID: "task-1", State: "Done"})
+	f.Put(issue.Issue{ID: "task-2", State: "Done"})
+	f.Put(issue.Issue{ID: "extra", State: "Todo"})
+	f.Subs = map[string][]string{idea.ID: {"task-1", "extra", "task-2"}}
+	if done, n, err := d.Finished(ctx, idea); done || n != 3 || err != nil {
+		t.Fatalf("a sub-issue is open: %v %d %v", done, n, err)
+	}
+	f.Put(issue.Issue{ID: "extra", State: "Done"})
+	if done, n, err := d.Finished(ctx, idea); !done || n != 3 || err != nil {
+		t.Fatalf("every sub-issue done: %v %d %v", done, n, err)
+	}
+}
+
 // Every task of a plan goes to the machine the idea was given to.
 func TestBriefOffersOnlySelf(t *testing.T) {
 	d, f := desk(t)

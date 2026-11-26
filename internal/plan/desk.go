@@ -225,20 +225,38 @@ func (d *Desk) Materialize(ctx context.Context, is issue.Issue) (string, error) 
 }
 
 // Finished reports whether every task of the approved plan of an idea is
-// done, so that the idea itself can be moved to Done. It also returns the
-// number of tasks. A task that is no longer visible, for example because
-// it was deleted, counts as done: it cannot be finished any more.
+// done, so that the idea itself can be moved to Done. The idea's other
+// sub-issues, such as ones the owner added by hand, must be done too. It
+// also returns the number of tasks. A task that is no longer visible, for
+// example because it was deleted, counts as done: it cannot be finished
+// any more.
 func (d *Desk) Finished(ctx context.Context, is issue.Issue) (bool, int, error) {
 	rec, err := d.Store.Load(is.ID)
 	if err != nil || rec == nil || !rec.Done || len(rec.Progress) == 0 {
 		return false, 0, err
 	}
 	ids := make([]string, 0, len(rec.Progress))
+	seen := map[string]bool{}
 	for _, p := range rec.Progress {
 		if p.Ref.ID == "" {
 			return false, 0, nil
 		}
-		ids = append(ids, p.Ref.ID)
+		if !seen[p.Ref.ID] {
+			seen[p.Ref.ID] = true
+			ids = append(ids, p.Ref.ID)
+		}
+	}
+	if s, ok := d.Planner.(tracker.SubIssues); ok {
+		subs, err := s.SubIssueIDs(ctx, is)
+		if err != nil {
+			return false, 0, err
+		}
+		for _, id := range subs {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
 	}
 	tasks, err := d.Tracker.FetchIssuesByIDs(ctx, ids)
 	if err != nil {
