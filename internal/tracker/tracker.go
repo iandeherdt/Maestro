@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iandeherdt/Maestro/internal/issue"
+	"github.com/iandeherdt/Maestro/internal/ticketimage"
 )
 
 // Error categories (SPEC 12.4).
@@ -188,4 +189,14 @@ type Lookup interface {
 	// LookupIdentifier reads the ticket. found is false when the board has
 	// no such ticket in scope (any more).
 	LookupIdentifier(ctx context.Context, identifier string) (is issue.Issue, found bool, err error)
+}
+
+// Images is implemented by adapters that can download the pictures people
+// put on a ticket: in its description, and in the comments of allowlisted
+// commenters (SPEC 13.5). The agent cannot download them itself, because
+// that takes the service's credentials.
+type Images interface {
+	// TicketImages downloads them, oldest first. Pictures that could not
+	// be downloaded are counted in the note, not an error.
+	TicketImages(ctx context.Context, is issue.Issue) (ticketimage.Result, error)
 }

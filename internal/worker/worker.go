@@ -9,7 +9,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/iandeherdt/Maestro/internal/orchestrator"
 	"github.com/iandeherdt/Maestro/internal/plan"
 	"github.com/iandeherdt/Maestro/internal/prompt"
+	"github.com/iandeherdt/Maestro/internal/ticketimage"
 	"github.com/iandeherdt/Maestro/internal/tracker"
 	"github.com/iandeherdt/Maestro/internal/workspace"
 )
@@ -140,6 +143,51 @@ type CurrentState struct {
 	Files []CurrentFile
 	// Note says in the service's words why there are fewer or none.
 	Note string
+}
+
+// TicketPictures is an optional part of the gates: it puts the pictures
+// on the ticket where the agent can open them (SPEC 13.5).
+type TicketPictures interface {
+	// TicketImages replaces the pictures in the workspace with imgs and
+	// returns their paths from the repository, in order. ok is false when
+	// not all of them could be written.
+	TicketImages(ctx context.Context, ws workspace.Workspace, imgs []ticketimage.Image) (paths []string, ok bool)
+}
+
+// ticketPictures downloads the ticket's pictures with the service's
+// credentials and gives them to the agent. It never fails the attempt:
+// without them the agent still has the text.
+func (w *Worker) ticketPictures(ctx context.Context, is issue.Issue, ws workspace.Workspace, sink orchestrator.Sink) ([]prompt.TicketPicture, string) {
+	src, ok := w.Tracker.(tracker.Images)
+	dst, ok2 := w.Gates.(TicketPictures)
+	if !ok || !ok2 {
+		return nil, ""
+	}
+	res, err := src.TicketImages(ctx, is)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ""
+		}
+		sink.Event(orchestrator.Event{Kind: "notification", Message: "The pictures on the ticket could not be downloaded: " + err.Error()})
+		return nil, "The pictures on the ticket, if it has any, could not be downloaded."
+	}
+	if len(res.Images) == 0 {
+		return nil, res.Note
+	}
+	paths, ok := dst.TicketImages(ctx, ws, res.Images)
+	note := res.Note
+	if !ok {
+		note = strings.TrimSpace(note + " Some pictures on the ticket could not be given to you.")
+	}
+	out := make([]prompt.TicketPicture, len(paths))
+	for i, p := range paths {
+		img := res.Images[i]
+		out[i] = prompt.TicketPicture{Path: p, Where: img.Where, Author: img.Author, At: img.At}
+	}
+	if len(out) > 0 {
+		sink.Event(orchestrator.Event{Kind: "notification", Message: fmt.Sprintf("%d picture(s) from the ticket given to the agent", len(out))})
+	}
+	return out, note
 }
 
 // CurrentFile is one picture of the current state as the agent sees it.
@@ -320,6 +368,8 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		feedback = append(feedback, notes...)
 	}
 
+	pics, picNote := w.ticketPictures(ctx, is, ws, sink)
+
 	maxTurns := int(cfg.Agent.MaxTurns)
 	sessionID, reason := w.conversation(ws.Key), ""
 	talked := sessionID != ""
@@ -336,6 +386,7 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 				Issue: is, Attempt: a.Number, RetryKind: a.RetryKind, Feedback: feedback,
 				WorkerName: cfg.Worker.Name, RepoName: cfg.Workspace.Repo,
 				BaseBranch: cfg.Workspace.BaseBranch, Branch: ws.Branch,
+				Pictures: pics, PictureNote: picNote,
 			})
 		}
 		var text string
@@ -483,8 +534,10 @@ func (w *Worker) plan(ctx context.Context, a orchestrator.Attempt, set Settings,
 	if err != nil {
 		return failed(PlanBriefError, err)
 	}
+	pics, picNote := w.ticketPictures(ctx, is, ws, sink)
 	first := func() (string, error) {
-		return set.Prompt.Planning(prompt.PlanInput{Issue: is, RepoName: cfg.Workspace.Repo, Workers: brief.Workers, History: brief.History})
+		return set.Prompt.Planning(prompt.PlanInput{Issue: is, RepoName: cfg.Workspace.Repo, Workers: brief.Workers, History: brief.History,
+			Pictures: pics, PictureNote: picNote})
 	}
 	maxTurns := int(cfg.Agent.MaxTurns)
 	sessionID, problem := w.conversation(ws.Key), ""

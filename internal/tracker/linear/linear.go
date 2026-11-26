@@ -71,6 +71,11 @@ type Adapter struct {
 	states  map[string]string // normalized state name -> id
 	backlog string            // a state of type backlog, where new tasks wait
 	cache   map[string]*cached
+
+	// imageHost and imageHTTP replace Linear's upload host and the
+	// download client in tests.
+	imageHost func(*url.URL) bool
+	imageHTTP *http.Client
 }
 
 type cached struct {

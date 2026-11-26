@@ -44,6 +44,9 @@ type fakeIssue struct {
 	updated  int
 	isPR     bool
 	nodeID   string
+	// bodyHTML and commentHTML are what the API renders, by comment id.
+	bodyHTML    string
+	commentHTML map[int64]string
 }
 
 // hub simulates the parts of the GitHub REST API the adapter uses.
@@ -239,7 +242,11 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case len(parts) == 2:
-		json.NewEncoder(w).Encode(h.wire(fi))
+		m := h.wire(fi)
+		if r.Header.Get("Accept") == mediaFull {
+			m["body_html"] = fi.bodyHTML
+		}
+		json.NewEncoder(w).Encode(m)
 	case parts[2] == "timeline":
 		var items []any
 		for _, e := range fi.events {
@@ -297,6 +304,11 @@ func (h *hub) serve(w http.ResponseWriter, r *http.Request) {
 	case parts[2] == "comments" && r.Method == http.MethodGet:
 		items := []any{}
 		for _, c := range fi.comments {
+			if r.Header.Get("Accept") == mediaFull {
+				items = append(items, map[string]any{"id": c.ID, "body": c.Body, "user": c.User, "created_at": c.CreatedAt,
+					"body_html": fi.commentHTML[c.ID]})
+				continue
+			}
 			items = append(items, c)
 		}
 		h.page(w, r, items)
