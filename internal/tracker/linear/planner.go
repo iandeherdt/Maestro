@@ -255,3 +255,34 @@ func (a *Adapter) AddBlocker(ctx context.Context, task, blocker tracker.TaskRef)
 	a.mu.Unlock()
 	return nil
 }
+
+// SubIssueIDs lists the sub-issues of an issue.
+func (a *Adapter) SubIssueIDs(ctx context.Context, parent issue.Issue) ([]string, error) {
+	var out []string
+	q := `query($id: String!, $after: String) { issue(id: $id) { children(first: 100, after: $after) { nodes { id } pageInfo { hasNextPage endCursor } } } }`
+	err := a.c.pages(ctx, q, map[string]any{"id": parent.ID}, func(raw json.RawMessage) (pageInfo, error) {
+		var d struct {
+			Issue *struct {
+				Children struct {
+					Nodes []struct {
+						ID string `json:"id"`
+					} `json:"nodes"`
+					PageInfo pageInfo `json:"pageInfo"`
+				} `json:"children"`
+			} `json:"issue"`
+		}
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return pageInfo{}, terr(tracker.Response, "sub-issues have an unexpected shape")
+		}
+		if d.Issue == nil {
+			return pageInfo{}, nil
+		}
+		for _, c := range d.Issue.Children.Nodes {
+			if c.ID != "" {
+				out = append(out, c.ID)
+			}
+		}
+		return d.Issue.Children.PageInfo, nil
+	})
+	return out, err
+}
