@@ -876,7 +876,7 @@ cannot skip; pick the ones that fit the project.
 
 | Pack | For | Needs a licence | The agent can |
 |---|---|---|---|
-| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks |
+| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks, which the agent can ask for while it works (`MAESTRO_STATUS: check`) and get the output and the screenshots back |
 | `godot` | A Godot 4 project in GDScript | No | write GDScript, scenes and resources as text, run Godot, the linter and the tests itself |
 | `blender` | 3D models made by Python scripts | No | write a generator, build it, look at its render |
 | `klad` | 2D art painted with klad | No | paint through klad's commands, export, look at the picture |
@@ -1002,8 +1002,10 @@ screenshots:
 `previews.sh` plays each scene of the build for two seconds and draws what every camera sees,
 overlay canvases included, at 1280 by 720 (at most 6 scenes). To pick the scenes or the size, put
 them in front of the command: `SHOT_SCENES=Assets/Scenes/Title.unity:Assets/Scenes/Level1.unity
-SHOT_WIDTH=1920 SHOT_HEIGHT=1080 sh conventions/unity/previews.sh`. The pictures are drawn with
-software OpenGL in the sandbox, so effects that need a real graphics card can look different.
+SHOT_WIDTH=1920 SHOT_HEIGHT=1080 sh conventions/unity/previews.sh`. In the sandbox the pictures
+are drawn with software OpenGL, so effects that need a real graphics card can look different. With
+`unity.editor` set (a Mac with Apple silicon), the command runs with the Editor of the Mac, in the
+same fence as the Unity checks, and draws with the Mac's own graphics.
 Run `maestro image` again after you upgrade, for the OpenGL drivers; the new scripts reach the
 repository by themselves, in the service's pull request that updates the packs. Not yet run with a
 real licence.

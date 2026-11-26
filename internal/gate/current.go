@@ -19,12 +19,17 @@ import (
 // nothing in it is ever committed.
 const CurrentDir = "current-screenshots"
 
-// writeCurrentScript empties the folder ("clear") or writes one picture
-// into it from standard input. The names are the service's own.
-const writeCurrentScript = `set -u
-d="$(dirname "$PWD")/` + CurrentDir + `"
-if [ "$1" = clear ]; then rm -rf "$d" && mkdir -p "$d"; exit $?; fi
-cat > "$d/$1"
+// CheckDir is the folder next to the repository where the agent finds the
+// pictures of a check it asked for (SPEC 13.6).
+const CheckDir = "check-screenshots"
+
+// writePictureScript empties a folder next to the repository ("clear") or
+// writes one picture into it from standard input. The folder and the names
+// are the service's own.
+const writePictureScript = `set -u
+d="$(dirname "$PWD")/$1"
+if [ "$2" = clear ]; then rm -rf "$d" && mkdir -p "$d"; exit $?; fi
+cat > "$d/$2"
 `
 
 // Current takes the pictures of the current state with the project's
@@ -43,13 +48,13 @@ func (g *Gates) Current(ctx context.Context, ws workspace.Workspace) worker.Curr
 	if len(shots) == 0 {
 		return worker.CurrentState{Note: note}
 	}
-	if !g.writeCurrent(ctx, ws.Key, "clear", nil) {
+	if !g.writePicture(ctx, ws.Key, CurrentDir, "clear", nil) {
 		return worker.CurrentState{Note: "The pictures of the current state could not be given to the agent."}
 	}
 	out := worker.CurrentState{Note: note}
 	for i, s := range shots {
 		name := strconv.Itoa(i+1) + ".png"
-		if !g.writeCurrent(ctx, ws.Key, name, s.PNG) {
+		if !g.writePicture(ctx, ws.Key, CurrentDir, name, s.PNG) {
 			out.Note = "Some pictures of the current state could not be given to the agent."
 			break
 		}
@@ -65,11 +70,30 @@ func (g *Gates) Current(ctx context.Context, ws workspace.Workspace) worker.Curr
 	return out
 }
 
-func (g *Gates) writeCurrent(ctx context.Context, key, name string, png []byte) bool {
+// GiveCheckPictures puts the pictures of a check the agent asked for where
+// it can open them, and returns their paths from the repository.
+func (g *Gates) GiveCheckPictures(ctx context.Context, ws workspace.Workspace, shots []worker.Screenshot) ([]worker.CurrentFile, string) {
+	if !g.writePicture(ctx, ws.Key, CheckDir, "clear", nil) {
+		return nil, "The pictures could not be given to you."
+	}
+	var out []worker.CurrentFile
+	for i, s := range shots {
+		name := strconv.Itoa(i+1) + ".png"
+		if !g.writePicture(ctx, ws.Key, CheckDir, name, s.PNG) {
+			return out, "Some pictures could not be given to you."
+		}
+		out = append(out, worker.CurrentFile{Caption: s.Caption, Path: "../" + CheckDir + "/" + name})
+	}
+	return out, ""
+}
+
+var _ worker.CheckPictures = (*Gates)(nil)
+
+func (g *Gates) writePicture(ctx context.Context, key, dir, name string, png []byte) bool {
 	sctx, cancel := context.WithTimeout(ctx, collectTime)
 	defer cancel()
 	res, err := g.Launcher.Run(sctx, sandbox.Request{
-		Step: sandbox.StepVerify, WorkspaceKey: key, Argv: []string{"sh", "-c", writeCurrentScript, "sh", name},
+		Step: sandbox.StepVerify, WorkspaceKey: key, Argv: []string{"sh", "-c", writePictureScript, "sh", dir, name},
 		NetworkProfile: sandbox.NetNone, Limits: sandbox.Limits{TimeoutMS: collectTime.Milliseconds()},
 	}, png)
 	return err == nil && res.ExitStatus == 0

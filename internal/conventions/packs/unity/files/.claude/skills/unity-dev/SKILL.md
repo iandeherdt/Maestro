@@ -8,8 +8,11 @@ description: Works on this Unity project without the editor: C# scripts, scenes 
 The checks the service runs before anything is pushed are in `conventions/unity/`, and what
 they enforce is in `conventions/unity/RULES.md`.
 
-You have no Unity licence, so you cannot open the project in Unity, and Unity's own tests run
-only in the checks after you finish. What you can run yourself:
+You have no Unity licence, so you cannot open the project in Unity or run Unity's own tests
+here. The service can: commit and end your turn with `MAESTRO_STATUS: check`, and the next turn
+gives you the output of Unity's tests and, when the project takes them, screenshots of each scene
+(`../check-screenshots/`), which you open with your file reading tool. Do that before you finish
+anything visual, and look at the pictures. What you can run yourself:
 
 ```sh
 sh conventions/unity/new-meta.sh   # .meta files, with new GUIDs, for what you added

@@ -38,6 +38,9 @@ type Publisher interface {
 // HostChecks runs the unity pack's checks on this machine (unity.editor).
 type HostChecks interface {
 	Unity(ctx context.Context, editor, key, head, script string) (hostcheck.Result, error)
+	// Shots runs the screenshots command there too: the Editor for Linux
+	// in the sandbox crashes where it runs emulated.
+	Shots(ctx context.Context, editor, key, head, command string, maxBytes int) (hostcheck.Result, []hostcheck.Picture, error)
 	Forget(key string)
 }
 
