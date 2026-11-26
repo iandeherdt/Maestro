@@ -56,6 +56,10 @@ type Input struct {
 	RepoName   string
 	BaseBranch string
 	Branch     string
+	// Pictures are the ticket's pictures, in the workspace. PictureNote
+	// says in the service's words why some or all are missing.
+	Pictures    []TicketPicture
+	PictureNote string
 }
 
 // Builder assembles prompts for one workflow template.
@@ -114,6 +118,7 @@ func (b *Builder) First(in Input) (string, error) {
 		}
 		out.WriteString("\n\n")
 	}
+	pictures(&out, in.Pictures, in.PictureNote)
 	block(&out, tok, "ISSUE_TITLE", "", in.Issue.Title)
 	block(&out, tok, "ISSUE_DESCRIPTION", "", in.Issue.Description)
 	for _, f := range in.Feedback {

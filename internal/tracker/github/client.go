@@ -82,6 +82,15 @@ func (c *client) sameOrigin(raw string) bool {
 
 // do performs one request. write selects the error category for a refusal.
 func (c *client) do(ctx context.Context, method, fullURL string, body any, out any, write bool) (http.Header, error) {
+	return c.doAs(ctx, method, fullURL, body, out, write, "application/vnd.github+json")
+}
+
+// mediaFull asks for the rendered HTML of a body next to its markdown.
+// Pictures in a private repository only have a download link there.
+const mediaFull = "application/vnd.github.full+json"
+
+// doAs is do with another media type.
+func (c *client) doAs(ctx context.Context, method, fullURL string, body any, out any, write bool, accept string) (http.Header, error) {
 	if !c.sameOrigin(fullURL) {
 		return nil, terr(tracker.Pagination, "refusing a request outside the configured API origin")
 	}
@@ -102,7 +111,7 @@ func (c *client) do(ctx context.Context, method, fullURL string, body any, out a
 		return nil, terr(tracker.MissingSecret, "no token available")
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Accept", accept)
 	req.Header.Set("X-GitHub-Api-Version", apiVersion)
 	req.Header.Set("User-Agent", "maestro-orchestrator")
 	if body != nil {
@@ -160,6 +169,11 @@ var nextLinkRE = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
 
 // list fetches every page of a list endpoint and calls each with one page.
 func (c *client) list(ctx context.Context, path string, query url.Values, each func(page json.RawMessage) error) error {
+	return c.listAs(ctx, path, query, "application/vnd.github+json", each)
+}
+
+// listAs is list with another media type.
+func (c *client) listAs(ctx context.Context, path string, query url.Values, accept string, each func(page json.RawMessage) error) error {
 	if query == nil {
 		query = url.Values{}
 	}
@@ -170,7 +184,7 @@ func (c *client) list(ctx context.Context, path string, query url.Values, each f
 			return terr(tracker.Pagination, "%s: more than %d pages", path, maxPages)
 		}
 		var raw json.RawMessage
-		h, err := c.do(ctx, http.MethodGet, next, nil, &raw, false)
+		h, err := c.doAs(ctx, http.MethodGet, next, nil, &raw, false, accept)
 		if err != nil {
 			return err // errNotFound included: the caller decides what a 404 means
 		}

@@ -86,6 +86,11 @@ type Adapter struct {
 	cache   map[int]*cachedIssue // issue number -> derived facts
 	written map[int]time.Time    // issue number -> last state write
 	waiting map[int]string       // issue number -> open blockers last logged
+
+	// imageHost and imageHTTP replace GitHub's picture hosts and the
+	// download client in tests.
+	imageHost func(*url.URL) bool
+	imageHTTP *http.Client
 }
 
 type cachedIssue struct {

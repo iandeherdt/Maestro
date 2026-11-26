@@ -345,6 +345,17 @@ Only comments by you and the other people in `tracker.allowed_commenters` count.
 anyone else is ignored. Set `publish.rework_on_comments: false` to switch this off, and
 `publish.review_quiet_ms` to change the wait.
 
+### Pictures on the ticket
+
+Paste a screenshot or a sketch into the ticket's description, or into a comment, and the agent
+sees it. The agent cannot open the board's picture links itself, so the service downloads them with
+its own credentials before the agent starts and puts them next to the repository, in
+`../ticket-images/`. The prompt tells the agent which file came from where. This works on GitHub and
+on Linear, for planning runs as well as for the work itself.
+
+Only pictures in the description and in comments by `tracker.allowed_commenters` are used, at most
+10 per ticket. PNG, JPEG and GIF work. The agent never gets the token or the API key.
+
 ### Screenshots on the pull request
 
 For anything you look at, a picture tells you more than the diff. Add this to the settings at

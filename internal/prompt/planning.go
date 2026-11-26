@@ -47,6 +47,9 @@ type PlanInput struct {
 	// earlier questions and plans (source "planner") and the owner's
 	// comments.
 	History []issue.Feedback
+	// Pictures are the idea's pictures, in the workspace (SPEC 13.5).
+	Pictures    []TicketPicture
+	PictureNote string
 }
 
 // Planning builds the first prompt of a planning run.
@@ -61,6 +64,7 @@ func (b *Builder) Planning(in PlanInput) (string, error) {
 	fmt.Fprintf(&out, dataRule, tok)
 	fmt.Fprintf(&out, "\n\nThe repository is %s.\n\n", safeWord(strings.ReplaceAll(in.RepoName, "/", ".")))
 	block(&out, tok, "WORKERS", "", strings.Join(in.Workers, "\n"))
+	pictures(&out, in.Pictures, in.PictureNote)
 	block(&out, tok, "IDEA_TITLE", "", in.Issue.Title)
 	block(&out, tok, "IDEA_DESCRIPTION", "", in.Issue.Description)
 	if len(in.History) > 0 {
