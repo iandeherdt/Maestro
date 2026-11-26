@@ -8,6 +8,11 @@
 # and says so: Maestro has already run Unity's tests on its own machine
 # before it pushed, but a change that did not come from Maestro is not
 # tested by Unity here.
+#
+# The Editor image is larger than the free disk of a GitHub-hosted runner,
+# so it is not the job's container (which is pulled before any step can
+# make room). The first step deletes preinstalled toolchains this job does
+# not use, then the checks run in the image with docker run.
 name: conventions-unity
 on:
   pull_request:
@@ -18,21 +23,30 @@ permissions:
 jobs:
   conventions-unity:
     runs-on: ubuntu-latest
-    container: unityci/editor:ubuntu-6000.5.8f1-base-4.0.0@sha256:b34dac1ef79a927bc078d95e8c0993c94f47ac7b0b66e354a29b7ead878b90a8
     env:
+      UNITY_IMAGE: unityci/editor:ubuntu-6000.5.8f1-base-4.0.0@sha256:b34dac1ef79a927bc078d95e8c0993c94f47ac7b0b66e354a29b7ead878b90a8
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
     steps:
+      - name: Room for the Unity Editor image
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift \
+            /usr/local/share/boost /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules \
+            /opt/hostedtoolcache /opt/microsoft /opt/google /opt/az
+          docker image prune --all --force > /dev/null
+          df -h /
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Unity Editor image
+        run: docker pull --quiet "$UNITY_IMAGE"
       - name: Without a licence, the meta files only
         if: env.UNITY_LICENSE == ''
         run: |
           echo "::warning title=No Unity licence in CI::Only the meta files were checked here. Unity's compile and tests ran on the Maestro machine before the push; for changes from elsewhere, add the repository secret UNITY_LICENSE."
-          sh conventions/unity/meta.sh
-      - name: Packages
+          docker run --rm -v "$PWD:/work" -w /work "$UNITY_IMAGE" sh conventions/unity/meta.sh
+      - name: Packages, meta files, compile, EditMode and PlayMode tests
         if: env.UNITY_LICENSE != ''
-        run: sh conventions/unity/prepare.sh
-      - name: Meta files, compile, EditMode and PlayMode tests
-        if: env.UNITY_LICENSE != ''
-        run: sh conventions/unity/verify.sh
+        run: |
+          docker run --rm -e UNITY_LICENSE -v "$PWD:/work" -w /work "$UNITY_IMAGE" \
+            sh -c 'sh conventions/unity/prepare.sh && sh conventions/unity/verify.sh'

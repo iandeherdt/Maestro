@@ -1,0 +1,25 @@
+# Temporary: checks that the Unity Editor image fits on a hosted runner
+# after making room. Removed before merge.
+name: tmp-unity-disk
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unity-disk:
+    runs-on: ubuntu-latest
+    env:
+      UNITY_IMAGE: unityci/editor:ubuntu-6000.5.8f1-base-4.0.0@sha256:b34dac1ef79a927bc078d95e8c0993c94f47ac7b0b66e354a29b7ead878b90a8
+    steps:
+      - name: Room for the Unity Editor image
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift \
+            /usr/local/share/boost /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules \
+            /opt/hostedtoolcache /opt/microsoft /opt/google /opt/az
+          docker image prune --all --force > /dev/null
+          df -h /
+      - name: Unity Editor image
+        run: docker pull --quiet "$UNITY_IMAGE" && df -h / && docker image ls
+      - name: Editor runs
+        run: docker run --rm -v "$PWD:/work" -w /work "$UNITY_IMAGE" sh -c 'cat /opt/unity/version; ls /opt/unity/Editor/Unity'
