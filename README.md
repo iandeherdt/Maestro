@@ -373,7 +373,11 @@ maestro image
 ```
 
 From then on every pull request has a **Screenshots** section with a picture of each page, taken
-by the service itself after the checks passed. The agent has no part in it.
+by the service itself after the checks passed. The agent cannot supply the pictures, but it says
+what they should show, so that the pull request shows the change and not only the start page:
+a page it changed (`/pricing`, `about.html`) is shot before the ones you set, and for a game it
+names a picture set-up it wrote, such as "start level 1 with the new enemy in view". For your
+own `command`, what the agent named is in `$SHOT_SHOW`, separated by `|`.
 
 A page is a file in the repository, or an address on `localhost` when the site needs a server.
 In that case say how to start it:

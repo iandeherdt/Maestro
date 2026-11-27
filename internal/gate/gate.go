@@ -40,7 +40,7 @@ type HostChecks interface {
 	Unity(ctx context.Context, editor, key, head, script string) (hostcheck.Result, error)
 	// Shots runs the screenshots command there too: the Editor for Linux
 	// in the sandbox crashes where it runs emulated.
-	Shots(ctx context.Context, editor, key, head, command string, maxBytes int) (hostcheck.Result, []hostcheck.Picture, error)
+	Shots(ctx context.Context, editor, key, head, command, show string, maxBytes int) (hostcheck.Result, []hostcheck.Picture, error)
 	Forget(key string)
 }
 
@@ -61,6 +61,9 @@ type Gates struct {
 	// current holds the pictures of the current state that a design
 	// attempt was given, by workspace key, for its pull request.
 	current map[string][]worker.Screenshot
+	// show holds what the agent last asked the pictures to show, by
+	// workspace key (MAESTRO_SHOW, SPEC 24.3).
+	show map[string][]string
 }
 
 var _ worker.Gates = (*Gates)(nil)
@@ -193,10 +196,30 @@ func (g *Gates) ExportedHead(workspaceKey string) string {
 	return g.heads[workspaceKey]
 }
 
+// Show remembers what the agent asked the pictures of a workspace to
+// show. The worker has already checked the shape of each item.
+func (g *Gates) Show(workspaceKey string, things []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.show == nil {
+		g.show = map[string][]string{}
+	}
+	g.show[workspaceKey] = append([]string(nil), things...)
+}
+
+func (g *Gates) shows(key string) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.show[key]
+}
+
+var _ worker.ShowSetter = (*Gates)(nil)
+
 // Forget drops what is remembered about a workspace that was removed.
 func (g *Gates) Forget(workspaceKey string) {
 	g.mu.Lock()
 	delete(g.heads, workspaceKey)
+	delete(g.show, workspaceKey)
 	g.mu.Unlock()
 	if g.Host != nil {
 		g.Host.Forget(workspaceKey)

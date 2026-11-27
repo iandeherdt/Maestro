@@ -21,6 +21,41 @@ sh conventions/unity/check.sh      # .meta files and GUIDs, and every script com
 
 Run it after every change. It is quicker than a failed check, which costs a whole new attempt.
 
+## Pictures that show your change
+
+On their own, the pictures are each scene a second or two after it starts: the menu, or the first
+frame. You know what you built, so the pictures are yours to choose, and the service asks for
+them before it publishes. To show what you changed, add a picture set-up: a static method without parameters in a
+class named `MaestroShotSetups`, in `Assets/Editor/MaestroShotSetups.cs` (run `new-meta.sh` for
+it). The service plays the first scene, calls the method once the game has started, and takes
+the picture a second later, or after the seconds the method returns as a `float` (at most 20).
+The picture is named after the method. Then name it in your final message, one line each:
+
+```csharp
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+static class MaestroShotSetups
+{
+    // Past the menu, into the first level, with the new enemy in view.
+    static float FirstLevelWithEnemy()
+    {
+        SceneManager.LoadScene("Level1");
+        return 2f; // let the level load and settle
+    }
+}
+```
+
+```text
+MAESTRO_SHOW: FirstLevelWithEnemy
+```
+
+The method runs in play mode, so it can load a scene, press the start button of the menu
+(`button.onClick.Invoke()`), move the player or the camera, or start a coroutine on an object of
+the game. Keep the set-ups the project already has; they are shown only when named. A scene
+can be named too (`MAESTRO_SHOW: Level1`). With `MAESTRO_STATUS: check` you see the pictures
+before you finish, and `Logs/maestro-shots.log` says why a set-up failed.
+
 ## How to work
 
 - There is no editor to click in. Scenes (`.unity`), prefabs (`.prefab`), materials and

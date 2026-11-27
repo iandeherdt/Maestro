@@ -597,6 +597,11 @@ func TestCommentsOnThePullRequestReachTheAgent(t *testing.T) {
 type checkGates struct {
 	*fakes
 	given int
+	shows []string
+}
+
+func (c *checkGates) Show(key string, things []string) {
+	c.shows = append(c.shows, key+": "+strings.Join(things, ", "))
 }
 
 func (c *checkGates) Verify(ctx context.Context, ws workspace.Workspace) (VerifyResult, error) {
@@ -616,7 +621,7 @@ func (c *checkGates) GiveCheckPictures(_ context.Context, ws workspace.Workspace
 // nothing is published, and the output and the pictures go back to it.
 func TestTheAgentAsksForTheChecks(t *testing.T) {
 	r := newRig(t,
-		script{text: "Changed the shader.\nMAESTRO_STATUS: check\nI cannot run Unity here."},
+		script{text: "Changed the shader.\nMAESTRO_SHOW: StartLevel\nMAESTRO_STATUS: check\nI cannot run Unity here."},
 		script{text: "Fixed the test.\nMAESTRO_STATUS: check\nLet me see it.", verifyOK: true},
 		script{text: "Looks right.\nMAESTRO_STATUS: done", verifyOK: true})
 	r.cfg.Agent.MaxTurns = 5
@@ -633,8 +638,28 @@ func TestTheAgentAsksForTheChecks(t *testing.T) {
 	if !strings.Contains(third, "passed") || !strings.Contains(third, "- ../check-screenshots/1.png: 1-Main") {
 		t.Fatalf("after a passing check:\n%s", third)
 	}
-	if !strings.Contains(r.f.prompts[0].Prompt, `"MAESTRO_STATUS: check"`) {
-		t.Fatal("the first prompt does not tell the agent about checks")
+	if !strings.Contains(r.f.prompts[0].Prompt, `"MAESTRO_STATUS: check"`) || !strings.Contains(r.f.prompts[0].Prompt, "MAESTRO_SHOW:") {
+		t.Fatal("the first prompt does not tell the agent about checks and what to show")
+	}
+	// What the pictures should show is given to the gates once, before
+	// the check; the turns that name nothing keep it.
+	if len(g.shows) != 1 || !strings.HasSuffix(g.shows[0], ": StartLevel") {
+		t.Fatalf("shows %q", g.shows)
+	}
+}
+
+func TestWhatThePicturesShouldShow(t *testing.T) {
+	got := DeclaredShows("Done.\nMAESTRO_SHOW: /pricing?plan=pro\n  MAESTRO_SHOW:   StartLevel  \r\nMAESTRO_SHOW: StartLevel\n" +
+		"MAESTRO_SHOW: ../../etc/passwd\nMAESTRO_SHOW: a|b\nMAESTRO_SHOW: $(rm -rf /)\nMAESTRO_SHOW:\nsays MAESTRO_SHOW: inline\nMAESTRO_STATUS: done")
+	if strings.Join(got, ",") != "/pricing?plan=pro,StartLevel" {
+		t.Fatalf("got %q", got)
+	}
+	var many strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&many, "MAESTRO_SHOW: page%d.html\n", i)
+	}
+	if got := DeclaredShows(many.String()); len(got) != config.MaxScreenshots {
+		t.Fatalf("%d things", len(got))
 	}
 }
 
@@ -658,5 +683,44 @@ func TestChecksOnTheLastTurnAndPastTheLimit(t *testing.T) {
 	}
 	if p := r.f.prompts[MaxChecks+1].Prompt; !strings.Contains(p, "did not run again") {
 		t.Fatalf("past the limit:\n%s", p)
+	}
+}
+
+// The agent says what the pictures show. When it finished without saying,
+// it is asked once; "none" is an answer too.
+func TestTheAgentIsAskedOnceWhatThePicturesShow(t *testing.T) {
+	r := newRig(t,
+		script{text: "Added the enemy.\nMAESTRO_STATUS: done"},
+		script{text: "Wrote the set-up.\nMAESTRO_SHOW: EnemyInLevel1\nMAESTRO_STATUS: done", verifyOK: true})
+	r.cfg.Screenshots.Command = "sh conventions/unity/previews.sh"
+	r.cfg.Agent.MaxTurns = 5
+	g := &checkGates{fakes: r.f}
+	r.w.Gates = g
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || r.f.verifies != 1 || len(r.f.prompts) != 2 {
+		t.Fatalf("outcome %+v, verifies %d, turns %d", out, r.f.verifies, len(r.f.prompts))
+	}
+	if !strings.Contains(r.f.prompts[1].Prompt, "only you know what they should show") || len(g.shows) != 1 || !strings.HasSuffix(g.shows[0], ": EnemyInLevel1") {
+		t.Fatalf("shows %q, prompt:\n%s", g.shows, r.f.prompts[1].Prompt)
+	}
+
+	// Asked once only, and not at all when it said, or said none.
+	for _, turns := range [][]script{
+		{{text: "MAESTRO_STATUS: done"}, {text: "MAESTRO_STATUS: done", verifyOK: true}},
+		{{text: "MAESTRO_SHOW: none\nMAESTRO_STATUS: done", verifyOK: true}},
+	} {
+		r = newRig(t, turns...)
+		r.cfg.Screenshots.Command = "x"
+		r.cfg.Agent.MaxTurns = 5
+		g = &checkGates{fakes: r.f}
+		r.w.Gates = g
+		if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || len(r.f.prompts) != len(turns) || len(g.shows) != 0 {
+			t.Fatalf("outcome %+v, turns %d, shows %q", out, len(r.f.prompts), g.shows)
+		}
+	}
+	// Without screenshots nobody asks.
+	r = newRig(t, script{text: "MAESTRO_STATUS: done", verifyOK: true})
+	r.w.Gates = &checkGates{fakes: r.f}
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || len(r.f.prompts) != 1 {
+		t.Fatalf("outcome %+v, turns %d", out, len(r.f.prompts))
 	}
 }

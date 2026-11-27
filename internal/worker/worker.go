@@ -143,6 +143,39 @@ type CheckPictures interface {
 	GiveCheckPictures(ctx context.Context, ws workspace.Workspace, shots []Screenshot) ([]CurrentFile, string)
 }
 
+// ShowSetter is an optional part of the gates: what the agent asked the
+// pictures of its work to show (MAESTRO_SHOW, SPEC 24.3).
+type ShowSetter interface {
+	Show(workspaceKey string, things []string)
+}
+
+var showRE = regexp.MustCompile(`(?m)^[ \t]*MAESTRO_SHOW:[ \t]*(.*?)[ \t]*\r?$`)
+
+// showThingRE is what a MAESTRO_SHOW item may hold: a page's path, a file
+// or the name of a shot. No quotes, no shell characters.
+var showThingRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._/?=&#%+,:-]{0,159}$|^/[A-Za-z0-9 ._/?=&#%+,:-]{0,159}$`)
+
+// DeclaredShows reads the "MAESTRO_SHOW: ..." lines of the agent's final
+// message: what the pictures of its work should show, in order, at most
+// config.MaxScreenshots. Lines that do not have the allowed shape are
+// left out.
+func DeclaredShows(resultText string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range showRE.FindAllStringSubmatch(resultText, -1) {
+		t := strings.TrimSpace(m[1])
+		if !showThingRE.MatchString(t) || strings.Contains(t, "..") || strings.Contains(t, "|") || seen[t] || strings.EqualFold(t, "none") {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+		if len(out) == config.MaxScreenshots {
+			break
+		}
+	}
+	return out
+}
+
 // MaxChecks is how many checks the agent may ask for in one attempt.
 const MaxChecks = 8
 
@@ -384,8 +417,10 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 	talked := sessionID != ""
 	sessionReset := false
 	var lastVerify *prompt.Verify
-	verified := false // the check ran once this attempt
-	checks := 0       // checks the agent asked for
+	verified := false     // the check ran once this attempt
+	checks := 0           // checks the agent asked for
+	showDeclared := false // the agent said what the pictures show
+	showAsked := false    // it was asked to, once
 	for turn := 1; ; turn++ {
 		if ctx.Err() != nil {
 			return orchestrator.Outcome{Kind: orchestrator.Normal}
@@ -459,6 +494,15 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 		if err != nil {
 			return failed(ExportError, err)
 		}
+		ss, showable := w.Gates.(ShowSetter)
+		if showable {
+			if shows := DeclaredShows(res.ResultText); len(shows) > 0 {
+				ss.Show(ws.Key, shows)
+			}
+		}
+		if showRE.MatchString(res.ResultText) {
+			showDeclared = true
+		}
 
 		status := DeclaredStatus(res.ResultText)
 		if status == "blocked" {
@@ -526,6 +570,15 @@ func (w *Worker) run(ctx context.Context, a orchestrator.Attempt, sink orchestra
 			if exp.NoChanges {
 				reason = prompt.ReasonNoChanges
 			}
+			continue
+		}
+
+		// The agent knows what it built, so it says what the pictures of
+		// the pull request show (SPEC 24.6). When it finished without
+		// saying, it is asked once, before the checks.
+		if showable && cfg.Screenshots.On() && !showDeclared && !showAsked && turn < maxTurns {
+			showAsked = true
+			reason, lastVerify = prompt.ReasonShow, nil
 			continue
 		}
 

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image/png"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,7 +42,7 @@ const shotDir = `d="$(dirname "$PWD")/screenshots"
 
 const pagesScript = `set -u
 ` + shotDir + `{ rm -rf "$d" && mkdir -p "$d"; } || exit 2
-w="$1"; h="$2"; start="$3"; shift 3
+w="$1"; h="$2"; start="$3"; asked="$4"; shift 4
 if [ -n "$start" ]; then
   ( sh -c "$start" >"$d/.start.log" 2>&1 & )
 fi
@@ -63,19 +64,29 @@ for page in "$@"; do
       done
       url="$page" ;;
     *)
-      if [ ! -f "$page" ]; then echo "NO_FILE $i"; exit 5; fi
+      if [ ! -f "$page" ]; then
+        # A page the agent asked for that is not there is left out; the
+        # pages of the settings must be there.
+        if [ "$i" -le "$asked" ]; then continue; fi
+        echo "NO_FILE $i"; exit 5
+      fi
       url="file://$PWD/$page" ;;
   esac
   "$browser" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars \
     --window-size="$w,$h" --virtual-time-budget=4000 --user-data-dir="/tmp/browser-$i" \
     --screenshot="$d/$i.png" "$url" >/dev/null 2>&1
-  if [ ! -s "$d/$i.png" ]; then echo "NO_PICTURE $i"; exit 6; fi
+  if [ ! -s "$d/$i.png" ]; then
+    rm -f "$d/$i.png"
+    if [ "$i" -le "$asked" ]; then continue; fi
+    echo "NO_PICTURE $i"; exit 6
+  fi
 done
 `
 
 const commandScript = `set -u
 ` + shotDir + `{ rm -rf "$d" && mkdir -p "$d"; } || exit 2
 SCREENSHOT_DIR="$d"; export SCREENSHOT_DIR
+SHOT_SHOW="${2:-}"; export SHOT_SHOW
 sh -c "$1"
 `
 
@@ -127,14 +138,19 @@ func (g *Gates) shoot(ctx context.Context, key string, cfg config.Screenshots) (
 		g.step(tctx, key, collectTime, "sh", "-c", tidyScript)
 	}()
 
+	show := g.shows(key)
+	asked := 0
+	if len(cfg.Pages) > 0 {
+		cfg.Pages, asked = withShown(cfg.Pages, show)
+	}
 	if len(cfg.Pages) == 0 && g.Host != nil && g.Config().Unity.Editor != "" {
-		return g.shootHere(ctx, key, cfg)
+		return g.shootHere(ctx, key, cfg, show)
 	}
 
-	argv := []string{"sh", "-c", commandScript, "sh", cfg.Command}
+	argv := []string{"sh", "-c", commandScript, "sh", cfg.Command, strings.Join(show, "|")}
 	if len(cfg.Pages) > 0 {
 		argv = append([]string{"sh", "-c", pagesScript, "sh",
-			strconv.FormatInt(cfg.Width, 10), strconv.FormatInt(cfg.Height, 10), cfg.Start}, cfg.Pages...)
+			strconv.FormatInt(cfg.Width, 10), strconv.FormatInt(cfg.Height, 10), cfg.Start, strconv.Itoa(asked)}, cfg.Pages...)
 	}
 	res, err := g.step(ctx, key, timeout, argv...)
 	switch {
@@ -223,7 +239,7 @@ func (g *Gates) logFailure(key string, status int, lines string) string {
 // Editor of unity.editor, against the commit the export step produced:
 // the Editor for Linux in the sandbox crashes where it runs emulated,
 // which is how it runs on a Mac with Apple silicon.
-func (g *Gates) shootHere(ctx context.Context, key string, cfg config.Screenshots) ([]worker.Screenshot, string) {
+func (g *Gates) shootHere(ctx context.Context, key string, cfg config.Screenshots, show []string) ([]worker.Screenshot, string) {
 	g.mu.Lock()
 	head := g.heads[key]
 	g.mu.Unlock()
@@ -236,7 +252,7 @@ func (g *Gates) shootHere(ctx context.Context, key string, cfg config.Screenshot
 	timeout := time.Duration(cfg.TimeoutMS) * time.Millisecond
 	sctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	res, pics, err := g.Host.Shots(sctx, g.Config().Unity.Editor, key, head, cfg.Command, maxShotBytes)
+	res, pics, err := g.Host.Shots(sctx, g.Config().Unity.Editor, key, head, cfg.Command, strings.Join(show, "|"), maxShotBytes)
 	switch {
 	case ctx.Err() != nil:
 		return nil, ""
@@ -278,6 +294,48 @@ func (g *Gates) shootHere(ctx context.Context, key string, cfg config.Screenshot
 		shots = append(shots, worker.Screenshot{Caption: caption, PNG: clean})
 	}
 	return shots, leftNote(shots, left)
+}
+
+// pageFileRE is a file the browser can show as a page.
+var pageFileRE = regexp.MustCompile(`(?i)^[A-Za-z0-9_][A-Za-z0-9_./-]*\.(html?|svg)$`)
+
+// withShown puts the pages the agent asked for (MAESTRO_SHOW) in front of
+// the configured ones, at most config.MaxScreenshots in all. A path that
+// starts with "/" is a page of the site, on the address of the first
+// configured page that is one; anything else is a file of the
+// repository. The worker has checked the shape of each.
+func withShown(pages, show []string) ([]string, int) {
+	origin := ""
+	for _, p := range pages {
+		if u, err := url.Parse(p); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
+			origin = u.Scheme + "://" + u.Host
+			break
+		}
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if !seen[p] && len(out) < config.MaxScreenshots {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, s := range show {
+		switch {
+		case strings.Contains(s, "://") || strings.Contains(s, ".."):
+		case strings.HasPrefix(s, "/") && origin != "":
+			add(origin + s)
+		case strings.HasPrefix(s, "/") && pageFileRE.MatchString(s[1:]):
+			add(s[1:])
+		case pageFileRE.MatchString(s):
+			add(s)
+		}
+	}
+	asked := len(out)
+	for _, p := range pages {
+		add(p)
+	}
+	return out, asked
 }
 
 // reason turns a failed step into words. The output of the step is not

@@ -287,6 +287,13 @@ func TestUnityScreenshotsRunWithTheEditorOfThisMachine(t *testing.T) {
 	if len(h.calls) != 1 || h.calls[0] != "shots|/x/Unity|GH-1|"+headA+"|sh conventions/unity/previews.sh" {
 		t.Fatalf("calls %v", h.calls)
 	}
+	// What the agent named goes to this machine's command.
+	g.Show("GH-1", []string{"StartLevel", "Shop"})
+	g.screenshots(ctx, "GH-1")
+	if len(h.calls) != 2 || !strings.HasSuffix(h.calls[1], "|StartLevel|Shop") {
+		t.Fatalf("calls %v", h.calls)
+	}
+	g.Show("GH-1", nil)
 
 	// A failed command: its lines go to the log, not to the note.
 	h.pics, h.res = nil, hostcheck.Result{ExitStatus: 1, Output: []byte("Unity: no licence for you")}
@@ -299,5 +306,57 @@ func TestUnityScreenshotsRunWithTheEditorOfThisMachine(t *testing.T) {
 	h.res, h.err = hostcheck.Result{}, errors.New("Unity Hub has no licence")
 	if _, note = g.screenshots(ctx, "GH-1"); !strings.Contains(note, "could not be started") {
 		t.Fatalf("note %q", note)
+	}
+}
+
+// What the agent asked to show comes first: pages of the site on the
+// address of the settings, files of the repository that are pages, and
+// nothing else.
+func TestThePagesTheAgentAskedForComeFirst(t *testing.T) {
+	pages, asked := withShown([]string{"http://localhost:3000/", "docs/index.html"},
+		[]string{"/pricing?plan=pro", "about.html", "StartLevel", "https://evil.example/", "../secret.html", "/docs/index.html"})
+	want := []string{"http://localhost:3000/pricing?plan=pro", "about.html", "http://localhost:3000/docs/index.html", "http://localhost:3000/", "docs/index.html"}
+	if strings.Join(pages, " ") != strings.Join(want, " ") || asked != 3 {
+		t.Fatalf("pages %q, asked %d", pages, asked)
+	}
+	// Without an address, a path is a file of the repository.
+	pages, asked = withShown([]string{"index.html"}, []string{"/shop.html", "/shop", "index.html"})
+	if strings.Join(pages, " ") != "shop.html index.html" || asked != 2 {
+		t.Fatalf("pages %q, asked %d", pages, asked)
+	}
+	// At most the number the pull request shows.
+	many := []string{"a.html", "b.html", "c.html", "d.html", "e.html", "f.html", "g.html", "h.html", "i.html", "j.html", "k.html"}
+	if pages, _ := withShown([]string{"index.html"}, many); len(pages) != config.MaxScreenshots {
+		t.Fatalf("%d pages", len(pages))
+	}
+}
+
+// The screenshots command learns what the agent asked for in SHOT_SHOW, and
+// a page the agent named that is not there is left out instead of costing
+// every picture.
+func TestTheAgentsChoiceReachesTheScreenshots(t *testing.T) {
+	l := newLocal(t)
+	good := base64.StdEncoding.EncodeToString(picture(40, 30))
+	g := l.gates(config.Screenshots{Command: `printf %s '` + good + `' | base64 -d > "$SCREENSHOT_DIR/$(printf %s "$SHOT_SHOW" | tr '|' '+').png"`})
+	g.Show("GH-1", []string{"StartLevel", "Shop"})
+	shots, note := g.screenshots(ctx, "GH-1")
+	if len(shots) != 1 || shots[0].Caption != "StartLevelShop" {
+		t.Fatalf("shots %+v, note %q", shots, note)
+	}
+	g.Forget("GH-1")
+	if shots, _ := g.screenshots(ctx, "GH-1"); len(shots) != 1 || shots[0].Caption != "screenshot 1" {
+		t.Fatalf("after Forget: %+v", shots)
+	}
+}
+
+func TestAPageTheAgentNamedThatIsNotThereIsLeftOut(t *testing.T) {
+	path := browser(t)
+	l := newLocal(t)
+	os.WriteFile(filepath.Join(l.bin, "chromium"), []byte("#!/bin/sh\nexec "+path+" \"$@\"\n"), 0o755)
+	g := l.gates(config.Screenshots{Pages: []string{"index.html"}, Width: 320, Height: 200})
+	g.Show("GH-1", []string{"missing.html"})
+	shots, note := g.screenshots(ctx, "GH-1")
+	if len(shots) != 1 || shots[0].Caption != "index.html" || note != "" {
+		t.Fatalf("shots %d, note %q", len(shots), note)
 	}
 }
