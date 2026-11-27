@@ -880,7 +880,7 @@ cannot skip; pick the ones that fit the project.
 
 | Pack | For | Needs a licence | The agent can |
 |---|---|---|---|
-| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks, which the agent can ask for while it works (`MAESTRO_STATUS: check`) and get the output and the screenshots back |
+| `unity` | A Unity project | Yes, Unity's (`maestro unity activate`) | write C#, scenes and prefabs as text, run the quick compile itself; Unity's tests run in the checks, which the agent can ask for while it works (`MAESTRO_STATUS: check`) and get the output and the screenshots back; make textures and simple models with generator scripts (`ArtGenerators/`) and commit them in `Assets/Art/Generated/`, the one folder where binary files are accepted |
 | `godot` | A Godot 4 project in GDScript | No | write GDScript, scenes and resources as text, run Godot, the linter and the tests itself |
 | `blender` | 3D models made by Python scripts | No | write a generator, build it, look at its render |
 | `klad` | 2D art painted with klad | No | paint through klad's commands, export, look at the picture |
@@ -1059,7 +1059,7 @@ As with the other game packs, the agents get the skill from Maestro, and the rep
 copy for your own Claude Code.
 
 The models and pictures are binary files, which Maestro refuses by default. The packs allow
-them in their output folders only, `art/models/` and `art/textures/`. When you move those in
+them in their output folders only, `art/models/` and `art/textures/` (and `Assets/Art/Generated/` for the `unity` pack, where the agent's generated textures and models go). When you move those in
 `settings.sh`, name the new folders in the settings file:
 
 ```yaml

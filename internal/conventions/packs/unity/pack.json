@@ -34,6 +34,12 @@
       "where": ["verify", "ci"]
     },
     {
+      "id": "generated-art",
+      "rule": "Textures and models the agent makes come from generator scripts in ArtGenerators/ and are committed only in Assets/Art/Generated/; everywhere else binary files are refused.",
+      "enforced_by": ["the diff policy of the Maestro service (policy.binary_paths)"],
+      "where": ["service"]
+    },
+    {
       "id": "packages",
       "rule": "The agent does not add, remove or change packages; the owner does.",
       "enforced_by": ["the diff policy of the Maestro service (Packages/manifest.json is protected)"],
@@ -82,6 +88,7 @@
     "path": "ProjectSettings/ProjectVersion.txt",
     "hint": "Make the project first: in Unity Hub, New project, with Editor 6000.5.8f1 (the version of the Maestro image). Close Unity, run `git init` in the project's folder (or move the project into this checkout), and run this again there."
   },
+  "binary_paths": ["Assets/Art/Generated/**"],
   "starter_unless": "Assets/Tests",
   "platform": "linux/amd64"
 }
