@@ -685,3 +685,42 @@ func TestChecksOnTheLastTurnAndPastTheLimit(t *testing.T) {
 		t.Fatalf("past the limit:\n%s", p)
 	}
 }
+
+// The agent says what the pictures show. When it finished without saying,
+// it is asked once; "none" is an answer too.
+func TestTheAgentIsAskedOnceWhatThePicturesShow(t *testing.T) {
+	r := newRig(t,
+		script{text: "Added the enemy.\nMAESTRO_STATUS: done"},
+		script{text: "Wrote the set-up.\nMAESTRO_SHOW: EnemyInLevel1\nMAESTRO_STATUS: done", verifyOK: true})
+	r.cfg.Screenshots.Command = "sh conventions/unity/previews.sh"
+	r.cfg.Agent.MaxTurns = 5
+	g := &checkGates{fakes: r.f}
+	r.w.Gates = g
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || r.f.verifies != 1 || len(r.f.prompts) != 2 {
+		t.Fatalf("outcome %+v, verifies %d, turns %d", out, r.f.verifies, len(r.f.prompts))
+	}
+	if !strings.Contains(r.f.prompts[1].Prompt, "only you know what they should show") || len(g.shows) != 1 || !strings.HasSuffix(g.shows[0], ": EnemyInLevel1") {
+		t.Fatalf("shows %q, prompt:\n%s", g.shows, r.f.prompts[1].Prompt)
+	}
+
+	// Asked once only, and not at all when it said, or said none.
+	for _, turns := range [][]script{
+		{{text: "MAESTRO_STATUS: done"}, {text: "MAESTRO_STATUS: done", verifyOK: true}},
+		{{text: "MAESTRO_SHOW: none\nMAESTRO_STATUS: done", verifyOK: true}},
+	} {
+		r = newRig(t, turns...)
+		r.cfg.Screenshots.Command = "x"
+		r.cfg.Agent.MaxTurns = 5
+		g = &checkGates{fakes: r.f}
+		r.w.Gates = g
+		if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || len(r.f.prompts) != len(turns) || len(g.shows) != 0 {
+			t.Fatalf("outcome %+v, turns %d, shows %q", out, len(r.f.prompts), g.shows)
+		}
+	}
+	// Without screenshots nobody asks.
+	r = newRig(t, script{text: "MAESTRO_STATUS: done", verifyOK: true})
+	r.w.Gates = &checkGates{fakes: r.f}
+	if out := r.run(orchestrator.Attempt{}); out.Kind != orchestrator.Published || len(r.f.prompts) != 1 {
+		t.Fatalf("outcome %+v, turns %d", out, len(r.f.prompts))
+	}
+}

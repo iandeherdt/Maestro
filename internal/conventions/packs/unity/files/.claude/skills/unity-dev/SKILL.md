@@ -24,7 +24,8 @@ Run it after every change. It is quicker than a failed check, which costs a whol
 ## Pictures that show your change
 
 On their own, the pictures are each scene a second or two after it starts: the menu, or the first
-frame. To show what you changed, add a picture set-up: a static method without parameters in a
+frame. You know what you built, so the pictures are yours to choose, and the service asks for
+them before it publishes. To show what you changed, add a picture set-up: a static method without parameters in a
 class named `MaestroShotSetups`, in `Assets/Editor/MaestroShotSetups.cs` (run `new-meta.sh` for
 it). The service plays the first scene, calls the method once the game has started, and takes
 the picture a second later, or after the seconds the method returns as a `float` (at most 20).

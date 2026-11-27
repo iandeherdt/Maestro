@@ -41,7 +41,7 @@ Your situation and limits:
 - You cannot fetch from the remote repository either. Before you start, the service merges the newest base branch into your branch. If that merge had conflicts, "git status" shows a merge in progress: resolve every conflict first, keeping what both sides meant, then commit the merge, before other work.
 - The service runs the repository's verification command on your commits. Work that fails it is not published. If a check cannot run here because this environment lacks something it needs (a licence, a tool, the network), that is not a reason to stop: commit your best work and end with "MAESTRO_STATUS: done". The service then runs the check where it can, and if it fails you get its output in the next turn.
 - To see whether your work passes before you finish, commit it and end with "MAESTRO_STATUS: check". The service then runs the same checks on your commits, and, when the project has them, takes its screenshots; nothing is published. The next turn gives you the output and the paths of the pictures, which you can open with your file reading tool. Use it when you cannot run the checks or see the result here, for example a game engine without a licence, and do not ask for more than a few.
-- When the project takes screenshots for the pull request, say what they should show, so that they show your change and not only the first screen: one line "MAESTRO_SHOW: <thing>" per picture in your final message, at most 6, for example "MAESTRO_SHOW: /pricing" for a page of a website, "MAESTRO_SHOW: docs/guide.html" for a page that is a file, or the name of a scene or of a picture set-up for a game (see the project's skills). Say it again when what they should show changes; otherwise the last one stands.
+- When the project takes screenshots for the pull request, you say what they show, because you know what you built: one line "MAESTRO_SHOW: <thing>" per picture in your final message, at most 6, each showing your change and not only the first screen, for example "MAESTRO_SHOW: /pricing" for a page of a website, "MAESTRO_SHOW: docs/guide.html" for a page that is a file, or the name of a scene or of a picture set-up for a game (see the project's skills). Say it again when what they should show changes; otherwise the last one stands. If nothing you changed can be seen, say "MAESTRO_SHOW: none".
 - End your final message with one line: "MAESTRO_STATUS: done", "MAESTRO_STATUS: continue", "MAESTRO_STATUS: check" or "MAESTRO_STATUS: blocked", followed by one line giving the reason.`
 
 const dataRule = `Handling of task data:
@@ -154,6 +154,9 @@ const (
 	ReasonCheck = "check"
 	// ReasonCheckLimit: the agent asked for more checks than it may.
 	ReasonCheckLimit = "check limit"
+	// ReasonShow: the agent finished without saying what the screenshots
+	// of the pull request should show.
+	ReasonShow = "show"
 )
 
 // Verify is the gate result shown to the agent after a failed verify, or
@@ -224,6 +227,11 @@ func (b *Builder) Continuation(turn, maxTurns int, reason string, v *Verify) (st
 	case ReasonCheckLimit:
 		fmt.Fprintf(&out, "You asked for the checks more often than the %d times an attempt allows, so they did not run again. "+
 			"Finish the work and end with MAESTRO_STATUS: done; the service runs the checks before it publishes.", checkLimit)
+	case ReasonShow:
+		out.WriteString("Before the service checks and publishes your work, it takes screenshots for the pull request, and only you know what they should show. " +
+			"Say it now: one line \"MAESTRO_SHOW: <thing>\" per picture, at most 6, each showing what you built. For a website, the pages you changed (\"MAESTRO_SHOW: /pricing\" or \"MAESTRO_SHOW: docs/guide.html\"). " +
+			"For a game, a picture set-up you write and commit that brings the game to where your change is visible, as the project's skills describe, and its name. " +
+			"If nothing you changed can be seen, end with \"MAESTRO_SHOW: none\". Then end with MAESTRO_STATUS: done.")
 	default:
 		return "", fmt.Errorf("unknown continuation reason %q", reason)
 	}

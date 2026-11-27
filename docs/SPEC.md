@@ -3381,6 +3381,12 @@ workspace until a later turn names other things, and forgets it with the workspa
 at most 160 characters of letters, digits, space and `._/?=&#%+,:-`, starts with a letter, a
 digit or `/`, and holds no `..` and no `|`; others are left out, and at most 6 are kept.
 
+The agent knows what it built, so saying it is part of finishing. When screenshots are set and
+the agent ends with `done` without any `MAESTRO_SHOW` line in the attempt, the service does not
+check yet: it sends the agent back once (reason `show`) to name what to show, or
+`MAESTRO_SHOW: none` when nothing it changed can be seen. A second `done` without it goes on to
+the checks as before, and so does the last turn.
+
 - With `pages`: a thing that starts with `/` is a page on the address of the first configured
   page that is an address (`http://localhost:3000` + `/pricing`); without such a page, it is a
   file of the repository when it names one ending in `.html`, `.htm` or `.svg`, as is a thing
