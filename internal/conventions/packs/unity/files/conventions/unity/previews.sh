@@ -3,7 +3,10 @@
 # (Maestro's screenshots command) or the folder given. Each scene of the
 # build (or the scenes given in SHOT_SCENES, separated by ':') is played for
 # two seconds and then drawn, at most 6. SHOT_WIDTH and SHOT_HEIGHT set the
-# size, 1280 by 720 unless set.
+# size, 1280 by 720 unless set. The project's picture set-ups (a class named
+# MaestroShotSetups, see MaestroShots.cs) are drawn first; SHOT_SHOW (names
+# separated by '|', from the agent's MAESTRO_SHOW lines) picks set-ups and
+# scenes.
 #
 # Unity draws with software OpenGL here, so a picture shows the layout and
 # the colours of the game, but effects that need a real graphics card can

@@ -3281,7 +3281,8 @@ differ, with the command that brings them in by hand.
 ## 24. Screenshots
 
 A pull request for something a person looks at is easier to judge with a picture. The service
-takes the pictures itself. The agent is not asked for them and cannot supply them.
+takes the pictures itself. The agent cannot supply them, but it can say what they should show
+(24.6).
 
 ### 24.1 Taking them
 
@@ -3371,6 +3372,33 @@ command needs.
 - A page is shown as it looks about four seconds after loading, without scrolling.
 - Nothing can be shown that needs a host outside the sandbox: a web font from a CDN is missing
   in the picture.
+
+### 24.6 What the Agent Asks to Show
+
+The same first screen on every pull request says nothing about the change. So the agent may end
+a turn with lines `MAESTRO_SHOW: <thing>`, one per picture. The service keeps the list for the
+workspace until a later turn names other things, and forgets it with the workspace. A thing is
+at most 160 characters of letters, digits, space and `._/?=&#%+,:-`, starts with a letter, a
+digit or `/`, and holds no `..` and no `|`; others are left out, and at most 6 are kept.
+
+- With `pages`: a thing that starts with `/` is a page on the address of the first configured
+  page that is an address (`http://localhost:3000` + `/pricing`); without such a page, it is a
+  file of the repository when it names one ending in `.html`, `.htm` or `.svg`, as is a thing
+  without `/` in front. Anything else, an address of its own included, is left out. The pages
+  asked for come first, then the configured ones, at most 6 in all. A page asked for that is not
+  there, or of which the browser draws nothing, is left out; the configured pages must still be
+  there (24.1).
+- With `command`: the things, joined with `|`, are in `SHOT_SHOW` for the command, in the
+  sandbox and on this machine alike. The service checks nothing more: what the command makes of
+  them is the project's. A line break in `SHOT_SHOW` is refused.
+- The Unity pack's `previews.sh` reads `SHOT_SHOW` as names of picture set-ups and scenes. A
+  set-up is a static method without parameters of a class named `MaestroShotSetups` in the
+  project. It plays the first scene, calls the method two seconds after play mode started,
+  and takes the picture one second later, or after the seconds the method returns as a number
+  (at most 20). The picture is named after the method. Names are compared by their letters and
+  digits, ignoring case, and a scene by its file name. Without `SHOT_SHOW`, or when it names
+  nothing there is, every set-up is shown and then every scene, at most 6. A set-up that is not
+  found or throws gives no picture and a warning in the log.
 
 ## 25. Assistant Interface
 

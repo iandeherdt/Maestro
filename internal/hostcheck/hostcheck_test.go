@@ -147,7 +147,7 @@ func TestTheUnityPacksScriptsRunWithTheEditorOfThisMachine(t *testing.T) {
 	// files it wrote come back.
 	png := []byte("\x89PNG\r\n\x1a\nnot really")
 	os.WriteFile(filepath.Join(filepath.Dir(editor), "shot.png"), png, 0o644)
-	res, pics, err := r.Shots(context.Background(), editor, "GH-1", head, "sh conventions/unity/previews.sh", 1<<20)
+	res, pics, err := r.Shots(context.Background(), editor, "GH-1", head, "sh conventions/unity/previews.sh", "", 1<<20)
 	if err != nil || res.ExitStatus != 0 {
 		t.Fatalf("%+v, %v\n%s", res, err, res.Output)
 	}
@@ -168,7 +168,7 @@ func TestTheUnityPacksScriptsRunWithTheEditorOfThisMachine(t *testing.T) {
 	os.WriteFile(secret, png, 0o600)
 	shotScript := `d="$SCREENSHOT_DIR"; printf a > "$d/b.png"; printf bb > "$d/a.png"; printf x > "$d/c.txt"
 ln -s ` + secret + ` "$d/link.png"; ln ` + secret + ` "$d/hard.png" 2>/dev/null; head -c 3000 /dev/zero > "$d/z.png"`
-	_, pics, err = r.Shots(context.Background(), editor, "GH-1", head, shotScript, 2000)
+	_, pics, err = r.Shots(context.Background(), editor, "GH-1", head, shotScript, "", 2000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +182,17 @@ ln -s ` + secret + ` "$d/link.png"; ln ` + secret + ` "$d/hard.png" 2>/dev/null;
 	if _, err := os.Stat(filepath.Join(tmp, "checks", "GH-1", "work", ShotDir)); err == nil {
 		t.Error("the pictures folder was kept")
 	}
-	if _, _, err := r.Shots(context.Background(), editor, "GH-1", head, shotScript, 0); err == nil {
+	if _, _, err := r.Shots(context.Background(), editor, "GH-1", head, shotScript, "", 0); err == nil {
 		t.Error("no size limit was accepted")
+	}
+	// What the agent asked to show reaches the command as SHOT_SHOW, and
+	// a line break in it is refused.
+	_, pics, err = r.Shots(context.Background(), editor, "GH-1", head, `printf a > "$SCREENSHOT_DIR/$SHOT_SHOW.png"`, "StartLevel|Shop", 2000)
+	if err != nil || len(pics) != 1 || pics[0].Name != "StartLevel|Shop.png" {
+		t.Fatalf("pictures %+v, %v", pics, err)
+	}
+	if _, _, err := r.Shots(context.Background(), editor, "GH-1", head, shotScript, "a\nb", 2000); err == nil {
+		t.Error("a line break in SHOT_SHOW was accepted")
 	}
 
 	// Problems of this machine are errors, with words.

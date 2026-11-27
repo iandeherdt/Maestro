@@ -597,6 +597,11 @@ func TestCommentsOnThePullRequestReachTheAgent(t *testing.T) {
 type checkGates struct {
 	*fakes
 	given int
+	shows []string
+}
+
+func (c *checkGates) Show(key string, things []string) {
+	c.shows = append(c.shows, key+": "+strings.Join(things, ", "))
 }
 
 func (c *checkGates) Verify(ctx context.Context, ws workspace.Workspace) (VerifyResult, error) {
@@ -616,7 +621,7 @@ func (c *checkGates) GiveCheckPictures(_ context.Context, ws workspace.Workspace
 // nothing is published, and the output and the pictures go back to it.
 func TestTheAgentAsksForTheChecks(t *testing.T) {
 	r := newRig(t,
-		script{text: "Changed the shader.\nMAESTRO_STATUS: check\nI cannot run Unity here."},
+		script{text: "Changed the shader.\nMAESTRO_SHOW: StartLevel\nMAESTRO_STATUS: check\nI cannot run Unity here."},
 		script{text: "Fixed the test.\nMAESTRO_STATUS: check\nLet me see it.", verifyOK: true},
 		script{text: "Looks right.\nMAESTRO_STATUS: done", verifyOK: true})
 	r.cfg.Agent.MaxTurns = 5
@@ -633,8 +638,28 @@ func TestTheAgentAsksForTheChecks(t *testing.T) {
 	if !strings.Contains(third, "passed") || !strings.Contains(third, "- ../check-screenshots/1.png: 1-Main") {
 		t.Fatalf("after a passing check:\n%s", third)
 	}
-	if !strings.Contains(r.f.prompts[0].Prompt, `"MAESTRO_STATUS: check"`) {
-		t.Fatal("the first prompt does not tell the agent about checks")
+	if !strings.Contains(r.f.prompts[0].Prompt, `"MAESTRO_STATUS: check"`) || !strings.Contains(r.f.prompts[0].Prompt, "MAESTRO_SHOW:") {
+		t.Fatal("the first prompt does not tell the agent about checks and what to show")
+	}
+	// What the pictures should show is given to the gates once, before
+	// the check; the turns that name nothing keep it.
+	if len(g.shows) != 1 || !strings.HasSuffix(g.shows[0], ": StartLevel") {
+		t.Fatalf("shows %q", g.shows)
+	}
+}
+
+func TestWhatThePicturesShouldShow(t *testing.T) {
+	got := DeclaredShows("Done.\nMAESTRO_SHOW: /pricing?plan=pro\n  MAESTRO_SHOW:   StartLevel  \r\nMAESTRO_SHOW: StartLevel\n" +
+		"MAESTRO_SHOW: ../../etc/passwd\nMAESTRO_SHOW: a|b\nMAESTRO_SHOW: $(rm -rf /)\nMAESTRO_SHOW:\nsays MAESTRO_SHOW: inline\nMAESTRO_STATUS: done")
+	if strings.Join(got, ",") != "/pricing?plan=pro,StartLevel" {
+		t.Fatalf("got %q", got)
+	}
+	var many strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&many, "MAESTRO_SHOW: page%d.html\n", i)
+	}
+	if got := DeclaredShows(many.String()); len(got) != config.MaxScreenshots {
+		t.Fatalf("%d things", len(got))
 	}
 }
 

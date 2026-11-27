@@ -117,7 +117,7 @@ func (r *Runner) homeDir() (string, error) {
 // not of the change: the Editor or the licence is missing, or the commit
 // could not be checked out.
 func (r *Runner) Unity(ctx context.Context, editor, key, head, script string) (Result, error) {
-	res, _, err := r.run(ctx, editor, key, head, script, 0)
+	res, _, err := r.run(ctx, editor, key, head, script, "", 0)
 	return res, err
 }
 
@@ -139,17 +139,23 @@ const ShotDir = "screenshots"
 // order of their names. A file over maxBytes comes back without its data.
 // The pictures are what the code the agent wrote produced: the caller
 // decodes and draws them again before they go anywhere.
-func (r *Runner) Shots(ctx context.Context, editor, key, head, command string, maxBytes int) (Result, []Picture, error) {
+//
+// show is what the agent asked the pictures to show, as SHOT_SHOW: names
+// separated by "|", already checked by the service.
+func (r *Runner) Shots(ctx context.Context, editor, key, head, command, show string, maxBytes int) (Result, []Picture, error) {
 	if maxBytes <= 0 {
 		return Result{}, nil, errors.New("no size limit for the pictures")
 	}
-	return r.run(ctx, editor, key, head, command, maxBytes)
+	if strings.ContainsAny(show, "\x00\n") {
+		return Result{}, nil, errors.New("SHOT_SHOW holds a line break")
+	}
+	return r.run(ctx, editor, key, head, command, show, maxBytes)
 }
 
 // run runs script in a check's folder. With shots above 0 it also gives
 // the script $SCREENSHOT_DIR and reads the pictures back, each up to shots
 // bytes.
-func (r *Runner) run(ctx context.Context, editor, key, head, script string, shots int) (Result, []Picture, error) {
+func (r *Runner) run(ctx context.Context, editor, key, head, script, show string, shots int) (Result, []Picture, error) {
 	switch {
 	case !keyRE.MatchString(key) || strings.Contains(key, ".."):
 		return Result{}, nil, errors.New("invalid workspace key")
@@ -256,7 +262,7 @@ func (r *Runner) run(ctx context.Context, editor, key, head, script string, shot
 		"NO_PROXY=localhost,127.0.0.1,::1", "no_proxy=localhost,127.0.0.1,::1",
 	}
 	if shots > 0 {
-		cmd.Env = append(cmd.Env, "SCREENSHOT_DIR="+shotDir)
+		cmd.Env = append(cmd.Env, "SCREENSHOT_DIR="+shotDir, "SHOT_SHOW="+show)
 	}
 	out := &tailBuffer{max: MaxOutput}
 	cmd.Stdout, cmd.Stderr = out, out

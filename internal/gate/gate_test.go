@@ -206,8 +206,12 @@ func (h *fakeHost) Unity(_ context.Context, editor, key, head, script string) (h
 	return h.res, h.err
 }
 
-func (h *fakeHost) Shots(_ context.Context, editor, key, head, command string, maxBytes int) (hostcheck.Result, []hostcheck.Picture, error) {
-	h.calls = append(h.calls, "shots|"+editor+"|"+key+"|"+head+"|"+command)
+func (h *fakeHost) Shots(_ context.Context, editor, key, head, command, show string, maxBytes int) (hostcheck.Result, []hostcheck.Picture, error) {
+	call := "shots|" + editor + "|" + key + "|" + head + "|" + command
+	if show != "" {
+		call += "|" + show
+	}
+	h.calls = append(h.calls, call)
 	return h.res, h.pics, h.err
 }
 
