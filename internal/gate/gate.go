@@ -100,11 +100,11 @@ func (g *Gates) export(ctx context.Context, key string) (head string, commits in
 
 // Export commits and bundles the workspace (SPEC 15.1).
 func (g *Gates) Export(ctx context.Context, ws workspace.Workspace) (worker.Export, error) {
-	head, commits, err := g.export(ctx, ws.Key)
+	_, commits, err := g.export(ctx, ws.Key)
 	if err != nil {
 		return worker.Export{}, err
 	}
-	return worker.Export{NoChanges: commits == 0, Head: head}, nil
+	return worker.Export{NoChanges: commits == 0}, nil
 }
 
 // Verify runs the operator's verify command against exactly what would be
