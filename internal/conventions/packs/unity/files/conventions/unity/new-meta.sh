@@ -33,6 +33,13 @@ body() {
         printf 'TextScriptImporter:\n%s\n' "$common" ;;
     *.unity|*.controller|*.anim|*.overrideController|*.mask|*.mixer|*.physicMaterial|*.renderTexture|*.shader|*.compute|*.hlsl|*.cginc|*.inputactions|*.uss|*.uxml|*.tss)
         printf 'DefaultImporter:\n%s\n' "$common" ;;
+    *.png|*.jpg|*.jpeg|*.tga|*.fbx|*.obj)
+        # Made by a generator (ArtGenerators/): Unity fills in the import
+        # settings it needs; an AssetPostprocessor sets anything else.
+        case "$1" in
+        Assets/Art/Generated/*) printf '' ;;
+        *) return 1 ;;
+        esac ;;
     *)
         return 1 ;;
     esac
@@ -50,7 +57,7 @@ write() {
     elif text=$(body "$p"); then
         printf 'fileFormatVersion: 2\nguid: %s\n%s\n' "$(guid)" "$text" > "$p.meta"
     else
-        echo "new-meta: no .meta written for $p: Unity imports this kind of file with settings of its own. Textures, models and audio are added by the owner in the Editor." >&2
+        echo "new-meta: no .meta written for $p: Unity imports this kind of file with settings of its own. Textures and models go in Assets/Art/Generated/, made by a generator; audio and other art are added by the owner in the Editor." >&2
         return 1
     fi
     echo "wrote $p.meta"

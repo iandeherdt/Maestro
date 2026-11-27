@@ -2,7 +2,9 @@ package conventions_test
 
 import (
 	"errors"
+	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -233,5 +235,84 @@ func TestStarterAndRequires(t *testing.T) {
 	klad, _ := Get("klad")
 	if got := Derive([]*Pack{blender, klad}).BinaryPaths; strings.Join(got, " ") != "art/models/** art/textures/**" {
 		t.Errorf("binary paths: %v", got)
+	}
+	// A Unity agent commits the textures and models its generators made,
+	// in one folder.
+	unity, _ = Get("unity")
+	if got := Derive([]*Pack{unity}).BinaryPaths; strings.Join(got, " ") != "Assets/Art/Generated/**" {
+		t.Errorf("unity binary paths: %v", got)
+	}
+}
+
+// The art helper of the Unity pack writes a real PNG and a model with
+// plain Node, and new-meta.sh gives them a .meta file in the folder for
+// generated art and nowhere else.
+func TestUnityAgentsMakeTexturesAndModels(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	unity, _ := Get("unity")
+	files, err := unity.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"conventions/unity/art.mjs", "conventions/unity/new-meta.sh"} {
+		if files[name] == nil {
+			t.Fatalf("the pack has no %s", name)
+		}
+		os.MkdirAll(filepath.Join(dir, filepath.Dir(name)), 0o755)
+		os.WriteFile(filepath.Join(dir, name), files[name], 0o644)
+	}
+	os.MkdirAll(filepath.Join(dir, "ArtGenerators"), 0o755)
+	os.WriteFile(filepath.Join(dir, "ArtGenerators", "wall.mjs"), []byte(`
+import { png, obj, fbm, normalFromHeight } from "../conventions/unity/art.mjs";
+const h = (x, y) => fbm(x / 8, y / 8, 3, 4, 7);
+png("Assets/Art/Generated/Textures/Wall.png", 32, 32, (x, y) => [255 * h(x, y), 300, -5]);
+png("Assets/Art/Generated/Textures/Wall_Normal.png", 32, 32, normalFromHeight(h));
+png("Assets/Elsewhere/Wall.png", 4, 4, () => [0, 0, 0]);
+obj("Assets/Art/Generated/Models/Quad.obj", { vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]], uvs: [[0, 0], [1, 0], [1, 1]], faces: [[0, 1, 2]] });
+`), 0o644)
+	run := func(name string, args ...string) (string, error) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := run(node, "ArtGenerators/wall.mjs"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	f, err := os.Open(filepath.Join(dir, "Assets/Art/Generated/Textures/Wall.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil || img.Bounds().Dx() != 32 || img.Bounds().Dy() != 32 {
+		t.Fatalf("the texture is not a 32 by 32 PNG: %v", err)
+	}
+	// Values outside 0..255 are clamped.
+	if _, g, b, a := img.At(3, 3).RGBA(); g != 0xffff || b != 0 || a != 0xffff {
+		t.Fatalf("pixel %v %v %v", g, b, a)
+	}
+	// The same seed gives the same file.
+	first, _ := os.ReadFile(filepath.Join(dir, "Assets/Art/Generated/Textures/Wall.png"))
+	run(node, "ArtGenerators/wall.mjs")
+	if again, _ := os.ReadFile(filepath.Join(dir, "Assets/Art/Generated/Textures/Wall.png")); string(first) != string(again) {
+		t.Fatal("a second run gave another texture")
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "Assets/Art/Generated/Models/Quad.obj")); !strings.Contains(string(raw), "f 1/1 2/2 3/3") {
+		t.Fatalf("model:\n%s", raw)
+	}
+
+	out, err := run("sh", "conventions/unity/new-meta.sh")
+	if err == nil || !strings.Contains(out, "no .meta written for Assets/Elsewhere/Wall.png") {
+		t.Fatalf("a texture outside the folder got a .meta file:\n%s", out)
+	}
+	for _, p := range []string{"Assets/Art/Generated/Textures/Wall.png", "Assets/Art/Generated/Textures/Wall_Normal.png", "Assets/Art/Generated/Models/Quad.obj", "Assets/Art/Generated/Models"} {
+		if raw, _ := os.ReadFile(filepath.Join(dir, p+".meta")); !strings.Contains(string(raw), "guid: ") {
+			t.Fatalf("%s.meta: %q", p, raw)
+		}
 	}
 }
